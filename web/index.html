@@ -280,11 +280,55 @@
             return rows.map(r => r.code);
         }
 
+        // ========== INDEXEDDB CACHE ==========
+        const IDB_NAME = 'cygnet-cache';
+        const IDB_STORE = 'blobs';
+
+        function idbOpen() {
+            return new Promise((resolve, reject) => {
+                const req = indexedDB.open(IDB_NAME, 1);
+                req.onupgradeneeded = () => req.result.createObjectStore(IDB_STORE);
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        async function idbGet(key) {
+            const db = await idbOpen();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(IDB_STORE, 'readonly');
+                const req = tx.objectStore(IDB_STORE).get(key);
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        async function idbPut(key, value) {
+            const db = await idbOpen();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(IDB_STORE, 'readwrite');
+                tx.objectStore(IDB_STORE).put(value, key);
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => reject(tx.error);
+            });
+        }
+
+        async function idbClear() {
+            const db = await idbOpen();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(IDB_STORE, 'readwrite');
+                tx.objectStore(IDB_STORE).clear();
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => reject(tx.error);
+            });
+        }
+
         // ========== MAIN COMPONENT ==========
         function DictionaryBrowser() {
             const [dbReady, setDbReady] = useState(false);
             const [dbError, setDbError] = useState(null);
             const [dbProgress, setDbProgress] = useState('');
+            const [downloadProgress, setDownloadProgress] = useState(null); // {loaded, total} or null
             const [allLanguages, setAllLanguages] = useState([]);
             const [searchTerm, setSearchTerm] = useState('');
             const [currentSearch, setCurrentSearch] = useState('');
@@ -344,30 +388,64 @@
                         const SQL = await initSqlJs({
                             locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/${file}`
                         });
-                        setDbProgress('Downloading database...');
-                        const response = await fetch('cygnet.db');
-                        if (!response.ok) throw new Error(`Failed to fetch database: ${response.status}`);
-                        const total = parseInt(response.headers.get('content-length') || '0');
-                        let loaded = 0;
 
-                        // Read with progress
-                        const reader = response.body.getReader();
-                        const chunks = [];
-                        while (true) {
-                            const { done, value } = await reader.read();
-                            if (done) break;
-                            chunks.push(value);
-                            loaded += value.length;
-                            if (total > 0) {
-                                const pct = Math.round(loaded / total * 100);
-                                setDbProgress(`Downloading database... ${pct}% (${(loaded/1048576).toFixed(0)} MB)`);
+                        // Check IndexedDB cache
+                        let buf;
+                        try {
+                            const cached = await idbGet('db');
+                            if (cached) {
+                                setDbProgress('Loading from cache...');
+                                buf = new Uint8Array(cached);
                             }
+                        } catch (e) {
+                            console.warn('IndexedDB cache read failed:', e);
                         }
-                        const buf = new Uint8Array(loaded);
-                        let offset = 0;
-                        for (const chunk of chunks) {
-                            buf.set(chunk, offset);
-                            offset += chunk.length;
+
+                        if (!buf) {
+                            // Fetch compressed database
+                            setDbProgress('Downloading database...');
+                            const response = await fetch('cygnet.db.gz');
+                            if (!response.ok) throw new Error(`Failed to fetch database: ${response.status}`);
+                            const compressedTotal = parseInt(response.headers.get('content-length') || '0');
+
+                            // Stream through DecompressionStream
+                            const ds = new DecompressionStream('gzip');
+                            const decompressedStream = response.body.pipeThrough(ds);
+                            const reader = decompressedStream.getReader();
+
+                            // We track compressed bytes via a wrapper on the original body
+                            // But DecompressionStream consumes the body, so we track decompressed bytes
+                            let loaded = 0;
+                            const chunks = [];
+                            while (true) {
+                                const { done, value } = await reader.read();
+                                if (done) break;
+                                chunks.push(value);
+                                loaded += value.length;
+                                if (compressedTotal > 0) {
+                                    // Estimate: show decompressed MB (compressed size known for reference)
+                                    setDbProgress('Downloading & decompressing...');
+                                    setDownloadProgress({ loaded, total: null, compressedTotal });
+                                } else {
+                                    setDbProgress(`Decompressing... ${(loaded/1048576).toFixed(0)} MB`);
+                                }
+                            }
+
+                            buf = new Uint8Array(loaded);
+                            let offset = 0;
+                            for (const chunk of chunks) {
+                                buf.set(chunk, offset);
+                                offset += chunk.length;
+                            }
+                            setDownloadProgress(null);
+
+                            // Cache in IndexedDB
+                            setDbProgress('Caching for next visit...');
+                            try {
+                                await idbPut('db', buf.buffer);
+                            } catch (e) {
+                                console.warn('IndexedDB cache write failed:', e);
+                            }
                         }
 
                         setDbProgress('Opening database...');
@@ -1152,7 +1230,7 @@
                             <h2 className="font-bold text-xl mb-2">Error Loading Database</h2>
                             <p className="mb-4">{dbError}</p>
                             <p className="text-sm text-gray-600">
-                                Make sure cygnet.db is in the same directory as this HTML file.
+                                Make sure cygnet.db.gz is in the same directory as this HTML file.
                             </p>
                         </div>
                     </div>
@@ -1162,9 +1240,18 @@
             if (!dbReady) {
                 return (
                     <div className="min-h-screen bg-white flex items-center justify-center p-4">
-                        <div className="text-center">
+                        <div className="text-center w-72">
                             <h1 className="text-4xl mb-4">🦢</h1>
-                            <p className="text-gray-600">{dbProgress || 'Initializing...'}</p>
+                            <p className="text-gray-600 mb-3">{dbProgress || 'Initializing...'}</p>
+                            {downloadProgress && (
+                                <div>
+                                    <div className="w-full bg-gray-200 rounded-full h-2 mb-1">
+                                        <div className="bg-blue-500 h-2 rounded-full transition-all"
+                                            style={{ width: `${Math.min(100, (downloadProgress.loaded / (downloadProgress.compressedTotal * 2.5)) * 100).toFixed(0)}%` }} />
+                                    </div>
+                                    <p className="text-xs text-gray-500">{(downloadProgress.loaded / 1048576).toFixed(0)} MB decompressed</p>
+                                </div>
+                            )}
                         </div>
                     </div>
                 );
@@ -1605,7 +1692,27 @@
 
                         {activeTab === 'python' && <div><h2 className="text-xl font-bold mb-4">Python Module</h2><p className="text-gray-600">Coming soon.</p></div>}
                         {activeTab === 'data' && <div><h2 className="text-xl font-bold mb-4">Data Download</h2><p className="text-gray-600">Coming soon.</p></div>}
-                        {activeTab === 'about' && <div><h2 className="text-xl font-bold mb-4">About</h2><p className="text-gray-600">Coming soon.</p></div>}
+                        {activeTab === 'about' && (
+                            <div>
+                                <h2 className="text-xl font-bold mb-4">About</h2>
+                                <p className="text-gray-600 mb-6">Coming soon.</p>
+                                <div className="border-t border-gray-200 pt-4">
+                                    <h3 className="font-medium text-sm text-gray-700 mb-2">Cache</h3>
+                                    <p className="text-sm text-gray-500 mb-2">
+                                        The database is cached locally in your browser to avoid re-downloading on each visit.
+                                    </p>
+                                    <button
+                                        onClick={async () => {
+                                            if (confirm('Clear cached database? It will be re-downloaded on next page load.')) {
+                                                await idbClear();
+                                                location.reload();
+                                            }
+                                        }}
+                                        className="text-sm text-red-600 hover:text-red-800 underline"
+                                    >Clear cached database</button>
+                                </div>
+                            </div>
+                        )}
                         {activeTab === 'publications' && <div><h2 className="text-xl font-bold mb-4">Publications</h2><p className="text-gray-600">Coming soon.</p></div>}
                     </main>
 
