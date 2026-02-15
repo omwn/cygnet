@@ -1408,13 +1408,18 @@
                     setSynonymsCollapsed(prev => ({ ...prev, [sense]: false }));
                 }
 
-                // Now load full sense data in the background
-                for (const meta of senseIdsWithMeta) {
-                    loadSense(meta.id).then(senseData => {
-                        if (senseData) {
-                            setLoadedSenses(prev => ({ ...prev, [meta.id]: senseData }));
-                        }
-                    });
+                // Now load full sense data in the background (batched to avoid overwhelming the browser)
+                const BATCH_SIZE = 20;
+                for (let i = 0; i < senseIdsWithMeta.length; i += BATCH_SIZE) {
+                    const batch = senseIdsWithMeta.slice(i, i + BATCH_SIZE);
+                    const results = await Promise.all(
+                        batch.map(meta => loadSense(meta.id).then(data => [meta.id, data]))
+                    );
+                    const updates = {};
+                    for (const [id, data] of results) {
+                        if (data) updates[id] = data;
+                    }
+                    setLoadedSenses(prev => ({ ...prev, ...updates }));
                 }
             };
             const performSearchWithTerm = async (term) => {
