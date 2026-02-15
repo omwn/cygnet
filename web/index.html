@@ -381,7 +381,20 @@
                 })();
             }, []);
 
+            const _langFullNames = {
+                arb: 'Arabic', bg: 'Bulgarian', ca: 'Catalan', ckb: 'Central Kurdish',
+                'cmn-Hans': 'Chinese (Simplified)', da: 'Danish', de: 'German',
+                el: 'Greek', en: 'English', es: 'Spanish', eu: 'Basque',
+                fi: 'Finnish', fr: 'French', gl: 'Galician', he: 'Hebrew',
+                hr: 'Croatian', is: 'Icelandic', it: 'Italian', lt: 'Lithuanian',
+                nb: 'Norwegian Bokmål', nl: 'Dutch', nn: 'Norwegian Nynorsk',
+                pl: 'Polish', pt: 'Portuguese', ro: 'Romanian', sk: 'Slovak',
+                sl: 'Slovenian', sq: 'Albanian', sv: 'Swedish', th: 'Thai',
+                ja: 'Japanese', ko: 'Korean', id: 'Indonesian', ms: 'Malay',
+                zh: 'Chinese', 'cmn-Hant': 'Chinese (Traditional)',
+            };
             const getLangName = (langCode) => _langNames[langCode] || langCode.toUpperCase();
+            const getLangFullName = (langCode) => _langFullNames[langCode] || getLangName(langCode);
 
             const getPosName = (posCode, capitalize = false) => {
                 const names = {
@@ -1057,11 +1070,12 @@
                                     const padding = 12;
                                     const lineHeight = d.isCenter ? 18 : 17;
                                     const posWidth = d.pos.length * avgCharWidth;
+                                    const posGap = 12;
 
-                                    let actualMaxWidth = posWidth + 4;
+                                    let actualMaxWidth = posWidth + posGap;
                                     lines.forEach((line, idx) => {
                                         const lw = idx === 0
-                                            ? posWidth + 4 + (line.length - d.pos.length) * avgCharWidth
+                                            ? posWidth + posGap + (line.length - d.pos.length) * avgCharWidth
                                             : line.length * avgCharWidth;
                                         actualMaxWidth = Math.max(actualMaxWidth, lw);
                                     });
@@ -1084,7 +1098,7 @@
 
                                     if (lines.length > 0) {
                                         textGroup.append('text')
-                                            .attr('x', posWidth + 4).attr('y', firstLineY)
+                                            .attr('x', posWidth + posGap).attr('y', firstLineY)
                                             .attr('font-size', d.isCenter ? 15 : 14)
                                             .text(lines[0].substring(d.pos.length).trim());
                                     }
@@ -1223,7 +1237,7 @@
                                                         <option value="en">English (default)</option>
                                                         {allLanguages.filter(l => l !== 'en')
                                                             .sort((a, b) => getLangName(a).localeCompare(getLangName(b)))
-                                                            .map(lang => <option key={lang} value={lang}>{getLangName(lang)}</option>)}
+                                                            .map(lang => <option key={lang} value={lang} title={getLangFullName(lang)}>{getLangName(lang)}</option>)}
                                                     </select>
                                                 </div>
 
@@ -1243,7 +1257,7 @@
                                                                     setSenseFilter(null);
                                                                     performSearch(currentSearch, nf, posFilter, null);
                                                                 }} className="cursor-pointer" />
-                                                            <span className="text-sm">{getLangName(lang)}</span>
+                                                            <span className="text-sm" title={getLangFullName(lang)}>{getLangName(lang)}</span>
                                                         </label>
                                                     ))}
                                                 </div>
@@ -1295,7 +1309,7 @@
                                                     <div key={lang} className="bg-white rounded shadow">
                                                         <button onClick={() => toggleSection(`lang-${lang}`)}
                                                             className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50">
-                                                            <h3 className="text-lg font-bold text-gray-800">{getLangName(lang)}</h3>
+                                                            <h3 className="text-lg font-bold text-gray-800" title={getLangFullName(lang)}>{getLangName(lang)}</h3>
                                                             <span className="text-gray-500">{collapsedSections[`lang-${lang}`] ? '▶' : '▼'}</span>
                                                         </button>
                                                         {!collapsedSections[`lang-${lang}`] && (
@@ -1477,7 +1491,7 @@
                                                     <div className="space-y-1 ml-2">
                                                         {altDefs.map(([lang, def]) => (
                                                             <div key={lang} className="text-sm">
-                                                                <span className="font-semibold text-gray-700">{getLangName(lang)}:</span> {def}
+                                                                <span className="font-semibold text-gray-700" title={getLangFullName(lang)}>{getLangName(lang)}:</span> {def}
                                                             </div>
                                                         ))}
                                                     </div>
@@ -1496,7 +1510,7 @@
                                                             }).filter(Boolean);
                                                             return (
                                                                 <div key={lang} className="text-sm">
-                                                                    <span className="font-semibold text-gray-700">{getLangName(lang)}:</span>{' '}
+                                                                    <span className="font-semibold text-gray-700" title={getLangFullName(lang)}>{getLangName(lang)}:</span>{' '}
                                                                     {lemmas.map((item, idx) => (
                                                                         <span key={item.senseId}>{idx > 0 && ', '}
                                                                             <button onClick={() => handleWordformClickWithSense(item.lemma, item.senseId)}
@@ -1520,7 +1534,7 @@
                                             <button onClick={handleBackToSearch} className="mb-4 text-blue-600 hover:underline">← Back to search</button>
                                             <div className="mb-4">
                                                 <h2 className="text-2xl font-bold mb-2">{sense.l}</h2>
-                                                <p className="text-gray-600">Language: {getLangName(sense.lg)}</p>
+                                                <p className="text-gray-600" title={getLangFullName(sense.lg)}>Language: {getLangName(sense.lg)}</p>
                                             </div>
                                             {sense.v && sense.v.length > 0 && (
                                                 <div className="mb-4">
