@@ -1346,10 +1346,11 @@
                                                                                                     });
                                                                                                 }
                                                                                                 const definition = concept?.d?.[definitionLanguage] || concept?.d?.en || '';
+                                                                                                const hasExtra = !!(sense.v?.length || synonyms.length || sense.ex?.length);
                                                                                                 return (
                                                                                                     <div key={sense.id}
-                                                                                                        className="bg-gray-50 p-3 rounded border border-gray-200 hover:border-blue-400 cursor-pointer sense-box"
-                                                                                                        onClick={() => toggleSynonyms(sense.id)}>
+                                                                                                        className={`bg-gray-50 p-3 rounded border border-gray-200 sense-box ${hasExtra ? 'hover:border-blue-400 cursor-pointer' : ''}`}
+                                                                                                        onClick={hasExtra ? () => toggleSynonyms(sense.id) : undefined}>
                                                                                                         <div className="flex items-start justify-between gap-2">
                                                                                                             <div className="flex-grow flex items-start gap-2">
                                                                                                                 <div className="flex-shrink-0 py-1">
@@ -1363,9 +1364,11 @@
                                                                                                                     </span>
                                                                                                                 </div>
                                                                                                             </div>
-                                                                                                            <div className="text-gray-500 text-sm pt-1 flex-shrink-0">
-                                                                                                                {synonymsCollapsed[sense.id] === false ? '▼' : '▶'}
-                                                                                                            </div>
+                                                                                                            {hasExtra && (
+                                                                                                                <div className="text-gray-500 text-sm pt-1 flex-shrink-0">
+                                                                                                                    {synonymsCollapsed[sense.id] === false ? '▼' : '▶'}
+                                                                                                                </div>
+                                                                                                            )}
                                                                                                         </div>
                                                                                                         {synonymsCollapsed[sense.id] === false && (
                                                                                                             <div className="mt-2 space-y-2">
@@ -1398,9 +1401,6 @@
                                                                                                                             <span key={ei}>{ei > 0 && '; '}"{renderExample(ex)}"</span>
                                                                                                                         ))}
                                                                                                                     </div>
-                                                                                                                )}
-                                                                                                                {!sense.v?.length && synonyms.length === 0 && !sense.ex?.length && (
-                                                                                                                    <div className="text-sm text-gray-600 italic">No additional information</div>
                                                                                                                 )}
                                                                                                             </div>
                                                                                                         )}
