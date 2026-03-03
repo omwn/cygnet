@@ -220,10 +220,15 @@ if $DO_BUILD; then
     echo "=== Step 9: Language codes ==="
     uv run python conversion_scripts/9_lang_codes.py
     echo
+    
+    echo "=== Step 10: Make sql for web ==="
+    uv run python conversion_scripts/10_sqlite_conversion.py
+    echo
 
     echo "=== Build complete! ==="
     echo "Output:"
     echo "  cygnet.xml        - Full merged resource"
     echo "  cygnet_small.xml  - Without provenance metadata"
-    echo "  website_data/     - JSON files for web interface"
+    echo "  web/cygnet.db     - sql db for web interface"
+    echo "  web/cygnet.db.gz  - compressed"
 fi
