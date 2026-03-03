@@ -287,6 +287,7 @@ def merge_cygnet_files(input_dir, output_file, log_file):
     all_examples = []  # list of (element, source_file)
     all_sense_relations = []  # list of (element, source_file)
     all_concept_relations = []  # list of (element, source_file)
+    resources = {}  # id -> attrib dict
 
     for xml_file in xml_files:
         print(f"  Loading: {xml_file.name}")
@@ -295,6 +296,11 @@ def merge_cygnet_files(input_dir, output_file, log_file):
 
         tree = etree.parse(str(xml_file))
         root = tree.getroot()
+
+        # Collect source resource metadata keyed by id
+        res_id = root.get('id')
+        if res_id and res_id not in resources:
+            resources[res_id] = dict(root.attrib)
 
         # Load ConceptLayer
         concept_layer = root.find('ConceptLayer')
@@ -899,6 +905,12 @@ def merge_cygnet_files(input_dir, output_file, log_file):
         concept_relation_layer = etree.SubElement(root, 'ConceptRelationLayer')
         for relation in concept_relations.values():
             concept_relation_layer.append(relation)
+
+    # Add ResourcesLayer with metadata from each source file
+    if resources:
+        resources_layer = etree.SubElement(root, 'ResourcesLayer')
+        for res in resources.values():
+            etree.SubElement(resources_layer, 'Resource', **res)
 
     # Write output XML
     tree = etree.ElementTree(root)

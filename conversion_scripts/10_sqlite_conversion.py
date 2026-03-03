@@ -10,6 +10,7 @@ Uses iterparse for streaming XML processing to avoid loading the entire
 ~800 MB XML file into memory.
 """
 
+import json
 import sqlite3
 import unicodedata
 from lxml import etree as ET
@@ -120,6 +121,22 @@ CREATE TABLE example_annotations (
     start_offset INTEGER NOT NULL,
     end_offset INTEGER NOT NULL,
     sense_rowid INTEGER NOT NULL REFERENCES senses(rowid)
+);
+
+-- Source wordnet resource metadata
+CREATE TABLE resources (
+    rowid INTEGER PRIMARY KEY,
+    code TEXT NOT NULL,
+    version TEXT,
+    label TEXT,
+    language_rowid INTEGER REFERENCES languages(rowid),
+    url TEXT,
+    citation TEXT,
+    licence TEXT,
+    email TEXT,
+    status TEXT,
+    confidence_score REAL,
+    extra TEXT
 );
 """
 
@@ -266,7 +283,7 @@ def main():
     context = ET.iterparse(xml_path, events=('end',),
                            tag=('Concept', 'Lexeme', 'Sense',
                                 'Gloss', 'Example',
-                                'SenseRelation', 'ConceptRelation'))
+                                'SenseRelation', 'ConceptRelation', 'Resource'))
 
     for event, elem in context:
         tag = elem.tag
@@ -428,6 +445,30 @@ def main():
                         (target, source, inv_rowid)
                     )
                     n_synset_rels += 1
+            elem.clear()
+
+        elif tag == 'Resource':
+            known = {'id', 'version', 'label', 'language', 'url', 'citation',
+                     'license', 'email', 'status', 'confidenceScore'}
+            attrib = dict(elem.attrib)
+            extra_attrs = {k: v for k, v in attrib.items() if k not in known}
+            lang_code = attrib.get('language')
+            lang_rowid = get_lang_rowid(lang_code) if lang_code else None
+            score_raw = attrib.get('confidenceScore')
+            score = float(score_raw) if score_raw else None
+            cur.execute(
+                'INSERT INTO resources '
+                '(code, version, label, language_rowid, url, citation, licence, '
+                'email, status, confidence_score, extra) '
+                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                (
+                    attrib.get('id'), attrib.get('version'), attrib.get('label'),
+                    lang_rowid, attrib.get('url'), attrib.get('citation'),
+                    attrib.get('license'), attrib.get('email'), attrib.get('status'),
+                    score,
+                    json.dumps(extra_attrs) if extra_attrs else None,
+                )
+            )
             elem.clear()
 
         # Free preceding siblings to keep memory bounded

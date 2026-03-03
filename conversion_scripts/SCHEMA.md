@@ -263,6 +263,39 @@ CREATE TABLE definition_annotations (
 );
 ```
 
+### resources
+
+Metadata for each contributing wordnet source, populated from the
+`<ResourcesLayer>` in the merged XML. One row per source.
+
+```sql
+CREATE TABLE resources (
+    rowid            INTEGER PRIMARY KEY,
+    code             TEXT NOT NULL,                        -- source id: "oewn", "omw-arb"
+    version          TEXT,                                 -- source version: "2025", "2.0"
+    label            TEXT,                                 -- human name: "Open English Wordnet"
+    language_rowid   INTEGER REFERENCES languages(rowid),  -- primary language
+    url              TEXT,                                 -- project URL
+    citation         TEXT,                                 -- bibliographic citation
+    licence          TEXT,                                 -- licence URL or identifier
+    email            TEXT,
+    status           TEXT,
+    confidence_score REAL,
+    extra            TEXT                                  -- JSON: any non-standard LMF attributes
+);
+```
+
+```
+rowid  code    version  label                  language_rowid  url                                          licence
+─────  ──────  ───────  ─────────────────────  ──────────────  ───────────────────────────────────────────  ──────────────────────────────────────────
+1      oewn    2025     Open English Wordnet   3               https://github.com/globalwordnet/english-…   https://creativecommons.org/licenses/by/4.0
+2      odenet  1.4      Offenes Deutsches WN   2               https://ikum.mediencampus.h-da.de/…         https://creativecommons.org/licenses/by-sa/4.0/
+```
+
+The `extra` column holds any LMF attributes not covered by the named
+columns (e.g. `dc:publisher`, `dc:description` from OdeNet), serialised
+as a JSON object.
+
 ## Example queries
 
 ### Look up a word
@@ -349,3 +382,4 @@ Only indexes used by the web interface are created:
 | Text `id` column on synsets, entries, senses | absent | Saves ~232 MB; web interface uses integer rowids |
 | `forms` UNIQUE(entry_rowid, form) | no constraint | Saves ~35 MB autoindex; dupes filtered at insert |
 | language as TEXT in entries, definitions | `language_rowid` INTEGER FK | Saves ~20 MB |
+| `lexicons` table (id, label, version, url, …) | `resources` table | Equivalent metadata; Cygnet adds `citation`, `email`, `confidence_score`, `extra` |

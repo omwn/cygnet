@@ -329,6 +329,7 @@ class WordNetToCygnetConverter:
         self.created_concepts: Set[str] = set()  # concept_ids already created
 
         self.lexicon_version = None
+        self.lexicon_attrs: Dict[str, str] = {}
 
     def read_metadata(self, input_path: str) -> Tuple[etree.Element, etree.ElementTree]:
         """Parse the input file and extract metadata without full conversion."""
@@ -342,6 +343,7 @@ class WordNetToCygnetConverter:
             lexicon_elem = root.find('.//Lexicon')
 
         if lexicon_elem is not None:
+            self.lexicon_attrs = dict(lexicon_elem.attrib)
             self.lexicon_id = lexicon_elem.get('id')
             self.lexicon_version = lexicon_elem.get('version')
             self.lexicon_language = lexicon_elem.get('language')
@@ -1611,11 +1613,8 @@ class WordNetToCygnetConverter:
         """Build the output CygnetResource XML tree."""
         print("\nBuilding output XML...")
 
-        # Create root element
-        cygnet_root = etree.Element('CygnetResource',
-                                    id=self.lexicon_id,
-                                    label=self.lexicon_label,
-                                    version="1.0")
+        # Create root element with all source attributes preserved
+        cygnet_root = etree.Element('CygnetResource', **self.lexicon_attrs)
 
         # Add layers only if they have content
         if self.concepts:

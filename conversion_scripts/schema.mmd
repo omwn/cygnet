@@ -84,6 +84,21 @@ erDiagram
         INTEGER sense_rowid FK
     }
 
+    resources {
+        INTEGER rowid PK
+        TEXT code "source wordnet id"
+        TEXT version
+        TEXT label "human-readable name"
+        INTEGER language_rowid FK
+        TEXT url
+        TEXT citation
+        TEXT licence
+        TEXT email
+        TEXT status
+        REAL confidence_score
+        TEXT extra "JSON: non-standard attributes"
+    }
+
     languages ||--o{ entries : "language_rowid"
     languages ||--o{ definitions : "language_rowid"
     entries ||--o{ forms : "entry_rowid"
@@ -102,3 +117,4 @@ erDiagram
     definitions ||--o{ definition_annotations : "definition_rowid"
     relation_types ||--o{ synset_relations : "type_rowid"
     relation_types ||--o{ sense_relations : "type_rowid"
+    languages ||--o{ resources : "language_rowid"

@@ -281,6 +281,17 @@
             return rows.map(r => r.code);
         }
 
+        function queryResources() {
+            return cachedExec(
+                `SELECT r.code, r.version, r.label, l.code AS language,
+                        r.url, r.citation, r.licence, r.email, r.status,
+                        r.confidence_score, r.extra
+                 FROM resources r
+                 LEFT JOIN languages l ON r.language_rowid = l.rowid
+                 ORDER BY r.label`
+            );
+        }
+
         // ========== INDEXEDDB CACHE ==========
         const IDB_NAME = 'cygnet-cache';
         const IDB_STORE = 'blobs';
@@ -331,6 +342,8 @@
             const [dbProgress, setDbProgress] = useState('');
             const [downloadProgress, setDownloadProgress] = useState(null); // {loaded, total} or null
             const [allLanguages, setAllLanguages] = useState([]);
+            const [allResources, setAllResources] = useState([]);
+            const [infoPopup, setInfoPopup] = useState(null);
             const [searchTerm, setSearchTerm] = useState('');
             const [currentSearch, setCurrentSearch] = useState('');
             const [languageFilter, setLanguageFilter] = useState(new Set());
@@ -453,6 +466,7 @@
                         _db = new SQL.Database(buf);
                         buildLangNames();
                         setAllLanguages(getAllLanguages());
+                        setAllResources(queryResources());
                         setDbReady(true);
                     } catch (e) {
                         console.error('DB init error:', e);
@@ -633,7 +647,7 @@
                     const hash = window.location.hash.slice(1);
                     const [path, queryString] = hash.split('?');
 
-                    if (['python', 'data', 'about', 'publications'].includes(path?.replace('/', ''))) {
+                    if (['python', 'data', 'about', 'publications', 'wordnets'].includes(path?.replace('/', ''))) {
                         setActiveTab(path.replace('/', ''));
                     } else {
                         setActiveTab('browser');
@@ -1287,7 +1301,7 @@
                                 </div>
                             </div>
                             <nav className="flex gap-3 mt-3 -mb-3">
-                                {['browser', 'python', 'data', 'about', 'publications'].map(tab => (
+                                {['browser', 'python', 'data', 'about', 'publications', 'wordnets'].map(tab => (
                                     <button key={tab}
                                         onClick={() => setActiveTab(tab)}
                                         className={`px-4 py-2 rounded-t-lg border-b-2 transition-colors ${
@@ -1726,6 +1740,66 @@
                             </div>
                         )}
                         {activeTab === 'publications' && <div><h2 className="text-xl font-bold mb-4">Publications</h2><p className="text-gray-600">Coming soon.</p></div>}
+                        {activeTab === 'wordnets' && (() => {
+                            const shortLicence = (url) => {
+                                if (!url) return null;
+                                const cc = url.match(/creativecommons\.org\/licenses\/([\w-]+)\/([\d.]+)/);
+                                if (cc) return `CC ${cc[1].toUpperCase()} ${cc[2]}`;
+                                if (/apache/i.test(url)) return 'Apache 2.0';
+                                if (url === 'wordnet') return 'WordNet';
+                                return url;
+                            };
+                            return (
+                            <div>
+                                <h2 className="text-xl font-bold mb-4">Contributing Wordnets</h2>
+                                {allResources.length === 0 ? (
+                                    <p className="text-gray-600">No resource metadata available.</p>
+                                ) : (
+                                    <table className="w-full text-sm border-collapse">
+                                        <thead>
+                                            <tr className="bg-gray-100 text-left">
+                                                <th className="px-3 py-2 border border-gray-200">Language</th>
+                                                <th className="px-3 py-2 border border-gray-200">Name</th>
+                                                <th className="px-3 py-2 border border-gray-200">Version</th>
+                                                <th className="px-3 py-2 border border-gray-200">Citation</th>
+                                                <th className="px-3 py-2 border border-gray-200">Licence</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {allResources.map((r, i) => (
+                                                <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                                                    <td className="px-3 py-2 border border-gray-200 whitespace-nowrap">
+                                                        {r.language
+                                                            ? <span title={r.language} className="cursor-help">{getLangFullName(r.language)}</span>
+                                                            : '—'}
+                                                    </td>
+                                                    <td className="px-3 py-2 border border-gray-200 font-medium">
+                                                        {r.url
+                                                            ? <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{r.label || r.code}</a>
+                                                            : (r.label || r.code)}
+                                                        <button onClick={() => setInfoPopup(r)}
+                                                                className="float-right text-blue-600 hover:text-blue-800"
+                                                                title="Show full metadata">ⓘ</button>
+                                                    </td>
+                                                    <td className="px-3 py-2 border border-gray-200 whitespace-nowrap">{r.version || '—'}</td>
+                                                    <td className="px-3 py-2 border border-gray-200">
+                                                        {r.citation
+                                                            ? <details><summary className="cursor-pointer text-blue-600 hover:underline list-none w-fit">cite</summary><p className="mt-1 text-xs text-gray-600 max-w-sm">{r.citation}</p></details>
+                                                            : '—'}
+                                                    </td>
+                                                    <td className="px-3 py-2 border border-gray-200 whitespace-nowrap">
+                                                        {r.licence
+                                                            ? <a href={r.licence} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{shortLicence(r.licence)}</a>
+                                                            : '—'}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                )}
+                            </div>
+                            );
+                        })()}
                     </main>
 
                     <footer className="mt-auto py-4">
@@ -1733,6 +1807,49 @@
                             <span>Cygnet — SQL interface</span>
                         </div>
                     </footer>
+
+                    {infoPopup && (() => {
+                        const r = infoPopup;
+                        const extra = (() => { try { return r.extra ? JSON.parse(r.extra) : null; } catch(e) { return null; } })();
+                        const rows = [
+                            ['ID',          r.code],
+                            ['Language',    r.language ? `${getLangFullName(r.language)} (${r.language})` : null],
+                            ['Version',     r.version],
+                            ['URL',         r.url],
+                            ['Licence',     r.licence],
+                            ['Email',       r.email],
+                            ['Status',      r.status],
+                            ['Confidence',  r.confidence_score != null ? r.confidence_score : null],
+                            ['Citation',    r.citation],
+                            ...(extra ? Object.entries(extra).map(([k, v]) => [k.replace(/^.*[/:}]/, ''), v]) : []),
+                        ].filter(([, v]) => v != null && v !== '');
+                        return (
+                            <div className="fixed inset-0 z-50 flex items-center justify-center"
+                                 onClick={() => setInfoPopup(null)}>
+                                <div className="absolute inset-0 bg-black opacity-40" />
+                                <div className="relative bg-white rounded-lg shadow-xl w-full max-w-lg mx-4 p-6 max-h-[80vh] overflow-y-auto"
+                                     onClick={e => e.stopPropagation()}>
+                                    <div className="flex items-start justify-between mb-4">
+                                        <h3 className="text-lg font-bold text-gray-900">{r.label || r.code}</h3>
+                                        <button onClick={() => setInfoPopup(null)}
+                                                className="text-gray-400 hover:text-gray-600 text-xl leading-none ml-4">✕</button>
+                                    </div>
+                                    <dl className="space-y-2 text-sm">
+                                        {rows.map(([label, value]) => (
+                                            <div key={label} className="grid grid-cols-[7rem_1fr] gap-2">
+                                                <dt className="font-medium text-gray-500">{label}</dt>
+                                                <dd className="text-gray-800 break-words">
+                                                    {/^https?:\/\//.test(value)
+                                                        ? <a href={value} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{value}</a>
+                                                        : value}
+                                                </dd>
+                                            </div>
+                                        ))}
+                                    </dl>
+                                </div>
+                            </div>
+                        );
+                    })()}
                 </div>
             );
         }
