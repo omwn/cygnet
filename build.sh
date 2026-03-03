@@ -229,6 +229,8 @@ if $DO_BUILD; then
     echo "Output:"
     echo "  cygnet.xml        - Full merged resource"
     echo "  cygnet_small.xml  - Without provenance metadata"
-    echo "  web/cygnet.db     - sql db for web interface"
-    echo "  web/cygnet.db.gz  - compressed"
+    echo "  web/cygnet.db         - sql db for web interface"
+    echo "  web/cygnet.db.gz      - compressed"
+    echo "  web/provenance.db     - provenance database"
+    echo "  web/provenance.db.gz  - compressed"
 fi

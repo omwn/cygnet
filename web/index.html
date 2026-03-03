@@ -81,6 +81,8 @@
 
         // ========== SQL DATABASE LAYER ==========
         let _db = null;
+        let _SQL = null;
+        let _provDb = null;
 
         // Prepared statement cache
         const _stmtCache = {};
@@ -221,9 +223,11 @@
                 WHERE synset_rowid = ? ORDER BY language_rowid
             `, [synsetRowid]);
             const d = {};
+            const dr = {};
             defs.forEach(def => {
                 const lang = _langRowidToCode[def.language_rowid];
                 d[lang] = def.definition;
+                dr[lang] = def.def_rowid;
             });
 
             // Get definition annotations (for English)
@@ -270,6 +274,7 @@
                 oc: r.pos,
                 ili: r.ili,
                 d: Object.keys(d).length > 0 ? d : undefined,
+                dr: Object.keys(dr).length > 0 ? dr : undefined,
                 da,
                 s: Object.keys(s).length > 0 ? s : undefined,
                 cr: cr.length > 0 ? cr : undefined
@@ -289,6 +294,34 @@
                  FROM resources r
                  LEFT JOIN languages l ON r.language_rowid = l.rowid
                  ORDER BY r.label`
+            );
+        }
+
+        function cachedExecProv(sql, params = []) {
+            if (!_provDb) return [];
+            try {
+                const results = _provDb.exec(sql, params);
+                if (!results || results.length === 0) return [];
+                const { columns, values } = results[0];
+                return values.map(row => {
+                    const obj = {};
+                    columns.forEach((col, i) => { obj[col] = row[i]; });
+                    return obj;
+                });
+            } catch (e) {
+                console.error('Provenance SQL error:', sql, params, e);
+                return [];
+            }
+        }
+
+        function queryProvenance(tableName, itemRowid) {
+            return cachedExecProv(
+                `SELECT pr.code, p.version, p.original_id
+                 FROM provenance p
+                 JOIN prov_tables pt ON p.table_rowid = pt.rowid
+                 JOIN prov_resources pr ON p.resource_rowid = pr.rowid
+                 WHERE pt.name = ? AND p.item_rowid = ?`,
+                [tableName, itemRowid]
             );
         }
 
@@ -343,6 +376,14 @@
             const [downloadProgress, setDownloadProgress] = useState(null); // {loaded, total} or null
             const [allLanguages, setAllLanguages] = useState([]);
             const [allResources, setAllResources] = useState([]);
+            const [provenanceReady, setProvenanceReady] = useState(false);
+            const [provLoading, setProvLoading] = useState(false);
+            const [provError, setProvError] = useState(null);
+            const [showProvenance, setShowProvenance] = useState(() =>
+                localStorage.getItem('showProvenance') === 'true'
+            );
+            const [highlightedResource, setHighlightedResource] = useState(null);
+            const highlightedRowRef = useRef(null);
             const [infoPopup, setInfoPopup] = useState(null);
             const [searchTerm, setSearchTerm] = useState('');
             const [currentSearch, setCurrentSearch] = useState('');
@@ -463,6 +504,7 @@
                         }
 
                         setDbProgress('Opening database...');
+                        _SQL = SQL;
                         _db = new SQL.Database(buf);
                         buildLangNames();
                         setAllLanguages(getAllLanguages());
@@ -606,8 +648,62 @@
             }, [loadConcept, loadConceptRelations, categorizeRelations]);
 
             useEffect(() => {
+                if (dbReady && showProvenance && !_provDb && !provLoading) loadProvenanceDb();
+            }, [dbReady]);
+
+            const loadProvenanceDb = useCallback(async () => {
+                if (_provDb || provLoading) return;
+                setProvLoading(true);
+                setProvError(null);
+                try {
+                    let buf;
+                    try {
+                        const cached = await idbGet('provdb');
+                        if (cached) buf = new Uint8Array(cached);
+                    } catch (e) {
+                        console.warn('IndexedDB provenance cache read failed:', e);
+                    }
+
+                    if (!buf) {
+                        const response = await fetch('provenance.db.gz');
+                        if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`);
+                        const ds = new DecompressionStream('gzip');
+                        const reader = response.body.pipeThrough(ds).getReader();
+                        const chunks = [];
+                        let loaded = 0;
+                        while (true) {
+                            const { done, value } = await reader.read();
+                            if (done) break;
+                            chunks.push(value);
+                            loaded += value.length;
+                        }
+                        buf = new Uint8Array(loaded);
+                        let offset = 0;
+                        for (const chunk of chunks) { buf.set(chunk, offset); offset += chunk.length; }
+                        try { await idbPut('provdb', buf.buffer); } catch (e) {
+                            console.warn('IndexedDB provenance cache write failed:', e);
+                        }
+                    }
+
+                    _provDb = new _SQL.Database(buf);
+                    setProvenanceReady(true);
+                } catch (e) {
+                    console.error('Provenance DB load error:', e);
+                    setProvError(e.message);
+                } finally {
+                    setProvLoading(false);
+                }
+            }, [provLoading]);
+
+            useEffect(() => {
                 localStorage.setItem('definitionLanguage', definitionLanguage);
             }, [definitionLanguage]);
+
+            useEffect(() => {
+                if (activeTab === 'wordnets' && highlightedResource && highlightedRowRef.current) {
+                    highlightedRowRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }, [activeTab, highlightedResource]);
 
             useEffect(() => {
                 if (view === 'concept') window.scrollTo(0, 0);
@@ -883,6 +979,25 @@
                     parts.push(<span key="text-end">{definitionText.substring(lastIndex)}</span>);
                 }
                 return parts;
+            };
+
+            const renderProvenance = (tableName, itemRowid) => {
+                if (!showProvenance || !provenanceReady) return null;
+                const rows = queryProvenance(tableName, itemRowid);
+                if (rows.length === 0) return null;
+                return (
+                    <span className="text-xs text-gray-400 ml-1">
+                        ({rows.map((s, i) => (
+                            <span key={s.code + (s.version || '')}>
+                                {i > 0 && ', '}
+                                <button
+                                    onClick={() => { setHighlightedResource(s.code); setActiveTab('wordnets'); }}
+                                    className="hover:text-blue-500 hover:underline"
+                                >{s.code}{s.version ? `:${s.version}` : ''}</button>
+                            </span>
+                        ))})
+                    </span>
+                );
             };
 
             // Concept graph
@@ -1333,7 +1448,7 @@
                                                         className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1 whitespace-nowrap">
                                                         <span>{filtersOpen ? '▼' : '▶'}</span>
                                                         <span>Filters</span>
-                                                        {(languageFilter.size > 0 || posFilter.size > 0 || definitionLanguage !== 'en') && (
+                                                        {(languageFilter.size > 0 || posFilter.size > 0 || definitionLanguage !== 'en' || showProvenance) && (
                                                             <span className="text-blue-600 text-xs ml-1">(active)</span>
                                                         )}
                                                     </button>
@@ -1407,6 +1522,22 @@
                                                             </label>
                                                         ))}
                                                     </div>
+                                                </div>
+
+                                                <div className="flex items-center gap-2">
+                                                    <label className="flex items-center gap-2 cursor-pointer">
+                                                        <input type="checkbox" checked={showProvenance}
+                                                            onChange={e => {
+                                                                const checked = e.target.checked;
+                                                                setShowProvenance(checked);
+                                                                localStorage.setItem('showProvenance', checked);
+                                                                if (checked && !_provDb && !provLoading) loadProvenanceDb();
+                                                            }}
+                                                            className="cursor-pointer" />
+                                                        <span className="text-sm text-gray-600">Show provenance</span>
+                                                    </label>
+                                                    {showProvenance && provLoading && <span className="text-xs text-gray-400">Loading...</span>}
+                                                    {showProvenance && provError && <span className="text-xs text-red-500">{provError}</span>}
                                                 </div>
                                             </div>
                                         )}
@@ -1570,6 +1701,7 @@
                                                 <p className="text-base">
                                                     <span className="text-gray-600 italic">{getPosName(concept.oc)}.</span>{' '}
                                                     {concept.da ? renderDefinitionWithLinks(mainDef, concept.da) : mainDef}
+                                                    {concept.dr?.en && renderProvenance('definitions', concept.dr.en)}
                                                     {concept.ili && <span className="text-sm ml-2">⟪{concept.ili}⟫</span>}
                                                 </p>
                                                 {(() => {
@@ -1629,6 +1761,7 @@
                                                         {altDefs.map(([lang, def]) => (
                                                             <div key={lang} className="text-sm">
                                                                 <span className="font-semibold text-gray-700" title={getLangFullName(lang)}>{getLangName(lang)}:</span> {def}
+                                                                {concept.dr?.[lang] && renderProvenance('definitions', concept.dr[lang])}
                                                             </div>
                                                         ))}
                                                     </div>
@@ -1652,6 +1785,7 @@
                                                                         <span key={item.senseId}>{idx > 0 && ', '}
                                                                             <button onClick={() => handleWordformClickWithSense(item.lemma, item.senseId)}
                                                                                 className="text-blue-600 hover:underline">{item.lemma}</button>
+                                                                            {renderProvenance('senses', parseInt(item.senseId))}
                                                                         </span>
                                                                     ))}
                                                                 </div>
@@ -1731,6 +1865,7 @@
                                         onClick={async () => {
                                             if (confirm('Clear cached database? It will be re-downloaded on next page load.')) {
                                                 await idbClear();
+                                                _provDb = null;
                                                 location.reload();
                                             }
                                         }}
@@ -1767,7 +1902,9 @@
                                         </thead>
                                         <tbody>
                                             {allResources.map((r, i) => (
-                                                <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                                                <tr key={i}
+                                                    ref={r.code === highlightedResource ? highlightedRowRef : null}
+                                                    className={r.code === highlightedResource ? 'bg-yellow-100' : (i % 2 === 0 ? 'bg-white' : 'bg-gray-50')}>
                                                     <td className="px-3 py-2 border border-gray-200 whitespace-nowrap">
                                                         {r.language
                                                             ? <span title={r.language} className="cursor-help">{getLangFullName(r.language)}</span>

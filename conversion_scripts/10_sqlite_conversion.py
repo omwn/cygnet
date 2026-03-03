@@ -12,6 +12,7 @@ Uses iterparse for streaming XML processing to avoid loading the entire
 
 import json
 import sqlite3
+import subprocess
 import unicodedata
 from lxml import etree as ET
 from pathlib import Path
@@ -140,6 +141,22 @@ CREATE TABLE resources (
 );
 """
 
+# Resources referenced in provenance but absent from the XML ResourcesLayer.
+# pwn:3.0 is hardcoded in 1_extract_cili.py as the origin of all CILI entries.
+IMPLICIT_RESOURCES = {
+    'pwn': {
+        'version': '3.0',
+        'label': 'Princeton WordNet',
+        'language': 'en',
+        'url': 'https://wordnet.princeton.edu/',
+        'licence': 'wordnet',
+        'citation': (
+            'Christiane Fellbaum (Ed.) 1998 '
+            'WordNet: An electronic lexical database. MIT Press.'
+        ),
+    },
+}
+
 # Only indexes actually used by the web interface
 INDEXES = """
 CREATE INDEX idx_forms_normalized ON forms(normalized_form);
@@ -151,6 +168,26 @@ CREATE INDEX idx_synset_relations_source ON synset_relations(source_rowid);
 CREATE INDEX idx_sense_relations_source ON sense_relations(source_rowid);
 CREATE INDEX idx_sense_examples_sense ON sense_examples(sense_rowid);
 CREATE INDEX idx_example_annotations_example ON example_annotations(example_rowid);
+"""
+
+PROV_SCHEMA = """
+CREATE TABLE prov_resources (
+    rowid INTEGER PRIMARY KEY,
+    code  TEXT NOT NULL UNIQUE
+);
+CREATE TABLE prov_tables (
+    rowid INTEGER PRIMARY KEY,
+    name  TEXT NOT NULL UNIQUE
+);
+CREATE TABLE provenance (
+    rowid          INTEGER PRIMARY KEY,
+    table_rowid    INTEGER NOT NULL REFERENCES prov_tables(rowid),
+    item_rowid     INTEGER NOT NULL,
+    resource_rowid INTEGER NOT NULL REFERENCES prov_resources(rowid),
+    version        TEXT,
+    original_id    TEXT NOT NULL
+);
+CREATE INDEX idx_provenance_lookup ON provenance(table_rowid, item_rowid);
 """
 
 # Inverse relation maps (from relations.xml)
@@ -237,6 +274,16 @@ def main():
 
     cur.executescript(SCHEMA)
 
+    prov_db_path = Path('web/provenance.db')
+    if prov_db_path.exists():
+        prov_db_path.unlink()
+    prov_conn = sqlite3.connect(str(prov_db_path))
+    prov_cur = prov_conn.cursor()
+    prov_cur.execute('PRAGMA journal_mode=OFF')
+    prov_cur.execute('PRAGMA synchronous=OFF')
+    prov_cur.execute('PRAGMA cache_size=-100000')
+    prov_cur.executescript(PROV_SCHEMA)
+
     # --- Lookup caches ---
     lang_code_to_rowid = {}
     rel_type_cache = {}
@@ -254,6 +301,42 @@ def main():
             rel_type_cache[rel_type] = cur.fetchone()[0]
         return rel_type_cache[rel_type]
 
+    prov_resource_cache = {}
+    prov_table_cache = {}
+
+    def get_prov_resource_rowid(code):
+        if code not in prov_resource_cache:
+            prov_cur.execute('INSERT OR IGNORE INTO prov_resources (code) VALUES (?)', (code,))
+            prov_cur.execute('SELECT rowid FROM prov_resources WHERE code = ?', (code,))
+            prov_resource_cache[code] = prov_cur.fetchone()[0]
+        return prov_resource_cache[code]
+
+    def get_prov_table_rowid(name):
+        if name not in prov_table_cache:
+            prov_cur.execute('INSERT OR IGNORE INTO prov_tables (name) VALUES (?)', (name,))
+            prov_cur.execute('SELECT rowid FROM prov_tables WHERE name = ?', (name,))
+            prov_table_cache[name] = prov_cur.fetchone()[0]
+        return prov_table_cache[name]
+
+    def insert_provenance(table_name, item_rowid, prov_elems):
+        """Insert Provenance child elements into provenance.db; return row count."""
+        table_rowid = get_prov_table_rowid(table_name)
+        count = 0
+        for prov in prov_elems:
+            resource = prov.get('resource')
+            original_id = prov.get('original_id')
+            if resource and original_id:
+                resource_rowid = get_prov_resource_rowid(resource)
+                prov_cur.execute(
+                    'INSERT INTO provenance '
+                    '(table_rowid, item_rowid, resource_rowid, version, original_id) '
+                    'VALUES (?, ?, ?, ?, ?)',
+                    (table_rowid, item_rowid, resource_rowid,
+                     prov.get('version'), original_id)
+                )
+                count += 1
+        return count
+
     # --- ID maps (built during streaming, used for cross-references) ---
     synset_id_to_rowid = {}
     entry_id_to_rowid = {}
@@ -264,6 +347,7 @@ def main():
     n_defs = n_def_anns = 0
     n_examples = n_ex_links = n_ex_anns = 0
     n_sense_rels = n_synset_rels = 0
+    n_prov = 0
 
     # Batch buffers for forms (to deduplicate)
     current_entry_rowid = None
@@ -293,7 +377,9 @@ def main():
             ili = cid.replace('cili.', '') if cid.startswith('cili.') else None
             pos = elem.get('ontological_category')
             cur.execute('INSERT INTO synsets (ili, pos) VALUES (?, ?)', (ili, pos))
-            synset_id_to_rowid[cid] = cur.lastrowid
+            synset_rowid = cur.lastrowid
+            synset_id_to_rowid[cid] = synset_rowid
+            n_prov += insert_provenance('synsets', synset_rowid, elem.findall('Provenance'))
             n_synsets += 1
             elem.clear()
 
@@ -306,6 +392,7 @@ def main():
                         (lang_rowid, pos))
             entry_rowid = cur.lastrowid
             entry_id_to_rowid[lid] = entry_rowid
+            n_prov += insert_provenance('entries', entry_rowid, elem.findall('Provenance'))
             n_entries += 1
 
             # Insert forms, deduplicating per entry
@@ -333,7 +420,9 @@ def main():
                     'INSERT INTO senses (entry_rowid, synset_rowid) VALUES (?, ?)',
                     (entry_rowid, synset_rowid)
                 )
-                sense_id_to_rowid[sid] = cur.lastrowid
+                sense_rowid = cur.lastrowid
+                sense_id_to_rowid[sid] = sense_rowid
+                n_prov += insert_provenance('senses', sense_rowid, elem.findall('Provenance'))
                 n_senses += 1
             elem.clear()
 
@@ -350,16 +439,17 @@ def main():
                     (synset_rowid, text, lang_rowid)
                 )
                 def_rowid = cur.lastrowid
+                n_prov += insert_provenance('definitions', def_rowid, elem.findall('Provenance'))
                 n_defs += 1
 
                 for ann in annotations:
-                    sense_rowid = sense_id_to_rowid.get(ann['sense'])
-                    if sense_rowid:
+                    ann_sense_rowid = sense_id_to_rowid.get(ann['sense'])
+                    if ann_sense_rowid:
                         cur.execute(
                             'INSERT INTO definition_annotations '
                             '(definition_rowid, start_offset, end_offset, sense_rowid) '
                             'VALUES (?, ?, ?, ?)',
-                            (def_rowid, ann['start'], ann['end'], sense_rowid)
+                            (def_rowid, ann['start'], ann['end'], ann_sense_rowid)
                         )
                         n_def_anns += 1
             elem.clear()
@@ -370,31 +460,32 @@ def main():
 
             referenced_senses = set()
             for ann in annotations:
-                sense_rowid = sense_id_to_rowid.get(ann['sense'])
-                if sense_rowid:
-                    referenced_senses.add(sense_rowid)
+                ann_sense_rowid = sense_id_to_rowid.get(ann['sense'])
+                if ann_sense_rowid:
+                    referenced_senses.add(ann_sense_rowid)
 
             if referenced_senses:
                 cur.execute('INSERT INTO examples (example) VALUES (?)', (text,))
                 example_rowid = cur.lastrowid
+                n_prov += insert_provenance('examples', example_rowid, elem.findall('Provenance'))
                 n_examples += 1
 
-                for sense_rowid in referenced_senses:
+                for ann_sense_rowid in referenced_senses:
                     cur.execute(
                         'INSERT INTO sense_examples (sense_rowid, example_rowid) '
                         'VALUES (?, ?)',
-                        (sense_rowid, example_rowid)
+                        (ann_sense_rowid, example_rowid)
                     )
                     n_ex_links += 1
 
                 for ann in annotations:
-                    sense_rowid = sense_id_to_rowid.get(ann['sense'])
-                    if sense_rowid:
+                    ann_sense_rowid = sense_id_to_rowid.get(ann['sense'])
+                    if ann_sense_rowid:
                         cur.execute(
                             'INSERT INTO example_annotations '
                             '(example_rowid, start_offset, end_offset, sense_rowid) '
                             'VALUES (?, ?, ?, ?)',
-                            (example_rowid, ann['start'], ann['end'], sense_rowid)
+                            (example_rowid, ann['start'], ann['end'], ann_sense_rowid)
                         )
                         n_ex_anns += 1
             elem.clear()
@@ -410,6 +501,9 @@ def main():
                     'VALUES (?, ?, ?)',
                     (source, target, type_rowid)
                 )
+                forward_rowid = cur.lastrowid
+                n_prov += insert_provenance('sense_relations', forward_rowid,
+                                            elem.findall('Provenance'))
                 n_sense_rels += 1
 
                 inverse = INVERSE_SENSE_RELATIONS.get(rel_type)
@@ -434,6 +528,9 @@ def main():
                     'VALUES (?, ?, ?)',
                     (source, target, type_rowid)
                 )
+                forward_rowid = cur.lastrowid
+                n_prov += insert_provenance('synset_relations', forward_rowid,
+                                            elem.findall('Provenance'))
                 n_synset_rels += 1
 
                 inverse = INVERSE_CONCEPT_RELATIONS.get(rel_type)
@@ -483,6 +580,7 @@ def main():
     print(f"  Examples: {n_examples:,}, links: {n_ex_links:,}, annotations: {n_ex_anns:,}")
     print(f"  Sense relations: {n_sense_rels:,}")
     print(f"  Synset relations: {n_synset_rels:,}")
+    print(f"  Provenance rows: {n_prov:,}")
 
     # Compute sense_index: position among senses with same (language, lemma_lower, concept_pos)
     print("\nComputing sense indices...")
@@ -510,6 +608,27 @@ def main():
     cur.execute('ANALYZE')
 
     conn.commit()
+    prov_conn.commit()
+
+    # Back-fill any prov_resources codes that have no resources row (e.g. pwn from CILI)
+    prov_cur.execute('SELECT code FROM prov_resources')
+    prov_codes = {row[0] for row in prov_cur.fetchall()}
+    cur.execute('SELECT code FROM resources')
+    existing_codes = {row[0] for row in cur.fetchall()}
+    for code in sorted(prov_codes - existing_codes):
+        meta = IMPLICIT_RESOURCES.get(code, {})
+        lang_code = meta.get('language')
+        lang_rowid = get_lang_rowid(lang_code) if lang_code else None
+        cur.execute(
+            'INSERT INTO resources '
+            '(code, version, label, language_rowid, url, licence, citation) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?)',
+            (code, meta.get('version'), meta.get('label'),
+             lang_rowid, meta.get('url'), meta.get('licence'),
+             meta.get('citation'))
+        )
+        print(f"  Added implicit resource: {code}")
+    conn.commit()
 
     # --- Statistics ---
     tables = [
@@ -528,12 +647,20 @@ def main():
     size_mb = db_path.stat().st_size / (1024 * 1024)
     print(f"\n✓ Database written to {db_path} ({size_mb:.1f} MB)")
 
-    # Gzip for web delivery
-    import subprocess
+    # Gzip main DB for web delivery
     gz_path = str(db_path) + '.gz'
     subprocess.run(['gzip', '-k', '-9', '-f', str(db_path)], check=True)
     gz_mb = Path(gz_path).stat().st_size / (1024 * 1024)
     print(f"✓ Compressed to {gz_path} ({gz_mb:.1f} MB)")
+
+    # Gzip provenance DB for web delivery
+    prov_size_mb = prov_db_path.stat().st_size / (1024 * 1024)
+    print(f"\n✓ Provenance database written to {prov_db_path} ({prov_size_mb:.1f} MB)")
+    subprocess.run(['gzip', '-k', '-9', '-f', str(prov_db_path)], check=True)
+    prov_gz_path = str(prov_db_path) + '.gz'
+    prov_gz_mb = Path(prov_gz_path).stat().st_size / (1024 * 1024)
+    print(f"✓ Compressed to {prov_gz_path} ({prov_gz_mb:.1f} MB)")
+    prov_conn.close()
 
 
 if __name__ == '__main__':

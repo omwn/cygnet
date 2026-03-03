@@ -1,7 +1,17 @@
 # Cygnet SQLite Schema
 
-The web interface stores the merged multilingual wordnet in a single SQLite
-database (`cygnet.db`). The schema follows the
+The web interface uses two SQLite databases:
+
+- **`cygnet.db`** — the main dictionary database (served as `cygnet.db.gz`)
+- **`provenance.db`** — optional source attribution data (served as `provenance.db.gz`)
+
+`cygnet.db` is downloaded automatically on first visit and cached in IndexedDB.
+`provenance.db` is only fetched on demand via the "Load provenance data" button
+in the Concept view, since it adds ~70 MB to the download.
+
+---
+
+The main schema follows the
 [Python `wn` module](https://github.com/goodmami/wn)'s SQLite layout where
 possible, with modifications for Cygnet's merged, ILI-indexed structure.
 
@@ -372,6 +382,91 @@ Only indexes used by the web interface are created:
 | `idx_sense_relations_source` | `sense_relations.source_rowid` | Outgoing sense relations |
 | `idx_sense_examples_sense` | `sense_examples.sense_rowid` | Examples for a sense |
 | `idx_example_annotations_example` | `example_annotations.example_rowid` | Annotations for an example |
+
+---
+
+## Provenance database (`provenance.db`)
+
+The provenance database records which source wordnet each merged item came
+from. It is a standalone file — it has no foreign keys back to `cygnet.db`.
+~3.83 million rows across 7 entity types.
+
+### prov_resources
+
+Lookup table for resource codes (one row per contributing wordnet).
+
+```sql
+CREATE TABLE prov_resources (
+    rowid INTEGER PRIMARY KEY,
+    code  TEXT NOT NULL UNIQUE   -- matches resources.code in cygnet.db: "oewn", "pwn", ...
+);
+```
+
+### prov_tables
+
+Lookup table for the `cygnet.db` table names that can have provenance.
+
+```sql
+CREATE TABLE prov_tables (
+    rowid INTEGER PRIMARY KEY,
+    name  TEXT NOT NULL UNIQUE   -- "synsets", "entries", "senses", "definitions",
+                                 -- "examples", "sense_relations", "synset_relations"
+);
+```
+
+### provenance
+
+One row per (item, source) pair. `item_rowid` matches the `rowid` of the
+corresponding row in `cygnet.db`.
+
+```sql
+CREATE TABLE provenance (
+    rowid          INTEGER PRIMARY KEY,
+    table_rowid    INTEGER NOT NULL REFERENCES prov_tables(rowid),
+    item_rowid     INTEGER NOT NULL,
+    resource_rowid INTEGER NOT NULL REFERENCES prov_resources(rowid),
+    version        TEXT,          -- source version: "2025", "3.1"
+    original_id    TEXT NOT NULL  -- original text ID in the source: "oewn-00001234-n"
+);
+CREATE INDEX idx_provenance_lookup ON provenance(table_rowid, item_rowid);
+```
+
+An item that was merged from multiple wordnets has one provenance row per
+source. Forward relation rows only are attributed (inverse rows synthesised
+by Cygnet carry no provenance).
+
+### Provenance query example
+
+```sql
+-- Which wordnets contributed to synset rowid 35549?
+SELECT pr.code, p.version, p.original_id
+FROM provenance p
+JOIN prov_tables pt  ON p.table_rowid    = pt.rowid
+JOIN prov_resources pr ON p.resource_rowid = pr.rowid
+WHERE pt.name = 'synsets' AND p.item_rowid = 35549;
+```
+
+```
+code   version  original_id
+─────  ───────  ───────────────────
+oewn   2025     oewn-09107022-n
+pwn    3.1      pwn-09107022-n
+```
+
+### Provenance row distribution (approximate)
+
+| Table | Rows |
+|---|---|
+| senses | 1,800,000 |
+| entries (lexemes) | 1,300,000 |
+| definitions (glosses) | 296,000 |
+| synset_relations | 145,000 |
+| synsets | 121,000 |
+| examples | 84,000 |
+| sense_relations | 48,000 |
+| **Total** | **~3,830,000** |
+
+---
 
 ## Differences from `wn` module schema
 
