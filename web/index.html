@@ -115,8 +115,11 @@
         let _langRowidToCode = {};
 
         function buildLangNames() {
-            const rows = cachedExec(`SELECT rowid, code, name FROM languages ORDER BY code`);
-            rows.forEach(r => {
+            const hasName = cachedExec(`PRAGMA table_info(languages)`).some(c => c.name === 'name');
+            const sql = hasName
+                ? `SELECT rowid, code, name FROM languages ORDER BY code`
+                : `SELECT rowid, code FROM languages ORDER BY code`;
+            cachedExec(sql).forEach(r => {
                 _langRowidToCode[r.rowid] = r.code;
                 _langNames[r.code] = r.name || r.code.toUpperCase();
             });
