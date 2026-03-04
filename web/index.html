@@ -395,6 +395,9 @@
             const [showProvenance, setShowProvenance] = useState(() =>
                 localStorage.getItem('showProvenance') === 'true'
             );
+            const [showPronunciation, setShowPronunciation] = useState(() =>
+                localStorage.getItem('showPronunciation') !== 'false'
+            );
             const [highlightedResource, setHighlightedResource] = useState(null);
             const highlightedRowRef = useRef(null);
             const [infoPopup, setInfoPopup] = useState(null);
@@ -1014,7 +1017,7 @@
             };
 
             const renderPronunciations = (prons) => {
-                if (!prons || prons.length === 0) return null;
+                if (!showPronunciation || !prons || prons.length === 0) return null;
                 return (
                     <span className="text-xs text-gray-400 font-normal">
                         {prons.map((p, i) => (
@@ -1474,7 +1477,7 @@
                                                         className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1 whitespace-nowrap">
                                                         <span>{filtersOpen ? '▼' : '▶'}</span>
                                                         <span>Filters</span>
-                                                        {(languageFilter.size > 0 || posFilter.size > 0 || definitionLanguage !== 'en' || showProvenance) && (
+                                                        {(languageFilter.size > 0 || posFilter.size > 0 || definitionLanguage !== 'en' || showProvenance || !showPronunciation) && (
                                                             <span className="text-blue-600 text-xs ml-1">(active)</span>
                                                         )}
                                                     </button>
@@ -1550,6 +1553,18 @@
                                                     </div>
                                                 </div>
 
+                                                <div className="flex items-center gap-2">
+                                                    <label className="flex items-center gap-2 cursor-pointer">
+                                                        <input type="checkbox" checked={showPronunciation}
+                                                            onChange={e => {
+                                                                const checked = e.target.checked;
+                                                                setShowPronunciation(checked);
+                                                                localStorage.setItem('showPronunciation', checked);
+                                                            }}
+                                                            className="cursor-pointer" />
+                                                        <span className="text-sm text-gray-600">Show pronunciation</span>
+                                                    </label>
+                                                </div>
                                                 <div className="flex items-center gap-2">
                                                     <label className="flex items-center gap-2 cursor-pointer">
                                                         <input type="checkbox" checked={showProvenance}
@@ -1832,7 +1847,7 @@
                                             <button onClick={handleBackToSearch} className="mb-4 text-blue-600 hover:underline">← Back to search</button>
                                             <div className="mb-4">
                                                 <h2 className="text-2xl font-bold mb-1">{sense.l}</h2>
-                                                {sense.p && sense.p.length > 0 && (
+                                                {showPronunciation && sense.p && sense.p.length > 0 && (
                                                     <div className="text-base text-gray-500 mb-1">
                                                         {sense.p.map((p, i) => (
                                                             <span key={i} className="mr-3">
