@@ -59,14 +59,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ steps.tag.outputs.value }}"
-          PRERELEASE=""
-          if echo "$TAG" | grep -qiE '(alpha|beta|rc)'; then
-            PRERELEASE="--prerelease"
-          fi
-          gh release create "$TAG" \
-            --title "Cygnet $TAG" \
+          gh release create "${{ steps.tag.outputs.value }}" \
+            --title "Cygnet ${{ steps.tag.outputs.value }}" \
             --generate-notes \
-            $PRERELEASE \
             web/cygnet.db.gz \
             web/provenance.db.gz
