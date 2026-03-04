@@ -115,10 +115,10 @@
         let _langRowidToCode = {};
 
         function buildLangNames() {
-            const rows = cachedExec(`SELECT rowid, code FROM languages ORDER BY code`);
+            const rows = cachedExec(`SELECT rowid, code, name FROM languages ORDER BY code`);
             rows.forEach(r => {
                 _langRowidToCode[r.rowid] = r.code;
-                _langNames[r.code] = r.code.toUpperCase();
+                _langNames[r.code] = r.name || r.code.toUpperCase();
             });
         }
 
@@ -533,20 +533,8 @@
                 })();
             }, []);
 
-            const _langFullNames = {
-                arb: 'Arabic', bg: 'Bulgarian', ca: 'Catalan', ckb: 'Central Kurdish',
-                'cmn-Hans': 'Chinese (Simplified)', da: 'Danish', de: 'German',
-                el: 'Greek', en: 'English', es: 'Spanish', eu: 'Basque',
-                fi: 'Finnish', fr: 'French', gl: 'Galician', he: 'Hebrew',
-                hr: 'Croatian', is: 'Icelandic', it: 'Italian', lt: 'Lithuanian',
-                nb: 'Norwegian Bokmål', nl: 'Dutch', nn: 'Norwegian Nynorsk',
-                pl: 'Polish', pt: 'Portuguese', ro: 'Romanian', sk: 'Slovak',
-                sl: 'Slovenian', sq: 'Albanian', sv: 'Swedish', th: 'Thai',
-                ja: 'Japanese', ko: 'Korean', id: 'Indonesian', ms: 'Malay',
-                zh: 'Chinese', 'cmn-Hant': 'Chinese (Traditional)',
-            };
             const getLangName = (langCode) => _langNames[langCode] || langCode.toUpperCase();
-            const getLangFullName = (langCode) => _langFullNames[langCode] || getLangName(langCode);
+            const getLangFullName = getLangName;
 
             const getPosName = (posCode, capitalize = false) => {
                 const names = {
@@ -1902,11 +1890,36 @@
                         )}
 
                         {activeTab === 'python' && <div><h2 className="text-xl font-bold mb-4">Python Module</h2><p className="text-gray-600">Coming soon.</p></div>}
-                        {activeTab === 'data' && <div><h2 className="text-xl font-bold mb-4">Data Download</h2><p className="text-gray-600">Coming soon.</p></div>}
+                        {activeTab === 'data' && (
+                            <div>
+                                <h2 className="text-xl font-bold mb-4">Data Download</h2>
+                                <p className="text-gray-700 mb-6">
+                                    The Cygnet databases are available for download below. Both are SQLite databases compressed with gzip.
+                                </p>
+                                <ul className="space-y-4 mb-8">
+                                    <li className="text-sm text-gray-800">
+                                        <a href="https://github.com/rowanhm/cygnet/releases/latest/download/cygnet.db.gz" className="text-blue-600 hover:underline font-medium">cygnet.db.gz</a>
+                                        {' '}— The main lexical database, containing synsets, entries, senses, definitions, examples, and pronunciations across all languages.
+                                    </li>
+                                    <li className="text-sm text-gray-800">
+                                        <a href="https://github.com/rowanhm/cygnet/releases/latest/download/provenance.db.gz" className="text-blue-600 hover:underline font-medium">provenance.db.gz</a>
+                                        {' '}— Provenance records tracing every data point back to its source wordnet and original identifier.
+                                    </li>
+                                </ul>
+                                <p className="text-gray-700">
+                                    The individual wordnets that make up Cygnet are each available from their respective projects — see the <button onClick={() => setActiveTab('wordnets')} className="text-blue-600 hover:underline">Wordnets</button> tab for the full list with links.
+                                </p>
+                            </div>
+                        )}
                         {activeTab === 'about' && (
                             <div>
                                 <h2 className="text-xl font-bold mb-4">About</h2>
-                                <p className="text-gray-600 mb-6">Coming soon.</p>
+                                <p className="text-gray-700 mb-4">
+                                    OMW Cygnet is an experimental reformulation of Wordnet that is designed to eliminate conflicting records, and improve modularity. It extends the idea of the <a href="https://omwn.org/" className="text-blue-600 hover:underline">Open Multilingual Wordnet</a> and puts concepts at the core of the structure.
+                                </p>
+                                <p className="text-gray-700 mb-4">
+                                    Developed by Rowan Hall Maudslay and Francis Bond. Source code is available on <a href="https://github.com/rowanhm/cygnet" className="text-blue-600 hover:underline">GitHub</a>.
+                                </p>
                                 <div className="border-t border-gray-200 pt-4">
                                     <h3 className="font-medium text-sm text-gray-700 mb-2">Cache</h3>
                                     <p className="text-sm text-gray-500 mb-2">
@@ -1925,7 +1938,22 @@
                                 </div>
                             </div>
                         )}
-                        {activeTab === 'publications' && <div><h2 className="text-xl font-bold mb-4">Publications</h2><p className="text-gray-600">Coming soon.</p></div>}
+                        {activeTab === 'publications' && (
+                            <div>
+                                <h2 className="text-xl font-bold mb-4">Publications</h2>
+                                <ul className="space-y-4">
+                                    <li className="text-sm text-gray-800">
+                                        Rowan Hall Maudslay &amp; Francis Bond (2026). Cygnet: Refactoring the Open Multilingual Wordnet. In <em>Proceedings of the 15th International Conference on Language Resources and Evaluation (LREC 2026)</em>. (to appear)
+                                    </li>
+                                    <li className="text-sm text-gray-800">
+                                        Francis Bond &amp; Ryan Foster (2013). Linking and extending an open multilingual wordnet. In <em>Proceedings of the 51st Annual Meeting of the Association for Computational Linguistics (ACL 2013)</em>. Sofia. pp. 1352–1362.
+                                    </li>
+                                    <li className="text-sm text-gray-800">
+                                        Francis Bond &amp; Kyonghee Paik (2012). A survey of wordnets and their licenses. In <em>Proceedings of the 6th Global WordNet Conference (GWC 2012)</em>. Matsue. pp. 64–71.
+                                    </li>
+                                </ul>
+                            </div>
+                        )}
                         {activeTab === 'wordnets' && (() => {
                             const shortLicence = (url) => {
                                 if (!url) return null;

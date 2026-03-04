@@ -209,6 +209,10 @@ if $DO_BUILD; then
     uv run python conversion_scripts/6_synthesise.py
     echo
 
+    echo "=== Step 9: Populate language names ==="
+    uv run python conversion_scripts/9_lang_codes.py
+    echo
+
     if $WITH_XML; then
         echo "=== Step 7: Generate and validate XML ==="
         uv run python conversion_scripts/7_validate_and_export.py

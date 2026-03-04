@@ -17,6 +17,7 @@ import sys
 import unicodedata
 from pathlib import Path
 
+import langcodes
 from lxml import etree as ET
 
 _COMBINING_RE = re.compile(r'[\u0300-\u036f\u1dc0-\u1dff\u20d0-\u20ff\ufe20-\ufe2f]')
@@ -32,7 +33,8 @@ CREATE TABLE relation_types (
 );
 CREATE TABLE languages (
     rowid INTEGER PRIMARY KEY,
-    code  TEXT NOT NULL UNIQUE
+    code  TEXT NOT NULL UNIQUE,
+    name  TEXT
 );
 CREATE TABLE synsets (
     rowid INTEGER PRIMARY KEY,
@@ -326,7 +328,13 @@ class MergeBuilder:
 
     def _lang_rowid(self, code: str) -> int:
         if code not in self._lang_cache:
-            self.cur.execute('INSERT INTO languages (code) VALUES (?)', (code,))
+            try:
+                name = langcodes.Language.get(code).display_name()
+            except Exception:
+                name = None
+            self.cur.execute(
+                'INSERT INTO languages (code, name) VALUES (?, ?)', (code, name)
+            )
             self._lang_cache[code] = self.cur.lastrowid
         return self._lang_cache[code]
 
