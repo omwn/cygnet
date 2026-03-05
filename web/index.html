@@ -202,14 +202,15 @@
 
             // Get sense relations
             const senseRels = cachedExec(`
-                SELECT rt.type, sr.target_rowid as target
+                SELECT rt.type, sr.target_rowid as target, sr.rowid as rid
                 FROM sense_relations sr
                 JOIN relation_types rt ON sr.type_rowid = rt.rowid
                 WHERE sr.source_rowid = ?
             `, [senseRowid]);
             const sr = senseRels.map(rel => ({
                 t: RELATION_TO_SHORT[rel.type] || rel.type,
-                to: rel.target
+                to: rel.target,
+                rid: rel.rid
             }));
 
             return {
@@ -276,14 +277,15 @@
 
             // Get concept relations
             const rels = cachedExec(`
-                SELECT rt.type, sr.target_rowid as target
+                SELECT rt.type, sr.target_rowid as target, sr.rowid as rid
                 FROM synset_relations sr
                 JOIN relation_types rt ON sr.type_rowid = rt.rowid
                 WHERE sr.source_rowid = ?
             `, [synsetRowid]);
             const cr = rels.map(rel => ({
                 t: RELATION_TO_SHORT[rel.type] || rel.type,
-                to: rel.target
+                to: rel.target,
+                rid: rel.rid
             }));
 
             return {
@@ -1055,6 +1057,32 @@
                                 >{s.code}{s.version ? `:${s.version}` : ''}</button>
                             </span>
                         ))})
+                    </span>
+                );
+            };
+
+            const renderCompactProvenance = (tableName, rowid) => {
+                if (!showProvenance || !provenanceReady || !rowid) return null;
+                const rows = queryProvenance(tableName, rowid);
+                if (rows.length === 0) return null;
+                const first = rows[0];
+                const rest = rows.slice(1);
+                return (
+                    <span className="relative inline-block group text-xs text-gray-400 ml-1 cursor-default">
+                        (<button onClick={() => { setHighlightedResource(first.code); setActiveTab('wordnets'); }}
+                            className="hover:text-blue-500 hover:underline">
+                            {first.code}{first.version ? `:${first.version}` : ''}
+                        </button>{rest.length > 0 && <span> +{rest.length}</span>})
+                        {rest.length > 0 && (
+                            <span className="absolute bottom-full left-0 hidden group-hover:flex flex-col bg-white border border-gray-200 rounded shadow-lg text-xs p-1.5 z-10 whitespace-nowrap gap-0.5">
+                                {rows.map((s, i) => (
+                                    <button key={i} onClick={() => { setHighlightedResource(s.code); setActiveTab('wordnets'); }}
+                                        className="text-left hover:text-blue-500 hover:underline">
+                                        {s.code}{s.version ? `:${s.version}` : ''}
+                                    </button>
+                                ))}
+                            </span>
+                        )}
                     </span>
                 );
             };
@@ -1836,7 +1864,7 @@
                                                         const toId = rel.to.toString();
                                                         if (!loadedSenses[toId]) loadSenseData(toId);
                                                         if (!senseRelsByType[rel.t]) senseRelsByType[rel.t] = [];
-                                                        senseRelsByType[rel.t].push({ fromLemma: sd.l, toSenseId: toId });
+                                                        senseRelsByType[rel.t].push({ fromLemma: sd.l, toSenseId: toId, rid: rel.rid });
                                                     });
                                                 });
                                                 const hasSenseRels = Object.keys(senseRelsByType).length > 0;
@@ -1892,20 +1920,23 @@
                                                             {concept.cr && Object.entries(
                                                                 concept.cr.reduce((acc, rel) => {
                                                                     if (!acc[rel.t]) acc[rel.t] = [];
-                                                                    acc[rel.t].push(rel.to);
+                                                                    acc[rel.t].push(rel);
                                                                     return acc;
                                                                 }, {})
-                                                            ).map(([relType, cids]) => (
+                                                            ).map(([relType, rels]) => (
                                                                 <div key={relType} className="flex gap-2 flex-wrap items-baseline">
                                                                     <span className="text-gray-500 italic flex-shrink-0">{relationNames[relType] || relType}:</span>
-                                                                    {cids.map(cid => {
-                                                                        const li = getConceptLabel(parseInt(cid), definitionLanguage);
+                                                                    {rels.map(rel => {
+                                                                        const li = getConceptLabel(parseInt(rel.to), definitionLanguage);
                                                                         return (
-                                                                            <button key={cid} onClick={() => handleConceptClick(cid)}
-                                                                                className="text-blue-600 hover:underline">
-                                                                                {li?.form || `#${cid}`}
-                                                                                {li?.lang && li.lang !== definitionLanguage && <span className="text-gray-400 text-xs ml-0.5">[{li.lang}]</span>}
-                                                                            </button>
+                                                                            <span key={rel.to} className="inline-flex items-baseline gap-0.5">
+                                                                                <button onClick={() => handleConceptClick(rel.to)}
+                                                                                    className="text-blue-600 hover:underline">
+                                                                                    {li?.form || `#${rel.to}`}
+                                                                                    {li?.lang && li.lang !== definitionLanguage && <span className="text-gray-400 text-xs ml-0.5">[{li.lang}]</span>}
+                                                                                </button>
+                                                                                {renderCompactProvenance('synset_relations', rel.rid)}
+                                                                            </span>
                                                                         );
                                                                     })}
                                                                 </div>
@@ -1913,25 +1944,26 @@
                                                             {hasSenseRels && Object.entries(senseRelsByType).map(([relType, rels]) => (
                                                                 <div key={`sr-${relType}`} className="flex gap-2 flex-wrap items-baseline">
                                                                     <span className="text-gray-500 italic flex-shrink-0">{relationNames[relType] || relType}:</span>
-                                                                    {rels.map(({ fromLemma, toSenseId }, i) => {
+                                                                    {rels.map(({ fromLemma, toSenseId, rid }, i) => {
                                                                         const toSense = loadedSenses[toSenseId];
                                                                         const cid = toSense?.c?.toString();
                                                                         const li = cid ? getConceptLabel(parseInt(cid), definitionLanguage) : null;
                                                                         const conceptLabel = li?.form;
                                                                         return (
-                                                                            <span key={i} className="whitespace-nowrap">
+                                                                            <span key={i} className="inline-flex items-baseline gap-0.5 whitespace-nowrap">
                                                                                 <button onClick={() => toSense?.l && handleWordformClickWithSense(toSense.l, toSenseId)}
                                                                                     className="text-blue-600 hover:underline">
                                                                                     {toSense?.l || '…'}
                                                                                 </button>
                                                                                 {conceptLabel && conceptLabel !== toSense?.l && (
-                                                                                    <span className="text-gray-500 ml-0.5">
+                                                                                    <span className="text-gray-500">
                                                                                         ({conceptLabel}{li.lang !== definitionLanguage && <span className="text-gray-400 text-xs ml-0.5">[{li.lang}]</span>})
                                                                                     </span>
                                                                                 )}
                                                                                 {li?.lang && li.lang !== definitionLanguage && conceptLabel === toSense?.l && (
-                                                                                    <span className="text-gray-400 text-xs ml-0.5">[{li.lang}]</span>
+                                                                                    <span className="text-gray-400 text-xs">[{li.lang}]</span>
                                                                                 )}
+                                                                                {renderCompactProvenance('sense_relations', rid)}
                                                                             </span>
                                                                         );
                                                                     })}
