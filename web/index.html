@@ -1418,7 +1418,7 @@
                     if (rafId) cancelAnimationFrame(rafId);
                     if (timeoutId) clearTimeout(timeoutId);
                 };
-            }, [selectedConcept, relatedConcepts, view, visibleNodes, loadedConcepts]);
+            }, [selectedConcept, relatedConcepts, view, visibleNodes, loadedConcepts, graphVisible]);
 
             useEffect(() => {
                 return () => {
