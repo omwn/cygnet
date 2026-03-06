@@ -1,0 +1,20 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!--
+  French test wordnet.  Concepts are declared in wn-en.xml; this file only
+  adds French senses pointing at the existing ILIs.  Processing both files
+  through MergeBuilder tests that cross-wordnet ILI references are resolved.
+-->
+<CygnetResource id="wn-fr" label="Test French WordNet" language="fr" version="1.0">
+
+  <!-- French lexeme -->
+  <Lexeme id="lex.fr.chien" language="fr" grammatical_category="NOUN">
+    <Wordform form="chien"/>
+    <Provenance resource="wn-fr" version="1.0" original_id="chien-n"/>
+  </Lexeme>
+
+  <!-- Sense references cili.i3 (dog), declared by wn-en — merge test -->
+  <Sense id="sense.chien" signifier="lex.fr.chien" signified="cili.i3">
+    <Provenance resource="wn-fr" version="1.0"/>
+  </Sense>
+
+</CygnetResource>

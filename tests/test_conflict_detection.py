@@ -1,78 +1,18 @@
 """Tests for duplicate/reversed relation conflict detection in MergeBuilder."""
 
-import importlib.util
-import sys
-import textwrap
+import logging
 from pathlib import Path
 
 import pytest
 
-# Import MergeBuilder from the conversion script
-_script = Path(__file__).parent.parent / 'conversion_scripts' / '6_synthesise.py'
-_spec = importlib.util.spec_from_file_location('synthesise', _script)
-_mod = importlib.util.module_from_spec(_spec)
-sys.modules['synthesise'] = _mod
-_spec.loader.exec_module(_mod)
-MergeBuilder = _mod.MergeBuilder
+from conftest import (
+    BASE_CONCEPTS,
+    BASE_CONCEPTS_SENSE_REL,
+    BASE_LEXEMES_AND_SENSES,
+    wn_xml,
+)
 
-
-def _wn_xml(wn_id: str, body: str, language: str = 'en', version: str = '1.0') -> str:
-    """Wrap body XML in a CygnetResource root element."""
-    inner = textwrap.indent(textwrap.dedent(body).strip(), '  ')
-    return (
-        f"<?xml version='1.0' encoding='UTF-8'?>\n"
-        f'<CygnetResource id="{wn_id}" label="Test {wn_id}"'
-        f' language="{language}" version="{version}">\n'
-        f'{inner}\n'
-        f'</CygnetResource>\n'
-    )
-
-
-# ---------------------------------------------------------------------------
-# Shared XML snippets
-# ---------------------------------------------------------------------------
-
-_BASE_CONCEPTS = """\
-<Concept id="cili.i1" ontological_category="NOUN" status="1">
-  <Provenance resource="wn-a" version="1.0" original_id="t-1"/>
-</Concept>
-<Concept id="cili.i2" ontological_category="NOUN" status="1">
-  <Provenance resource="wn-a" version="1.0" original_id="t-2"/>
-</Concept>
-<Gloss definiendum="cili.i1" language="en">
-  <AnnotatedSentence>dog</AnnotatedSentence>
-  <Provenance resource="wn-a" version="1.0"/>
-</Gloss>
-<Gloss definiendum="cili.i2" language="en">
-  <AnnotatedSentence>animal</AnnotatedSentence>
-  <Provenance resource="wn-a" version="1.0"/>
-</Gloss>
-"""
-
-_BASE_LEXEMES_AND_SENSES = """\
-<Lexeme id="en.NOUN.dog" language="en" grammatical_category="NOUN">
-  <Wordform form="dog"/>
-  <Provenance resource="wn-a" version="1.0" original_id="dog-n"/>
-</Lexeme>
-<Lexeme id="en.NOUN.animal" language="en" grammatical_category="NOUN">
-  <Wordform form="animal"/>
-  <Provenance resource="wn-a" version="1.0" original_id="animal-n"/>
-</Lexeme>
-<Sense id="sense.dog" signifier="en.NOUN.dog" signified="cili.i1">
-  <Provenance resource="wn-a" version="1.0"/>
-</Sense>
-<Sense id="sense.animal" signifier="en.NOUN.animal" signified="cili.i2">
-  <Provenance resource="wn-a" version="1.0"/>
-</Sense>
-"""
-
-
-@pytest.fixture()
-def builder(tmp_path):
-    """MergeBuilder with temporary DB paths."""
-    db = tmp_path / 'cygnet.db'
-    prov = tmp_path / 'provenance.db'
-    return MergeBuilder(db, prov)
+_WORDNETS_DIR = Path(__file__).parent / 'wordnets'
 
 
 # ---------------------------------------------------------------------------
@@ -87,20 +27,19 @@ class TestSynsetRelationConflict:
         skipped with a warning.
         """
         wn_a = tmp_path / 'wn-a.xml'
-        wn_a.write_text(_wn_xml('wn-a', _BASE_CONCEPTS + _BASE_LEXEMES_AND_SENSES + """\
+        wn_a.write_text(wn_xml('wn-a', BASE_CONCEPTS + BASE_LEXEMES_AND_SENSES + """\
 <ConceptRelation relation_type="class_hypernym" source="cili.i1" target="cili.i2">
   <Provenance resource="wn-a" version="1.0"/>
 </ConceptRelation>
 """))
 
         wn_b = tmp_path / 'wn-b.xml'
-        wn_b.write_text(_wn_xml('wn-b', """\
+        wn_b.write_text(wn_xml('wn-b', """\
 <ConceptRelation relation_type="class_hypernym" source="cili.i2" target="cili.i1">
   <Provenance resource="wn-b" version="1.0"/>
 </ConceptRelation>
 """))
 
-        import logging
         with caplog.at_level(logging.WARNING, logger='synthesise'):
             builder.process_file(wn_a)
             builder.process_file(wn_b)
@@ -114,13 +53,13 @@ class TestSynsetRelationConflict:
     def test_reversed_hypernym_relation_not_stored(self, builder, tmp_path):
         """The conflicting reversed relation must not be persisted to the DB."""
         wn_a = tmp_path / 'wn-a.xml'
-        wn_a.write_text(_wn_xml('wn-a', _BASE_CONCEPTS + _BASE_LEXEMES_AND_SENSES + """\
+        wn_a.write_text(wn_xml('wn-a', BASE_CONCEPTS + BASE_LEXEMES_AND_SENSES + """\
 <ConceptRelation relation_type="class_hypernym" source="cili.i1" target="cili.i2">
   <Provenance resource="wn-a" version="1.0"/>
 </ConceptRelation>
 """))
         wn_b = tmp_path / 'wn-b.xml'
-        wn_b.write_text(_wn_xml('wn-b', """\
+        wn_b.write_text(wn_xml('wn-b', """\
 <ConceptRelation relation_type="class_hypernym" source="cili.i2" target="cili.i1">
   <Provenance resource="wn-b" version="1.0"/>
 </ConceptRelation>
@@ -141,19 +80,18 @@ class TestSynsetRelationConflict:
         directions explicitly asserted should NOT trigger a conflict warning.
         """
         wn_a = tmp_path / 'wn-a.xml'
-        wn_a.write_text(_wn_xml('wn-a', _BASE_CONCEPTS + _BASE_LEXEMES_AND_SENSES + """\
+        wn_a.write_text(wn_xml('wn-a', BASE_CONCEPTS + BASE_LEXEMES_AND_SENSES + """\
 <ConceptRelation relation_type="opposite" source="cili.i1" target="cili.i2">
   <Provenance resource="wn-a" version="1.0"/>
 </ConceptRelation>
 """))
         wn_b = tmp_path / 'wn-b.xml'
-        wn_b.write_text(_wn_xml('wn-b', """\
+        wn_b.write_text(wn_xml('wn-b', """\
 <ConceptRelation relation_type="opposite" source="cili.i2" target="cili.i1">
   <Provenance resource="wn-b" version="1.0"/>
 </ConceptRelation>
 """))
 
-        import logging
         with caplog.at_level(logging.WARNING, logger='synthesise'):
             builder.process_file(wn_a)
             builder.process_file(wn_b)
@@ -163,13 +101,12 @@ class TestSynsetRelationConflict:
     def test_no_conflict_on_normal_relations(self, builder, tmp_path, caplog):
         """Single-source wordnet with correct hypernym should produce zero conflicts."""
         wn_a = tmp_path / 'wn-a.xml'
-        wn_a.write_text(_wn_xml('wn-a', _BASE_CONCEPTS + _BASE_LEXEMES_AND_SENSES + """\
+        wn_a.write_text(wn_xml('wn-a', BASE_CONCEPTS + BASE_LEXEMES_AND_SENSES + """\
 <ConceptRelation relation_type="class_hypernym" source="cili.i1" target="cili.i2">
   <Provenance resource="wn-a" version="1.0"/>
 </ConceptRelation>
 """))
 
-        import logging
         with caplog.at_level(logging.WARNING, logger='synthesise'):
             builder.process_file(wn_a)
 
@@ -180,38 +117,6 @@ class TestSynsetRelationConflict:
 # Sense-relation conflict tests
 # ---------------------------------------------------------------------------
 
-_BASE_CONCEPTS_SENSE_REL = """\
-<Concept id="cili.i3" ontological_category="VERB" status="1">
-  <Provenance resource="wn-a" version="1.0" original_id="t-3"/>
-</Concept>
-<Concept id="cili.i4" ontological_category="NOUN" status="1">
-  <Provenance resource="wn-a" version="1.0" original_id="t-4"/>
-</Concept>
-<Gloss definiendum="cili.i3" language="en">
-  <AnnotatedSentence>run</AnnotatedSentence>
-  <Provenance resource="wn-a" version="1.0"/>
-</Gloss>
-<Gloss definiendum="cili.i4" language="en">
-  <AnnotatedSentence>running</AnnotatedSentence>
-  <Provenance resource="wn-a" version="1.0"/>
-</Gloss>
-<Lexeme id="en.VERB.run" language="en" grammatical_category="VERB">
-  <Wordform form="run"/>
-  <Provenance resource="wn-a" version="1.0" original_id="run-v"/>
-</Lexeme>
-<Lexeme id="en.NOUN.running" language="en" grammatical_category="NOUN">
-  <Wordform form="running"/>
-  <Provenance resource="wn-a" version="1.0" original_id="running-n"/>
-</Lexeme>
-<Sense id="sense.run" signifier="en.VERB.run" signified="cili.i3">
-  <Provenance resource="wn-a" version="1.0"/>
-</Sense>
-<Sense id="sense.running" signifier="en.NOUN.running" signified="cili.i4">
-  <Provenance resource="wn-a" version="1.0"/>
-</Sense>
-"""
-
-
 class TestSenseRelationConflict:
     def test_reversed_derivation_is_skipped(self, builder, tmp_path, caplog):
         """
@@ -219,19 +124,18 @@ class TestSenseRelationConflict:
         wn-b explicitly adds derivation(running→run), which conflicts and must be skipped.
         """
         wn_a = tmp_path / 'wn-a.xml'
-        wn_a.write_text(_wn_xml('wn-a', _BASE_CONCEPTS_SENSE_REL + """\
+        wn_a.write_text(wn_xml('wn-a', BASE_CONCEPTS_SENSE_REL + """\
 <SenseRelation relation_type="derivation" source="sense.run" target="sense.running">
   <Provenance resource="wn-a" version="1.0"/>
 </SenseRelation>
 """))
         wn_b = tmp_path / 'wn-b.xml'
-        wn_b.write_text(_wn_xml('wn-b', """\
+        wn_b.write_text(wn_xml('wn-b', """\
 <SenseRelation relation_type="derivation" source="sense.running" target="sense.run">
   <Provenance resource="wn-b" version="1.0"/>
 </SenseRelation>
 """))
 
-        import logging
         with caplog.at_level(logging.WARNING, logger='synthesise'):
             builder.process_file(wn_a)
             builder.process_file(wn_b)
@@ -243,13 +147,13 @@ class TestSenseRelationConflict:
     def test_reversed_derivation_not_stored(self, builder, tmp_path):
         """The conflicting reversed sense relation must not be persisted."""
         wn_a = tmp_path / 'wn-a.xml'
-        wn_a.write_text(_wn_xml('wn-a', _BASE_CONCEPTS_SENSE_REL + """\
+        wn_a.write_text(wn_xml('wn-a', BASE_CONCEPTS_SENSE_REL + """\
 <SenseRelation relation_type="derivation" source="sense.run" target="sense.running">
   <Provenance resource="wn-a" version="1.0"/>
 </SenseRelation>
 """))
         wn_b = tmp_path / 'wn-b.xml'
-        wn_b.write_text(_wn_xml('wn-b', """\
+        wn_b.write_text(wn_xml('wn-b', """\
 <SenseRelation relation_type="derivation" source="sense.running" target="sense.run">
   <Provenance resource="wn-b" version="1.0"/>
 </SenseRelation>
@@ -270,21 +174,78 @@ class TestSenseRelationConflict:
         asserted should not trigger a conflict warning.
         """
         wn_a = tmp_path / 'wn-a.xml'
-        wn_a.write_text(_wn_xml('wn-a', _BASE_CONCEPTS_SENSE_REL + """\
+        wn_a.write_text(wn_xml('wn-a', BASE_CONCEPTS_SENSE_REL + """\
 <SenseRelation relation_type="antonym" source="sense.run" target="sense.running">
   <Provenance resource="wn-a" version="1.0"/>
 </SenseRelation>
 """))
         wn_b = tmp_path / 'wn-b.xml'
-        wn_b.write_text(_wn_xml('wn-b', """\
+        wn_b.write_text(wn_xml('wn-b', """\
 <SenseRelation relation_type="antonym" source="sense.running" target="sense.run">
   <Provenance resource="wn-b" version="1.0"/>
 </SenseRelation>
 """))
 
-        import logging
         with caplog.at_level(logging.WARNING, logger='synthesise'):
             builder.process_file(wn_a)
             builder.process_file(wn_b)
 
         assert builder.n_rel_conflicts == 0
+
+
+# ---------------------------------------------------------------------------
+# Integration tests using the shared test wordnet files
+# ---------------------------------------------------------------------------
+
+class TestWordnetFiles:
+    def test_wn_en_loads_cleanly(self, builder):
+        """wn-en.xml alone produces no conflicts."""
+        builder.process_file(_WORDNETS_DIR / 'wn-en.xml')
+        assert builder.n_rel_conflicts == 0
+
+    def test_wn_en_plus_fr_loads_cleanly(self, builder):
+        """wn-en + wn-fr: French sense references an ILI from wn-en — no conflicts."""
+        builder.process_file(_WORDNETS_DIR / 'wn-en.xml')
+        builder.process_file(_WORDNETS_DIR / 'wn-fr.xml')
+        assert builder.n_rel_conflicts == 0
+
+    def test_wn_en_plus_fr_merges_dog_concept(self, builder):
+        """After merging, the dog concept (cili.i3) has senses in both en and fr."""
+        builder.process_file(_WORDNETS_DIR / 'wn-en.xml')
+        builder.process_file(_WORDNETS_DIR / 'wn-fr.xml')
+
+        dog_rowid = builder.cur.execute(
+            "SELECT rowid FROM synsets WHERE ili = 'i3'"
+        ).fetchone()[0]
+        lang_codes = {
+            row[0] for row in builder.cur.execute(
+                """SELECT l.code FROM senses s
+                   JOIN entries e ON s.entry_rowid = e.rowid
+                   JOIN languages l ON e.language_rowid = l.rowid
+                   WHERE s.synset_rowid = ?""",
+                (dog_rowid,),
+            )
+        }
+        assert lang_codes == {'en', 'fr'}
+
+    def test_wn_bad_triggers_conflict(self, builder, caplog):
+        """wn-bad.xml asserts a reversed hypernym that conflicts with wn-en.xml."""
+        builder.process_file(_WORDNETS_DIR / 'wn-en.xml')
+
+        with caplog.at_level(logging.WARNING, logger='synthesise'):
+            builder.process_file(_WORDNETS_DIR / 'wn-bad.xml')
+
+        assert builder.n_rel_conflicts == 1
+        assert 'wn-bad' in caplog.text
+        assert 'class_hypernym' in caplog.text
+
+    def test_wn_bad_conflict_not_stored(self, builder):
+        """The reversed relation from wn-bad.xml must not be persisted."""
+        builder.process_file(_WORDNETS_DIR / 'wn-en.xml')
+        builder.process_file(_WORDNETS_DIR / 'wn-bad.xml')
+
+        # wn-en has 2 explicit hypernyms → 4 rows total (2 + 2 auto-hyponyms)
+        count = builder.cur.execute(
+            'SELECT COUNT(*) FROM synset_relations'
+        ).fetchone()[0]
+        assert count == 4

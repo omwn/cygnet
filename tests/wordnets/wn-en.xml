@@ -1,0 +1,90 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<CygnetResource id="wn-en" label="Test English WordNet" language="en" version="1.0">
+
+  <!-- Concepts (ILI declarations shared by all wordnets) -->
+  <Concept id="cili.i1" ontological_category="NOUN" status="1">
+    <Provenance resource="wn-en" version="1.0" original_id="n01"/>
+  </Concept>
+  <Concept id="cili.i2" ontological_category="NOUN" status="1">
+    <Provenance resource="wn-en" version="1.0" original_id="n02"/>
+  </Concept>
+  <Concept id="cili.i3" ontological_category="NOUN" status="1">
+    <Provenance resource="wn-en" version="1.0" original_id="n03"/>
+  </Concept>
+  <Concept id="cili.i4" ontological_category="NOUN" status="1">
+    <Provenance resource="wn-en" version="1.0" original_id="n04"/>
+  </Concept>
+  <Concept id="cili.i5" ontological_category="NOUN" status="1">
+    <Provenance resource="wn-en" version="1.0" original_id="n05"/>
+  </Concept>
+
+  <!-- English definitions -->
+  <Gloss definiendum="cili.i1" language="en">
+    <AnnotatedSentence>a thing that exists independently</AnnotatedSentence>
+    <Provenance resource="wn-en" version="1.0"/>
+  </Gloss>
+  <Gloss definiendum="cili.i2" language="en">
+    <AnnotatedSentence>a living animal; any member of the kingdom Animalia</AnnotatedSentence>
+    <Provenance resource="wn-en" version="1.0"/>
+  </Gloss>
+  <Gloss definiendum="cili.i3" language="en">
+    <AnnotatedSentence>a domesticated animal; Canis familiaris</AnnotatedSentence>
+    <Provenance resource="wn-en" version="1.0"/>
+  </Gloss>
+  <Gloss definiendum="cili.i4" language="en">
+    <AnnotatedSentence>the quality of being bright</AnnotatedSentence>
+    <Provenance resource="wn-en" version="1.0"/>
+  </Gloss>
+  <Gloss definiendum="cili.i5" language="en">
+    <AnnotatedSentence>any of several small sharks</AnnotatedSentence>
+    <Provenance resource="wn-en" version="1.0"/>
+  </Gloss>
+
+  <!-- English lexemes -->
+  <Lexeme id="lex.en.entity" language="en" grammatical_category="NOUN">
+    <Wordform form="entity"/>
+    <Provenance resource="wn-en" version="1.0" original_id="entity-n"/>
+  </Lexeme>
+  <Lexeme id="lex.en.animal" language="en" grammatical_category="NOUN">
+    <Wordform form="animal"/>
+    <Provenance resource="wn-en" version="1.0" original_id="animal-n"/>
+  </Lexeme>
+  <Lexeme id="lex.en.dog" language="en" grammatical_category="NOUN">
+    <Wordform form="dog"/>
+    <Provenance resource="wn-en" version="1.0" original_id="dog-n"/>
+  </Lexeme>
+  <Lexeme id="lex.en.brightness" language="en" grammatical_category="NOUN">
+    <Wordform form="brightness"/>
+    <Provenance resource="wn-en" version="1.0" original_id="brightness-n"/>
+  </Lexeme>
+  <Lexeme id="lex.en.dogfish" language="en" grammatical_category="NOUN">
+    <Wordform form="dogfish"/>
+    <Provenance resource="wn-en" version="1.0" original_id="dogfish-n"/>
+  </Lexeme>
+
+  <!-- English senses (lexeme → concept) -->
+  <Sense id="sense.entity" signifier="lex.en.entity" signified="cili.i1">
+    <Provenance resource="wn-en" version="1.0"/>
+  </Sense>
+  <Sense id="sense.animal" signifier="lex.en.animal" signified="cili.i2">
+    <Provenance resource="wn-en" version="1.0"/>
+  </Sense>
+  <Sense id="sense.dog" signifier="lex.en.dog" signified="cili.i3">
+    <Provenance resource="wn-en" version="1.0"/>
+  </Sense>
+  <Sense id="sense.brightness" signifier="lex.en.brightness" signified="cili.i4">
+    <Provenance resource="wn-en" version="1.0"/>
+  </Sense>
+  <Sense id="sense.dogfish" signifier="lex.en.dogfish" signified="cili.i5">
+    <Provenance resource="wn-en" version="1.0"/>
+  </Sense>
+
+  <!-- Hypernym chain: dog → animal → entity -->
+  <ConceptRelation relation_type="class_hypernym" source="cili.i3" target="cili.i2">
+    <Provenance resource="wn-en" version="1.0"/>
+  </ConceptRelation>
+  <ConceptRelation relation_type="class_hypernym" source="cili.i2" target="cili.i1">
+    <Provenance resource="wn-en" version="1.0"/>
+  </ConceptRelation>
+
+</CygnetResource>
