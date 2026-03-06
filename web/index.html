@@ -125,19 +125,75 @@
             });
         }
 
+        const _SENSE_COLS = `s.rowid as sense_id, e.language_rowid as lang_rowid, syn.pos as pos,
+                       f.form as lemma, s.sense_index as ind, syn.rowid as synset_id`;
+        const _SENSE_JOINS = `FROM forms f
+                JOIN entries e ON f.entry_rowid = e.rowid
+                JOIN senses s ON s.entry_rowid = e.rowid
+                JOIN synsets syn ON s.synset_rowid = syn.rowid`;
+
         function searchWordform(term) {
             const normalized = remove_accents(term.toLowerCase());
             const rows = cachedExec(`
-                SELECT s.rowid as sense_id, e.language_rowid as lang_rowid, syn.pos as pos,
-                       f.form as lemma, s.sense_index as ind, syn.rowid as synset_id
-                FROM forms f
-                JOIN entries e ON f.entry_rowid = e.rowid
-                JOIN senses s ON s.entry_rowid = e.rowid
-                JOIN synsets syn ON s.synset_rowid = syn.rowid
+                SELECT ${_SENSE_COLS} ${_SENSE_JOINS}
                 WHERE f.normalized_form = ?
                 ORDER BY e.language_rowid, f.form
             `, [normalized]);
             return rows.map(r => ({ ...r, lg: _langRowidToCode[r.lang_rowid] }));
+        }
+
+        function searchGlob(term) {
+            const pattern = remove_accents(term.toLowerCase()).replace(/\*/g, '%').replace(/\?/g, '_');
+            const rows = cachedExec(`
+                SELECT ${_SENSE_COLS} ${_SENSE_JOINS}
+                WHERE f.normalized_form LIKE ? LIMIT 2000
+            `, [pattern]);
+            return rows.map(r => ({ ...r, lg: _langRowidToCode[r.lang_rowid] }));
+        }
+
+        function searchByIli(term) {
+            const norm = term.replace(/^cili\./, '');
+            const rows = cachedExec(`
+                SELECT ${_SENSE_COLS}
+                FROM synsets syn
+                JOIN senses s ON s.synset_rowid = syn.rowid
+                JOIN entries e ON s.entry_rowid = e.rowid
+                JOIN forms f ON f.entry_rowid = e.rowid AND f.rank = 0
+                WHERE syn.ili = ?
+                ORDER BY e.language_rowid, f.form
+            `, [norm]);
+            return rows.map(r => ({ ...r, lg: _langRowidToCode[r.lang_rowid] }));
+        }
+
+        function searchDefinition(term, langCodes) {
+            const params = [`%${term}%`];
+            let langClause = '';
+            if (langCodes && langCodes.size > 0) {
+                const rowids = Object.entries(_langRowidToCode)
+                    .filter(([, code]) => langCodes.has(code))
+                    .map(([rowid]) => parseInt(rowid));
+                if (rowids.length > 0) {
+                    langClause = `AND d.language_rowid IN (${rowids.map(() => '?').join(',')})`;
+                    params.push(...rowids);
+                }
+            }
+            const rows = cachedExec(`
+                SELECT ${_SENSE_COLS}
+                FROM definitions d
+                JOIN synsets syn ON d.synset_rowid = syn.rowid
+                JOIN senses s ON s.synset_rowid = syn.rowid
+                JOIN entries e ON s.entry_rowid = e.rowid
+                JOIN forms f ON f.entry_rowid = e.rowid AND f.rank = 0
+                WHERE d.definition LIKE ? ${langClause} LIMIT 2000
+            `, params);
+            return rows.map(r => ({ ...r, lg: _langRowidToCode[r.lang_rowid] }));
+        }
+
+        function detectSearchMode(term) {
+            if (/^(cili\.)?i\d+$/.test(term)) return 'ili';
+            if (term.startsWith('def:')) return 'definition';
+            if (term.includes('*') || term.includes('?')) return 'glob';
+            return 'exact';
         }
 
         function querySense(senseRowid) {
@@ -498,6 +554,7 @@
             const [infoPopup, setInfoPopup] = useState(null);
             const [searchTerm, setSearchTerm] = useState('');
             const [currentSearch, setCurrentSearch] = useState('');
+            const [currentSearchSenseIds, setCurrentSearchSenseIds] = useState(new Set());
             const [languageFilter, setLanguageFilter] = useState(new Set());
             const [posFilter, setPosFilter] = useState(new Set());
             const [senseFilter, setSenseFilter] = useState(null);
@@ -928,7 +985,14 @@
                 if (!term?.trim() || !dbReady) return;
                 setLoadingResults(true);
 
-                const results = searchWordform(term.trim());
+                // Defer query so the spinner renders before the (potentially slow) SQL runs
+                setTimeout(() => {
+                const t = term.trim();
+                const mode = detectSearchMode(t);
+                const results = mode === 'ili'        ? searchByIli(t)
+                              : mode === 'definition' ? searchDefinition(t.slice(4).trim(), lang)
+                              : mode === 'glob'       ? searchGlob(t)
+                              : searchWordform(t);
                 const senseMap = {};
 
                 results.forEach(r => {
@@ -948,6 +1012,7 @@
                 });
 
                 setLoadedSenses(prev => ({ ...prev, ...senseMap }));
+                setCurrentSearchSenseIds(new Set(Object.keys(senseMap)));
                 setLoadingResults(false);
 
                 if (sense) {
@@ -971,6 +1036,7 @@
                     if (i < senseIds.length) setTimeout(loadBatch, 0);
                 };
                 setTimeout(loadBatch, 0);
+                }, 0); // end deferred search
             }, [dbReady]);
 
             const handleSearch = () => {
@@ -994,20 +1060,15 @@
             const getFilteredWordforms = () => {
                 if (!currentSearch) return [];
                 const results = [];
-                const searchLower = remove_accents(currentSearch.toLowerCase());
-                for (const senseId in loadedSenses) {
+                const ids = senseFilter ? [senseFilter] : [...currentSearchSenseIds];
+                for (const senseId of ids) {
                     const sense = loadedSenses[senseId];
                     if (!sense) continue;
-                    if (senseFilter && senseId !== senseFilter) continue;
-
-                    const lemma = sense.l ? remove_accents(sense.l.toLowerCase()) : '';
-                    if (lemma === searchLower || sense.v?.some(v => remove_accents(v.toLowerCase()) === searchLower)) {
-                        const lang = sense.lg;
-                        if (languageFilter.size > 0 && !languageFilter.has(lang)) continue;
-                        const pos = sense.ontological_category || getConceptData(sense.c?.toString())?.oc || 'UNK';
-                        if (posFilter.size > 0 && !posFilter.has(pos)) continue;
-                        results.push({ ...sense, id: senseId, ontological_category: pos });
-                    }
+                    const lang = sense.lg;
+                    if (languageFilter.size > 0 && !languageFilter.has(lang)) continue;
+                    const pos = sense.ontological_category || getConceptData(sense.c?.toString())?.oc || 'UNK';
+                    if (posFilter.size > 0 && !posFilter.has(pos)) continue;
+                    results.push({ ...sense, id: senseId, ontological_category: pos });
                 }
                 return results;
             };
@@ -1065,7 +1126,7 @@
                 setSearchTerm(''); setCurrentSearch(''); setView('search');
                 setSelectedConcept(null); setSelectedSense(null);
                 setLanguageFilter(new Set()); setPosFilter(new Set());
-                setSenseFilter(null); setLoadedSenses({}); setLoadedConcepts({});
+                setSenseFilter(null); setCurrentSearchSenseIds(new Set()); setLoadedSenses({}); setLoadedConcepts({});
                 setSynonymsCollapsed({}); setActiveTab('browser');
             };
 
@@ -1731,13 +1792,22 @@
                                 {view === 'search' && (
                                     <div className="mb-8">
                                         {!senseFilter && (
-                                            <div className="flex items-center gap-3">
+                                            <div className="flex items-center gap-2">
                                                 <input type="text" value={searchTerm}
                                                     onChange={(e) => setSearchTerm(e.target.value)}
                                                     onKeyPress={handleKeyPress}
-                                                    placeholder="Search for a word..."
+                                                    placeholder="word, hot*, *ness, i1234, def:bright"
                                                     className="flex-grow px-3 py-2 border border-gray-300 rounded"
                                                 />
+                                                <div className="relative group flex-shrink-0">
+                                                    <button className="w-6 h-6 rounded-full border border-gray-400 text-gray-500 text-xs font-bold hover:border-blue-500 hover:text-blue-500 flex items-center justify-center">ℹ</button>
+                                                    <div className="absolute right-0 top-full mt-1 hidden group-hover:block bg-white border border-gray-200 rounded shadow-lg p-3 text-xs text-gray-700 z-30 w-64 space-y-1.5">
+                                                        <div><span className="font-mono font-semibold">word</span> — exact match</div>
+                                                        <div><span className="font-mono font-semibold">hot*</span> or <span className="font-mono font-semibold">*ness</span> — glob (<span className="font-mono">*</span> = any characters, <span className="font-mono">?</span> = one)</div>
+                                                        <div><span className="font-mono font-semibold">i1234</span> or <span className="font-mono font-semibold">cili.i1234</span> — look up concept by ILI</div>
+                                                        <div><span className="font-mono font-semibold">def:word</span> — search inside definitions</div>
+                                                    </div>
+                                                </div>
                                             </div>
                                         )}
 
@@ -1752,14 +1822,36 @@
                                             </div>
                                         )}
 
-                                        {loadingResults && <div className="text-center py-8"><p className="text-gray-600">Searching...</p></div>}
-
-                                        {!loadingResults && currentSearch && filteredResults.length === 0 && (
-                                            <div className="text-center py-8"><p className="text-gray-600">No results found</p></div>
+                                        {loadingResults && (
+                                            <div className="flex items-center gap-3 py-6 text-gray-500">
+                                                <svg className="animate-spin h-5 w-5 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                                                </svg>
+                                                <span>Searching{detectSearchMode(currentSearch) !== 'exact' ? ' — this may take a moment…' : '…'}</span>
+                                            </div>
                                         )}
 
-                                        {!loadingResults && currentSearch && filteredResults.length > 0 && (
-                                            <div className="space-y-6 mt-6">
+                                        {!loadingResults && currentSearch && filteredResults.length === 0 && (
+                                            <div className="text-center py-8"><p className="text-gray-600">No results found for <span className="font-mono">{currentSearch}</span></p></div>
+                                        )}
+
+                                        {!loadingResults && currentSearch && filteredResults.length > 0 && (() => {
+                                            const nLangs = Object.keys(groupedByLanguageAndPos).length;
+                                            const showHint = filteredResults.length > 100 && (languageFilter.size === 0 || posFilter.size === 0);
+                                            return (<>
+                                            <div className="mt-4 mb-1 flex items-center gap-3 flex-wrap">
+                                                <span className="text-sm text-gray-500">
+                                                    {filteredResults.length.toLocaleString()} {filteredResults.length === 1 ? 'result' : 'results'}
+                                                    {' across '}{nLangs} {nLangs === 1 ? 'language' : 'languages'}
+                                                </span>
+                                                {showHint && (
+                                                    <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-0.5">
+                                                        Too many results? Use the Language or POS filters in ⚙ Settings to narrow down.
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className="space-y-6 mt-2">
                                                 {Object.entries(groupedByLanguageAndPos)
                                                     .sort(([a], [b]) => getLangName(a).localeCompare(getLangName(b)))
                                                     .map(([lang, posByLang]) => (
@@ -1880,7 +1972,8 @@
                                                     </div>
                                                 ))}
                                             </div>
-                                        )}
+                                            </>);
+                                        })()}
                                     </div>
                                 )}
 
@@ -2239,8 +2332,11 @@
                                         {' '}— Provenance records tracing every data point back to its source wordnet and original identifier.
                                     </li>
                                 </ul>
-                                <p className="text-gray-700">
+                                <p className="text-gray-700 mb-4">
                                     The individual wordnets that make up Cygnet are each available from their respective projects — see the <button onClick={() => setActiveTab('wordnets')} className="text-blue-600 hover:underline">Wordnets</button> tab for the full list with links.
+                                </p>
+                                <p className="text-gray-700">
+                                    Source code for merging and displaying wordnets is available on <a href="https://github.com/rowanhm/cygnet" className="text-blue-600 hover:underline">GitHub</a>.
                                 </p>
                             </div>
                         )}
