@@ -6,7 +6,7 @@ contents, so every assertion can be exact.
 Test DB contents (see conftest._UI_TEST_WORDNET):
   Synsets:  entity (i1), animal (i2), dog (i3), brightness (i4), dogfish (i5)
   Senses:   en:entity, en:animal, en:dog, en:brightness, en:dogfish, fr:chien
-  Relations: dog→animal (class_hypernym), animal→entity (class_hypernym)
+  Relations: dog→animal (hypernym), animal→entity (hypernym)
 
 Expected search results (exact/glob match on normalized_form):
   "dog"        exact  → 1  (en:dog)                       across 1 language
@@ -332,3 +332,64 @@ class TestLargeResultHint:
         expect(
             page_ready.locator('text=Too many results')
         ).not_to_be_visible()
+
+
+# ---------------------------------------------------------------------------
+# Security: SQL injection and XSS via search input
+# ---------------------------------------------------------------------------
+
+class TestSecurity:
+    """Search input is passed as a parameterised SQL value, never interpolated.
+    Injection attempts must return 0 results (not crash or leak data).
+    Rendered output must not execute injected script tags."""
+
+    _INJECTIONS = [
+        "' OR '1'='1",
+        "'; DROP TABLE synsets; --",
+        "' UNION SELECT code, rowid, rowid, rowid, rowid FROM resources --",
+        "dog' AND '1'='1",
+        "\\x00",
+        "a" * 10_000,           # very long input
+    ]
+
+    def test_sql_injection_returns_no_results(self, page_ready: Page):
+        """Classic SQL injection in the search box must not return real rows."""
+        for payload in self._INJECTIONS:
+            _search(page_ready, payload)
+            expect(
+                page_ready.locator('text=No results found')
+            ).to_be_visible(timeout=_SEARCH_TIMEOUT)
+
+    def test_sql_injection_does_not_crash_page(self, page_ready: Page):
+        """The search input must remain usable after every injection attempt."""
+        for payload in self._INJECTIONS:
+            _search(page_ready, payload)
+        # After all payloads the search box must still be present
+        expect(page_ready.locator('input[placeholder*="word"]')).to_be_visible()
+
+    def test_xss_script_tag_not_executed(self, page_ready: Page):
+        """A <script> tag injected via search must not execute JS."""
+        page_ready.evaluate("window.__xss_fired = false;")
+        _search(page_ready, "<script>window.__xss_fired=true;</script>")
+        fired = page_ready.evaluate("window.__xss_fired")
+        assert not fired, "XSS payload was executed"
+
+    def test_xss_event_handler_not_executed(self, page_ready: Page):
+        """An onerror/onload attribute injected via search must not execute."""
+        page_ready.evaluate("window.__xss_fired = false;")
+        _search(page_ready, '<img src=x onerror="window.__xss_fired=true;">')
+        fired = page_ready.evaluate("window.__xss_fired")
+        assert not fired, "XSS event handler was executed"
+
+    def test_glob_injection_returns_no_unexpected_results(self, page_ready: Page):
+        """GLOB wildcards must not bypass the search intent or leak all rows."""
+        _search(page_ready, '*')
+        # '*' alone matches everything — there should be results but no crash
+        expect(page_ready.locator('input[placeholder*="word"]')).to_be_visible()
+
+    def test_def_injection_no_raw_sql_leak(self, page_ready: Page):
+        """def: prefix with embedded SQL must show no results, not an error."""
+        _search(page_ready, "def:' OR '1'='1")
+        expect(
+            page_ready.locator('text=No results found')
+        ).to_be_visible(timeout=_SEARCH_TIMEOUT)

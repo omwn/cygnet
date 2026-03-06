@@ -3,7 +3,7 @@
   Intentionally erroneous wordnet used by conflict-detection tests.
 
   Problems introduced:
-  1. Reversed hypernym: asserts animal→dog as class_hypernym, which conflicts
+  1. Reversed hypernym: asserts animal→dog as hypernym, which conflicts
      with the auto-generated hyponym(animal→dog) produced when wn-en asserts
      dog→animal.  The merger must detect and skip this with a warning.
   2. Reversed derivation sense relation (if included with wn-en's run→running).
@@ -11,7 +11,7 @@
 <CygnetResource id="wn-bad" label="Bad Test WordNet" language="en" version="1.0">
 
   <!-- Reversed synset relation: conflicts with wn-en's dog→animal hypernym -->
-  <ConceptRelation relation_type="class_hypernym" source="cili.i2" target="cili.i3">
+  <ConceptRelation relation_type="hypernym" source="cili.i2" target="cili.i3">
     <Provenance resource="wn-bad" version="1.0"/>
   </ConceptRelation>
 

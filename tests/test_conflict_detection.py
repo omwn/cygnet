@@ -28,14 +28,14 @@ class TestSynsetRelationConflict:
         """
         wn_a = tmp_path / 'wn-a.xml'
         wn_a.write_text(wn_xml('wn-a', BASE_CONCEPTS + BASE_LEXEMES_AND_SENSES + """\
-<ConceptRelation relation_type="class_hypernym" source="cili.i1" target="cili.i2">
+<ConceptRelation relation_type="hypernym" source="cili.i1" target="cili.i2">
   <Provenance resource="wn-a" version="1.0"/>
 </ConceptRelation>
 """))
 
         wn_b = tmp_path / 'wn-b.xml'
         wn_b.write_text(wn_xml('wn-b', """\
-<ConceptRelation relation_type="class_hypernym" source="cili.i2" target="cili.i1">
+<ConceptRelation relation_type="hypernym" source="cili.i2" target="cili.i1">
   <Provenance resource="wn-b" version="1.0"/>
 </ConceptRelation>
 """))
@@ -46,7 +46,7 @@ class TestSynsetRelationConflict:
 
         assert builder.n_rel_conflicts == 1
         assert 'wn-b' in caplog.text
-        assert 'class_hypernym' in caplog.text
+        assert 'hypernym' in caplog.text
         assert 'cili.i1' in caplog.text
         assert 'cili.i2' in caplog.text
 
@@ -54,13 +54,13 @@ class TestSynsetRelationConflict:
         """The conflicting reversed relation must not be persisted to the DB."""
         wn_a = tmp_path / 'wn-a.xml'
         wn_a.write_text(wn_xml('wn-a', BASE_CONCEPTS + BASE_LEXEMES_AND_SENSES + """\
-<ConceptRelation relation_type="class_hypernym" source="cili.i1" target="cili.i2">
+<ConceptRelation relation_type="hypernym" source="cili.i1" target="cili.i2">
   <Provenance resource="wn-a" version="1.0"/>
 </ConceptRelation>
 """))
         wn_b = tmp_path / 'wn-b.xml'
         wn_b.write_text(wn_xml('wn-b', """\
-<ConceptRelation relation_type="class_hypernym" source="cili.i2" target="cili.i1">
+<ConceptRelation relation_type="hypernym" source="cili.i2" target="cili.i1">
   <Provenance resource="wn-b" version="1.0"/>
 </ConceptRelation>
 """))
@@ -76,18 +76,18 @@ class TestSynsetRelationConflict:
 
     def test_symmetric_relation_not_flagged(self, builder, tmp_path, caplog):
         """
-        Symmetric relations (opposite, antonym at concept level) with both
+        Symmetric relations (antonym at concept level) with both
         directions explicitly asserted should NOT trigger a conflict warning.
         """
         wn_a = tmp_path / 'wn-a.xml'
         wn_a.write_text(wn_xml('wn-a', BASE_CONCEPTS + BASE_LEXEMES_AND_SENSES + """\
-<ConceptRelation relation_type="opposite" source="cili.i1" target="cili.i2">
+<ConceptRelation relation_type="antonym" source="cili.i1" target="cili.i2">
   <Provenance resource="wn-a" version="1.0"/>
 </ConceptRelation>
 """))
         wn_b = tmp_path / 'wn-b.xml'
         wn_b.write_text(wn_xml('wn-b', """\
-<ConceptRelation relation_type="opposite" source="cili.i2" target="cili.i1">
+<ConceptRelation relation_type="antonym" source="cili.i2" target="cili.i1">
   <Provenance resource="wn-b" version="1.0"/>
 </ConceptRelation>
 """))
@@ -102,7 +102,7 @@ class TestSynsetRelationConflict:
         """Single-source wordnet with correct hypernym should produce zero conflicts."""
         wn_a = tmp_path / 'wn-a.xml'
         wn_a.write_text(wn_xml('wn-a', BASE_CONCEPTS + BASE_LEXEMES_AND_SENSES + """\
-<ConceptRelation relation_type="class_hypernym" source="cili.i1" target="cili.i2">
+<ConceptRelation relation_type="hypernym" source="cili.i1" target="cili.i2">
   <Provenance resource="wn-a" version="1.0"/>
 </ConceptRelation>
 """))
@@ -118,10 +118,11 @@ class TestSynsetRelationConflict:
 # ---------------------------------------------------------------------------
 
 class TestSenseRelationConflict:
-    def test_reversed_derivation_is_skipped(self, builder, tmp_path, caplog):
+    def test_duplicate_derivation_silently_ignored(self, builder, tmp_path, caplog):
         """
-        wn-a adds derivation(run→running), auto-generating derivation_of(running→run).
-        wn-b explicitly adds derivation(running→run), which conflicts and must be skipped.
+        derivation is symmetric: both directions have the same relation type.
+        wn-a adds derivation(run→running), auto-generating derivation(running→run).
+        wn-b explicitly asserts derivation(running→run) — a duplicate, silently ignored.
         """
         wn_a = tmp_path / 'wn-a.xml'
         wn_a.write_text(wn_xml('wn-a', BASE_CONCEPTS_SENSE_REL + """\
@@ -140,9 +141,7 @@ class TestSenseRelationConflict:
             builder.process_file(wn_a)
             builder.process_file(wn_b)
 
-        assert builder.n_rel_conflicts == 1
-        assert 'wn-b' in caplog.text
-        assert 'derivation' in caplog.text
+        assert builder.n_rel_conflicts == 0
 
     def test_reversed_derivation_not_stored(self, builder, tmp_path):
         """The conflicting reversed sense relation must not be persisted."""
@@ -165,7 +164,7 @@ class TestSenseRelationConflict:
         rows = builder.cur.execute(
             'SELECT source_rowid, target_rowid FROM sense_relations'
         ).fetchall()
-        # derivation(run→running) + auto derivation_of(running→run) = 2 rows
+        # derivation(run→running) + auto derivation(running→run) = 2 rows
         assert len(rows) == 2
 
     def test_symmetric_antonym_not_flagged(self, builder, tmp_path, caplog):
@@ -237,7 +236,7 @@ class TestWordnetFiles:
 
         assert builder.n_rel_conflicts == 1
         assert 'wn-bad' in caplog.text
-        assert 'class_hypernym' in caplog.text
+        assert 'hypernym' in caplog.text
 
     def test_wn_bad_conflict_not_stored(self, builder):
         """The reversed relation from wn-bad.xml must not be persisted."""

@@ -174,30 +174,20 @@ IMPLICIT_RESOURCES = {
 
 INVERSE_SENSE_RELATIONS: dict[str, str] = {
     'antonym':    'antonym',
-    'derivation': 'derivation_of',
-    'pertainym':  'pertainym_of',
-    'participle': 'participle_of',
+    'derivation': 'derivation',
+    'pertainym':  'pertainym',
+    'participle': 'participle',
 }
 
 INVERSE_CONCEPT_RELATIONS: dict[str, str] = {
-    'class_hypernym':       'class_hyponym',
-    'instance_hypernym':    'instance_hyponym',
-    'member_meronym':       'member_holonym',
-    'part_meronym':         'part_holonym',
-    'substance_meronym':    'substance_holonym',
-    'opposite':             'opposite',
-    'causes':               'caused_by',
-    'entails':              'entailed_by',
-    'agent_of_action':      'action_of_agent',
-    'patient_of_action':    'action_of_patient',
-    'result_of_action':     'action_of_result',
-    'instrument_of_agent':  'agent_of_instrument',
-    'instrument_of_action': 'action_of_instrument',
-    'result_of_agent':      'agent_of_result',
-    'patient_of_agent':     'agent_of_patient',
-    'instrument_of_patient':'patient_of_instrument',
-    'instrument_of_result': 'result_of_instrument',
-    'patient_of_result':    'result_of_patient',
+    'hypernym':          'hyponym',
+    'instance_hypernym': 'instance_hyponym',
+    'mero_member':       'holo_member',
+    'mero_part':         'holo_part',
+    'mero_substance':    'holo_substance',
+    'antonym':           'antonym',
+    'causes':            'is_caused_by',
+    'entails':           'is_entailed_by',
 }
 
 BATCH_SIZE = 50_000
@@ -1057,7 +1047,7 @@ class MergeBuilder:
         """
         hypernym_types = {r[0] for r in self.cur.execute(
             "SELECT rowid FROM relation_types "
-            "WHERE type IN ('class_hypernym', 'instance_hypernym')"
+            "WHERE type IN ('hypernym', 'instance_hypernym')"
         ).fetchall()}
         if not hypernym_types:
             return 0

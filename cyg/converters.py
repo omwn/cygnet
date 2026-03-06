@@ -35,23 +35,23 @@ SENSE_RELATION_NAME_MAPPING = {
 }
 
 CONCEPT_RELATION_NAME_MAPPING = {
-    'hypernym': 'class_hypernym',
-    'instance_hypernym': 'instance_hypernym',
-    'mero_member': 'member_meronym',
-    'mero_part': 'part_meronym',
-    'mero_substance': 'substance_meronym',
-    'causes': 'causes',
-    'entails': 'entails',
-    'agent': 'agent_of_action',
-    'patient': 'patient_of_action',
-    'result': 'result_of_action',
-    'co_agent_instrument': 'instrument_of_agent',
-    'antonym': 'opposite',
-    'instrument': 'instrument_of_action',
-    'co_agent_result': 'result_of_agent',
-    'co_agent_patient': 'patient_of_agent',
-    'co_patient_instrument': 'instrument_of_patient',
-    'co_result_instrument': 'instrument_of_result',
+    'hypernym':              'hypernym',
+    'instance_hypernym':     'instance_hypernym',
+    'mero_member':           'mero_member',
+    'mero_part':             'mero_part',
+    'mero_substance':        'mero_substance',
+    'causes':                'causes',
+    'entails':               'entails',
+    'antonym':               'antonym',
+    'agent':                 None,
+    'patient':               None,
+    'result':                None,
+    'co_agent_instrument':   None,
+    'instrument':            None,
+    'co_agent_result':       None,
+    'co_agent_patient':      None,
+    'co_patient_instrument': None,
+    'co_result_instrument':  None,
 }
 
 SENSE_RELATION_PAIRS = {
@@ -152,13 +152,13 @@ CONCEPT_RELATION_PAIRS = {
 }
 
 CONCEPT_RELATIONS_REQUIRING_SAME_CATEGORY = {
-    'class_hypernym',
+    'hypernym',
     'instance_hypernym',
-    'member_meronym',
-    'part_meronym',
-    'substance_meronym',
+    'mero_member',
+    'mero_part',
+    'mero_substance',
     'causes',
-    'entails'
+    'entails',
 }
 
 # ISO 639-1 language code to spaCy efficient (small) model mapping
@@ -1257,7 +1257,7 @@ class WordNetToCygnetConverter:
             seen_symmetric = set()
 
             for source, target, rel_type_val in sorted(with_inverses):
-                if rel_type_val not in name_mapping:
+                if name_mapping.get(rel_type_val) is None:
                     continue
 
                 inverse_type = pairs_dict.get(rel_type_val)

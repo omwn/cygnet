@@ -80,10 +80,10 @@
   </Sense>
 
   <!-- Hypernym chain: dog → animal → entity -->
-  <ConceptRelation relation_type="class_hypernym" source="cili.i3" target="cili.i2">
+  <ConceptRelation relation_type="hypernym" source="cili.i3" target="cili.i2">
     <Provenance resource="wn-en" version="1.0"/>
   </ConceptRelation>
-  <ConceptRelation relation_type="class_hypernym" source="cili.i2" target="cili.i1">
+  <ConceptRelation relation_type="hypernym" source="cili.i2" target="cili.i1">
     <Provenance resource="wn-en" version="1.0"/>
   </ConceptRelation>
 

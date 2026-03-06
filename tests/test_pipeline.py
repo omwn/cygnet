@@ -372,17 +372,17 @@ _CHAIN_BODY = """\
   <AnnotatedSentence>gamma</AnnotatedSentence>
   <Provenance resource="wn-a" version="1.0"/>
 </Gloss>
-<ConceptRelation relation_type="class_hypernym" source="cili.a1" target="cili.a2">
+<ConceptRelation relation_type="hypernym" source="cili.a1" target="cili.a2">
   <Provenance resource="wn-a" version="1.0"/>
 </ConceptRelation>
-<ConceptRelation relation_type="class_hypernym" source="cili.a2" target="cili.a3">
+<ConceptRelation relation_type="hypernym" source="cili.a2" target="cili.a3">
   <Provenance resource="wn-a" version="1.0"/>
 </ConceptRelation>
 """
 
 # XML body: adds the back-edge a3→a1 to close a cycle
 _CYCLE_BODY = _CHAIN_BODY + """\
-<ConceptRelation relation_type="class_hypernym" source="cili.a3" target="cili.a1">
+<ConceptRelation relation_type="hypernym" source="cili.a3" target="cili.a1">
   <Provenance resource="wn-a" version="1.0"/>
 </ConceptRelation>
 """
