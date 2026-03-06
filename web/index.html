@@ -456,6 +456,16 @@
             });
         }
 
+        async function idbDel(key) {
+            const db = await idbOpen();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(IDB_STORE, 'readwrite');
+                tx.objectStore(IDB_STORE).delete(key);
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => reject(tx.error);
+            });
+        }
+
         async function idbClear() {
             const db = await idbOpen();
             return new Promise((resolve, reject) => {
@@ -563,13 +573,25 @@
                             locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/${file}`
                         });
 
-                        // Check IndexedDB cache
+                        // Check IndexedDB cache, validating against server mtime
                         let buf;
                         try {
                             const cached = await idbGet('db');
                             if (cached) {
-                                setDbProgress('Loading from cache...');
-                                buf = new Uint8Array(cached);
+                                let stale = false;
+                                try {
+                                    const head = await fetch(DB_BASE + 'cygnet.db.gz', { method: 'HEAD' });
+                                    const serverMtime = head.headers.get('last-modified') || head.headers.get('etag');
+                                    const cachedMtime = await idbGet('db-mtime');
+                                    if (serverMtime && serverMtime !== cachedMtime) stale = true;
+                                } catch (_) { /* offline — trust cache */ }
+                                if (stale) {
+                                    setDbProgress('Database updated, clearing cache...');
+                                    await Promise.all([idbDel('db'), idbDel('provdb'), idbDel('db-mtime')]);
+                                } else {
+                                    setDbProgress('Loading from cache...');
+                                    buf = new Uint8Array(cached);
+                                }
                             }
                         } catch (e) {
                             console.warn('IndexedDB cache read failed:', e);
@@ -580,6 +602,7 @@
                             setDbProgress('Downloading database...');
                             const response = await fetch(DB_BASE + 'cygnet.db.gz');
                             if (!response.ok) throw new Error(`Failed to fetch database: ${response.status}`);
+                            const serverMtime = response.headers.get('last-modified') || response.headers.get('etag') || '';
                             const compressedTotal = parseInt(response.headers.get('content-length') || '0');
 
                             // Stream through DecompressionStream
@@ -617,6 +640,7 @@
                             setDbProgress('Caching for next visit...');
                             try {
                                 await idbPut('db', buf.buffer);
+                                if (serverMtime) await idbPut('db-mtime', serverMtime);
                             } catch (e) {
                                 console.warn('IndexedDB cache write failed:', e);
                             }
