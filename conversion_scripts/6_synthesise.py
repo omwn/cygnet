@@ -1038,35 +1038,11 @@ class MergeBuilder:
             ) sub WHERE senses.rowid = sub.sid
         """)
 
-    def detect_cycles(self) -> int:
-        """Detect cycles in the IS-A hierarchy using Tarjan's SCC algorithm.
-
-        Each strongly connected component with more than one node (or any
-        self-loop) constitutes a cycle group. Logs one WARNING per SCC,
-        listing the ILIs involved. Returns the number of cyclic SCCs.
-        """
-        hypernym_types = {r[0] for r in self.cur.execute(
-            "SELECT rowid FROM relation_types "
-            "WHERE type IN ('hypernym', 'instance_hypernym')"
-        ).fetchall()}
-        if not hypernym_types:
-            return 0
-
-        ph = ','.join('?' * len(hypernym_types))
-        edges = self.cur.execute(
-            f"SELECT source_rowid, target_rowid FROM synset_relations "
-            f"WHERE type_rowid IN ({ph})",
-            list(hypernym_types),
-        ).fetchall()
-
-        children: dict[int, list[int]] = {}
-        nodes: set[int] = set()
-        for src, tgt in edges:
-            children.setdefault(src, []).append(tgt)
-            nodes.add(src)
-            nodes.add(tgt)
-
-        # Iterative Tarjan's SCC
+    @staticmethod
+    def _tarjan_cyclic_sccs(
+        nodes: set[int], children: dict[int, list[int]]
+    ) -> list[list[int]]:
+        """Iterative Tarjan's SCC; returns only SCCs that contain a cycle."""
         index_counter = [0]
         index: dict[int, int] = {}
         lowlink: dict[int, int] = {}
@@ -1077,7 +1053,6 @@ class MergeBuilder:
         for start in nodes:
             if start in index:
                 continue
-            # Iterative DFS using an explicit call stack
             dfs_stack: list[tuple[int, object]] = [
                 (start, iter(children.get(start, [])))
             ]
@@ -1100,12 +1075,12 @@ class MergeBuilder:
                         break
                     elif on_stack.get(w):
                         lowlink[v] = min(lowlink[v], index[w])
-
                 if not advanced:
                     dfs_stack.pop()
                     if dfs_stack:
-                        parent = dfs_stack[-1][0]
-                        lowlink[parent] = min(lowlink[parent], lowlink[v])
+                        lowlink[dfs_stack[-1][0]] = min(
+                            lowlink[dfs_stack[-1][0]], lowlink[v]
+                        )
                     if lowlink[v] == index[v]:
                         scc: list[int] = []
                         while True:
@@ -1114,10 +1089,162 @@ class MergeBuilder:
                             scc.append(w)
                             if w == v:
                                 break
-                        if len(scc) > 1 or (scc[0] in children and
-                                            scc[0] in children[scc[0]]):
+                        if len(scc) > 1 or (
+                            scc[0] in children and scc[0] in children[scc[0]]
+                        ):
                             cyclic_sccs.append(scc)
+        return cyclic_sccs
 
+    @staticmethod
+    def _bfs_path(
+        start: int,
+        end: int,
+        scc_set: set[int],
+        children: dict[int, list[int]],
+        exclude_edge: tuple[int, int],
+    ) -> list[int]:
+        """BFS from start to end within scc_set, skipping one specific edge."""
+        from collections import deque
+        queue: deque[list[int]] = deque([[start]])
+        visited = {start}
+        while queue:
+            path = queue.popleft()
+            node = path[-1]
+            for nbr in children.get(node, []):
+                if (node, nbr) == exclude_edge:
+                    continue
+                if nbr == end:
+                    return path + [end]
+                if nbr in scc_set and nbr not in visited:
+                    visited.add(nbr)
+                    queue.append(path + [nbr])
+        return [start, end]
+
+    def check_and_remove_new_cycles(
+        self, resource_code: str, first_new_rowid: int
+    ) -> int:
+        """Remove hypernym relations introduced by a file that create cycles.
+
+        Identifies edges with rowid >= first_new_rowid that lie within a cyclic
+        SCC, removes them and their auto-inverses, and logs a human-readable
+        description suitable for filing upstream bug reports.
+
+        Args:
+            resource_code: Resource identifier for logging.
+            first_new_rowid: Lowest synset_relation rowid assigned to this file.
+
+        Returns:
+            Number of cycle-causing edges removed.
+        """
+        hypernym_types = {r[0]: r[1] for r in self.cur.execute(
+            "SELECT rowid, type FROM relation_types "
+            "WHERE type IN ('hypernym', 'instance_hypernym')"
+        ).fetchall()}
+        if not hypernym_types:
+            return 0
+
+        ph = ','.join('?' * len(hypernym_types))
+        rows = self.cur.execute(
+            f"SELECT rowid, source_rowid, target_rowid, type_rowid "
+            f"FROM synset_relations WHERE type_rowid IN ({ph})",
+            list(hypernym_types),
+        ).fetchall()
+        if not rows:
+            return 0
+
+        children: dict[int, list[int]] = {}
+        nodes: set[int] = set()
+        edge_info: dict[tuple[int, int], tuple[int, int]] = {}  # (s,t)->(rowid, type_rowid)
+        for rowid, src, tgt, tr in rows:
+            children.setdefault(src, []).append(tgt)
+            nodes.add(src)
+            nodes.add(tgt)
+            edge_info[(src, tgt)] = (rowid, tr)
+
+        cyclic_sccs = self._tarjan_cyclic_sccs(nodes, children)
+        if not cyclic_sccs:
+            return 0
+
+        removed = 0
+        for scc in cyclic_sccs:
+            scc_set = set(scc)
+            for src in scc_set:
+                for tgt in list(children.get(src, [])):
+                    if tgt not in scc_set:
+                        continue
+                    edge_rowid, type_rowid = edge_info.get((src, tgt), (None, None))
+                    if edge_rowid is None or edge_rowid < first_new_rowid:
+                        continue
+                    # This edge is from the new file and closes a cycle — remove it
+                    rel_type = hypernym_types[type_rowid]
+                    src_ili = self._synset_rowid_to_ili.get(src, f'#{src}')
+                    tgt_ili = self._synset_rowid_to_ili.get(tgt, f'#{tgt}')
+                    chain = self._bfs_path(tgt, src, scc_set, children, (src, tgt))
+                    chain_str = ' → '.join(
+                        self._synset_rowid_to_ili.get(n) or f'#{n}' for n in chain
+                    )
+                    logger.warning(
+                        'Cycle removed [%s]: %s %s %s '
+                        '(existing chain: %s → %s)',
+                        resource_code, src_ili, rel_type, tgt_ili,
+                        chain_str, src_ili,
+                    )
+                    # Remove the offending edge and its auto-inverse
+                    self.cur.execute(
+                        'DELETE FROM synset_relations WHERE rowid = ?',
+                        (edge_rowid,),
+                    )
+                    self._synset_rel_keys.pop((src, tgt, type_rowid), None)
+                    inv_name = INVERSE_CONCEPT_RELATIONS.get(rel_type)
+                    if inv_name:
+                        inv_rows = self.cur.execute(
+                            'SELECT rowid FROM relation_types WHERE type = ?',
+                            (inv_name,),
+                        ).fetchone()
+                        if inv_rows:
+                            inv_type_rowid = inv_rows[0]
+                            self.cur.execute(
+                                'DELETE FROM synset_relations '
+                                'WHERE source_rowid = ? AND target_rowid = ? '
+                                'AND type_rowid = ?',
+                                (tgt, src, inv_type_rowid),
+                            )
+                            self._synset_rel_keys.pop(
+                                (tgt, src, inv_type_rowid), None
+                            )
+                    removed += 1
+                    self.n_synset_rels -= 2
+        return removed
+
+    def detect_cycles(self) -> int:
+        """Validate that no cycles remain in the IS-A hierarchy.
+
+        Runs Tarjan's SCC on all hypernym edges; logs a WARNING per cyclic SCC.
+        Returns the number of cyclic SCCs found (should be 0 after per-file
+        cycle removal in Phase 1).
+        """
+        hypernym_types = {r[0] for r in self.cur.execute(
+            "SELECT rowid FROM relation_types "
+            "WHERE type IN ('hypernym', 'instance_hypernym')"
+        ).fetchall()}
+        if not hypernym_types:
+            return 0
+
+        ph = ','.join('?' * len(hypernym_types))
+        edges = self.cur.execute(
+            f"SELECT source_rowid, target_rowid FROM synset_relations "
+            f"WHERE type_rowid IN ({ph})",
+            list(hypernym_types),
+        ).fetchall()
+
+        children: dict[int, list[int]] = {}
+        nodes: set[int] = set()
+        for src, tgt in edges:
+            children.setdefault(src, []).append(tgt)
+            nodes.add(src)
+            nodes.add(tgt)
+
+        cyclic_sccs = self._tarjan_cyclic_sccs(nodes, children)
         for scc in cyclic_sccs:
             ili_map = dict(self.cur.execute(
                 f"SELECT rowid, ili FROM synsets "
@@ -1125,9 +1252,8 @@ class MergeBuilder:
                 scc,
             ).fetchall())
             nodes_str = ', '.join(ili_map.get(n) or str(n) for n in scc)
-            logger.warning('Cyclic SCC in hypernym graph (%d nodes): %s',
+            logger.warning('Cyclic SCC remaining after cleanup (%d nodes): %s',
                            len(scc), nodes_str)
-
         return len(cyclic_sccs)
 
     def insert_resources(self) -> None:
@@ -1253,10 +1379,18 @@ def main() -> None:
 
     builder = MergeBuilder(db_path, prov_db_path)
 
+    n_cycles_removed = 0
     print('\nPhase 1: Streaming files into SQLite...')
     for xml_file in xml_files:
         print(f'  {xml_file.name}', flush=True)
+        first_new_rowid = builder._next_synset_rel_id
         builder.process_file(xml_file)
+        resource_code = xml_file.stem
+        removed = builder.check_and_remove_new_cycles(resource_code, first_new_rowid)
+        if removed:
+            print(f'    Removed {removed} cycle-causing relation(s) from {resource_code}'
+                  f' (see {log_path})', flush=True)
+            n_cycles_removed += removed
 
     print(f'\n  Synsets: {builder.n_synsets:,}')
     print(f'  Entries: {builder.n_entries:,},  Forms: {builder.n_forms:,},'
@@ -1271,16 +1405,19 @@ def main() -> None:
     if builder.n_rel_conflicts:
         print(f'  Relation conflicts skipped: {builder.n_rel_conflicts:,}'
               f' (see {log_path})')
+    if n_cycles_removed:
+        print(f'  Cycle-causing relations removed: {n_cycles_removed:,}'
+              f' (see {log_path})')
 
     print('\nCreating indexes...')
     builder.create_indexes()
 
-    print('\nPhase 1b: Detecting cycles in hypernym graph...')
+    print('\nPhase 1b: Validating no cycles remain...')
     n_cycles = builder.detect_cycles()
     if n_cycles:
-        print(f'  WARNING: {n_cycles:,} cycle(s) detected (see {log_path})')
+        print(f'  WARNING: {n_cycles:,} residual cycle(s) found (see {log_path})')
     else:
-        print('  No cycles detected.')
+        print('  OK — no cycles.')
 
     print('\nPhase 2: Merging case-variant lexemes...')
     removed = builder.merge_case_variants()

@@ -410,10 +410,70 @@ class TestDetectCycles:
         builder.create_indexes()
         with caplog.at_level(logging.WARNING, logger='synthesise'):
             builder.detect_cycles()
-        assert 'Cyclic SCC' in caplog.text
+        assert 'Cyclic SCC remaining' in caplog.text
 
     def test_wn_en_has_no_cycles(self, builder):
         """The curated test wordnet must be cycle-free."""
         builder.process_file(_WORDNETS_DIR / 'wn-en.xml')
         builder.create_indexes()
         assert builder.detect_cycles() == 0
+
+
+# ---------------------------------------------------------------------------
+# check_and_remove_new_cycles
+# ---------------------------------------------------------------------------
+
+class TestCheckAndRemoveNewCycles:
+    """check_and_remove_new_cycles() removes cycle-closing edges per-file."""
+
+    def test_cycle_edge_removed_from_db(self, builder, tmp_path):
+        """The back-edge that closes a cycle is deleted from synset_relations."""
+        chain_file = tmp_path / 'wn-chain.xml'
+        chain_file.write_text(wn_xml('wn-a', _CHAIN_BODY))
+        first = builder._next_synset_rel_id
+        builder.process_file(chain_file)
+        builder.check_and_remove_new_cycles('wn-a', first)
+        # Chain has no cycles — nothing removed
+        assert builder.detect_cycles() == 0
+
+    def test_cycle_back_edge_is_rejected(self, builder, tmp_path):
+        """A second file that closes a cycle has its offending edge removed."""
+        chain_file = tmp_path / 'wn-chain.xml'
+        chain_file.write_text(wn_xml('wn-a', _CHAIN_BODY))
+        builder.process_file(chain_file)
+
+        back_file = tmp_path / 'wn-back.xml'
+        back_file.write_text(wn_xml('wn-b', """\
+<ConceptRelation relation_type="hypernym" source="cili.a3" target="cili.a1">
+  <Provenance resource="wn-b" version="1.0"/>
+</ConceptRelation>
+"""))
+        first = builder._next_synset_rel_id
+        builder.process_file(back_file)
+        removed = builder.check_and_remove_new_cycles('wn-b', first)
+
+        assert removed >= 1
+        builder.create_indexes()
+        assert builder.detect_cycles() == 0
+
+    def test_cycle_removal_logged_with_chain(self, builder, tmp_path, caplog):
+        """Log message names the resource, the edge, and the existing chain."""
+        import logging
+        chain_file = tmp_path / 'wn-chain.xml'
+        chain_file.write_text(wn_xml('wn-a', _CHAIN_BODY))
+        builder.process_file(chain_file)
+
+        back_file = tmp_path / 'wn-back.xml'
+        back_file.write_text(wn_xml('wn-b', """\
+<ConceptRelation relation_type="hypernym" source="cili.a3" target="cili.a1">
+  <Provenance resource="wn-b" version="1.0"/>
+</ConceptRelation>
+"""))
+        first = builder._next_synset_rel_id
+        builder.process_file(back_file)
+        with caplog.at_level(logging.WARNING, logger='synthesise'):
+            builder.check_and_remove_new_cycles('wn-b', first)
+
+        assert 'wn-b' in caplog.text
+        assert 'hypernym' in caplog.text
+        assert 'existing chain' in caplog.text
