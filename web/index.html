@@ -555,6 +555,7 @@
             const [allLanguages, setAllLanguages] = useState([]);
             const [allResources, setAllResources] = useState([]);
             const [dbStats, setDbStats] = useState(null);
+            const [wnSort, setWnSort] = useState({ col: null, asc: true });
             const [provenanceReady, setProvenanceReady] = useState(false);
             const [provLoading, setProvLoading] = useState(false);
             const [provError, setProvError] = useState(null);
@@ -2429,7 +2430,6 @@
                                 if (url === 'wordnet') return 'WordNet';
                                 return url;
                             };
-                            const [wnSort, setWnSort] = React.useState({ col: null, asc: true });
                             const sortResources = (col) => setWnSort(s => ({ col, asc: s.col === col ? !s.asc : true }));
                             const sortedResources = React.useMemo(() => {
                                 if (!wnSort.col) return allResources;
