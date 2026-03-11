@@ -1,0 +1,99 @@
+# Wordnets to include in Cygnet.
+# Keys are BCP 47 / ISO 639 language codes; values are lists of source archive URLs.
+# To add a language, append an entry here and re-run build.sh.
+
+# English — Open English WordNet
+en = ["https://en-word.net/static/english-wordnet-2025.xml.gz"]
+
+# Arabic — OMW Arabic
+arb = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-arb-2.0.tar.xz"]
+
+# Bulgarian — OMW Bulgarian
+bg = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-bg-2.0.tar.xz"]
+
+# Catalan — OMW Catalan
+ca = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-ca-2.0.tar.xz"]
+
+# Chinese (Mandarin) — OMW Chinese
+cmn = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-cmn-2.0.tar.xz"]
+
+# Danish — OMW Danish
+da = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-da-2.0.tar.xz"]
+
+# German — OdeNet
+de = ["https://github.com/hdaSprachtechnologie/odenet/releases/download/v1.4/odenet-1.4.tar.xz"]
+
+# Greek — OMW Greek
+el = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-el-2.0.tar.xz"]
+
+# Spanish — OMW Spanish
+es = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-es-2.0.tar.xz"]
+
+# Basque — OMW Basque
+eu = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-eu-2.0.tar.xz"]
+
+# Finnish — OMW Finnish
+fi = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-fi-2.0.tar.xz"]
+
+# French — OMW French
+fr = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-fr-2.0.tar.xz"]
+
+# Galician — OMW Galician
+gl = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-gl-2.0.tar.xz"]
+
+# Hebrew — OMW Hebrew
+he = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-he-2.0.tar.xz"]
+
+# Croatian — OMW Croatian
+hr = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-hr-2.0.tar.xz"]
+
+# Icelandic — OMW Icelandic
+is = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-is-2.0.tar.xz"]
+
+# Italian — OMW Italian + Italian WordNet (IWN)
+it = [
+    "https://github.com/omwn/omw-data/releases/download/v2.0/omw-it-2.0.tar.xz",
+    "https://github.com/omwn/omw-data/releases/download/v2.0/omw-iwn-2.0.tar.xz",
+]
+
+# Kurdish (Kurmanji) — KurdNet
+kmr = ["https://github.com/sinaahmadi/kurdnet/releases/download/kurdnet-1.0.tar.xz/kurdnet-1.0.tar.xz"]
+
+# Lithuanian — OMW Lithuanian
+lt = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-lt-2.0.tar.xz"]
+
+# Norwegian Bokmål — OMW Norwegian Bokmål
+nb = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-nb-2.0.tar.xz"]
+
+# Dutch — OMW Dutch
+nl = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-nl-2.0.tar.xz"]
+
+# Norwegian Nynorsk — OMW Norwegian Nynorsk
+nn = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-nn-2.0.tar.xz"]
+
+# Polish — OMW Polish
+pl = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-pl-2.0.tar.xz"]
+
+# Portuguese — OMW Portuguese + OpenWordNet-PT
+pt = [
+    "https://github.com/omwn/omw-data/releases/download/v2.0/omw-pt-2.0.tar.xz",
+    "https://github.com/own-pt/openWordnet-PT/releases/download/v1.0.0/own-pt.tar.gz",
+]
+
+# Romanian — OMW Romanian
+ro = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-ro-2.0.tar.xz"]
+
+# Slovak — OMW Slovak
+sk = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-sk-2.0.tar.xz"]
+
+# Slovenian — OMW Slovenian
+sl = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-sl-2.0.tar.xz"]
+
+# Albanian — OMW Albanian
+sq = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-sq-2.0.tar.xz"]
+
+# Swedish — OMW Swedish
+sv = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-sv-2.0.tar.xz"]
+
+# Thai — OMW Thai
+th = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-th-2.0.tar.xz"]

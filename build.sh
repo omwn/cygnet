@@ -2,8 +2,8 @@
 #
 # build.sh - Download wordnets and build Cygnet
 #
-# Downloads OEWN, OMW, OdeNet, Portuguese WN (own-pt), and KurdNet,
-# then runs the full Cygnet build pipeline.
+# Downloads wordnets listed in wordnets.toml, then runs the full Cygnet
+# build pipeline.  To add or remove a language, edit wordnets.toml.
 #
 # Prerequisites: uv, curl, tar, xz
 #
@@ -20,11 +20,6 @@
 set -euo pipefail
 
 # --- Configuration ---
-OEWN_URL="https://en-word.net/static/english-wordnet-2025.xml.gz"
-OMW_URL="https://github.com/omwn/omw-data/releases/download/v2.0/omw-2.0.tar.xz"
-ODENET_URL="https://github.com/hdaSprachtechnologie/odenet/releases/download/v1.4/odenet-1.4.tar.xz"
-OWNPT_URL="https://github.com/own-pt/openWordnet-PT/releases/download/v1.0.0/own-pt.tar.gz"
-KURDNET_URL="https://github.com/sinaahmadi/kurdnet/releases/download/kurdnet-1.0.tar.xz/kurdnet-1.0.tar.xz"
 CILI_DEFS_URL="https://github.com/globalwordnet/cili/releases/download/v1.0/cili.tsv.xz"
 CILI_PWN_MAP_URL="https://raw.githubusercontent.com/globalwordnet/cili/master/ili-map-pwn30.tab"
 
@@ -60,7 +55,7 @@ cd "$PROJECT_DIR"
 
 mkdir -p bin/raw_wns bin/cygnets_presynth website_data
 
-# Download a standalone wordnet archive and extract its XML into bin/raw_wns/
+# Download a wordnet archive and extract its XML files into bin/raw_wns/ (flat).
 download_standalone() {
     local name="$1" url="$2"
     echo "  Downloading $name..."
@@ -70,8 +65,31 @@ download_standalone() {
     tar xf "$tmpdir/archive" -C "$tmpdir/"
     # Copy all wordnet XML files (plain, gzipped, or xz-compressed)
     find "$tmpdir" \( -name '*.xml' -o -name '*.xml.gz' -o -name '*.xml.xz' \) \
-        -exec cp -n {} bin/raw_wns/ \;
+        -exec cp --update=none {} bin/raw_wns/ \;
     rm -rf "$tmpdir"
+}
+
+# Parse wordnets.toml and emit "stem<TAB>url" lines (no tomllib dependency needed).
+get_wordnet_urls() {
+    python3 << 'PYEOF'
+import re, sys
+
+content = open("wordnets.toml").read()
+
+def stem(url):
+    name = url.rstrip("/").split("/")[-1]
+    for ext in [".tar.xz", ".tar.gz", ".tar.bz2", ".xz", ".gz"]:
+        if name.endswith(ext):
+            name = name[:-len(ext)]
+            break
+    if name.endswith(".xml"):
+        name = name[:-4]
+    return re.sub(r"-\d[\d.]*$", "", name)
+
+for m in re.finditer(r"^\s*[\w-]+\s*=\s*(\[.*?\])", content, re.MULTILINE | re.DOTALL):
+    for url in re.findall(r'"([^"]*)"', m.group(1)):
+        print(stem(url) + "\t" + url)
+PYEOF
 }
 
 # ============================================================
@@ -113,45 +131,28 @@ with open('bin/cili_defs.tsv') as fin, open('bin/cili.tsv', 'w', newline='') as 
         echo "  CILI already present, skipping."
     fi
 
-    # OEWN (Open English WordNet)
-    if ! ls bin/raw_wns/english-wordnet-*.xml.gz &>/dev/null; then
-        echo "  Downloading OEWN..."
-        curl -fSL -o bin/raw_wns/english-wordnet-2025.xml.gz "$OEWN_URL"
-    else
-        echo "  OEWN already present, skipping."
-    fi
-
-    # OMW (Open Multilingual Wordnet)
-    if ! ls -d bin/raw_wns/omw-* &>/dev/null; then
-        echo "  Downloading OMW..."
-        tmpdir=$(mktemp -d)
-        curl -fSL -o "$tmpdir/omw.tar.xz" "$OMW_URL"
-        tar xf "$tmpdir/omw.tar.xz" -C bin/raw_wns/
-        rm -rf "$tmpdir"
-    else
-        echo "  OMW already present, skipping."
-    fi
-
-    # OdeNet (German)
-    if ! ls bin/raw_wns/odenet* &>/dev/null; then
-        download_standalone "OdeNet" "$ODENET_URL"
-    else
-        echo "  OdeNet already present, skipping."
-    fi
-
-    # Portuguese WordNet (own-pt)
-    if ! ls bin/raw_wns/own-pt* &>/dev/null; then
-        download_standalone "Portuguese WN (own-pt)" "$OWNPT_URL"
-    else
-        echo "  Portuguese WN already present, skipping."
-    fi
-
-    # KurdNet (Kurdish)
-    if ! ls bin/raw_wns/kurdnet* &>/dev/null; then
-        download_standalone "KurdNet" "$KURDNET_URL"
-    else
-        echo "  KurdNet already present, skipping."
-    fi
+    # Wordnets (from wordnets.toml)
+    echo "  Downloading wordnets from wordnets.toml..."
+    while IFS=$'\t' read -r stem url; do
+        if [[ "$url" == *.xml.gz ]] || [[ "$url" == *.xml.xz ]] || [[ "$url" == *.xml ]]; then
+            # Direct XML (possibly compressed) — download straight to bin/raw_wns/
+            fname="bin/raw_wns/$(basename "$url")"
+            if [ ! -f "$fname" ]; then
+                echo "  Downloading $(basename "$url")..."
+                curl -fSL -o "$fname" "$url"
+            else
+                echo "  $(basename "$url") already present, skipping."
+            fi
+        else
+            # Archive — extract and copy XMLs flat into bin/raw_wns/
+            if ! compgen -G "bin/raw_wns/${stem}*.xml" > /dev/null 2>&1 && \
+               ! compgen -G "bin/raw_wns/*/${stem}*/*.xml" > /dev/null 2>&1; then
+                download_standalone "$stem" "$url"
+            else
+                echo "  $stem already present, skipping."
+            fi
+        fi
+    done < <(get_wordnet_urls)
 
     echo "  Downloads complete."
     echo
