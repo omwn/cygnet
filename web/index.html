@@ -28,37 +28,22 @@
             'antonym': 'ant', 'derivation': 'der', 'derivation_of': '-der',
             'pertainym': 'ptr', 'pertainym_of': '-ptr',
             'participle': 'prt', 'participle_of': '-prt',
-            'class_hypernym': 'hyp', 'class_hyponym': '-hyp',
+            'hypernym': 'hyp', 'hyponym': '-hyp',
             'instance_hypernym': 'ihyp', 'instance_hyponym': '-ihyp',
-            'member_meronym': 'mmer', 'member_holonym': '-mmer',
-            'part_meronym': 'pmer', 'part_holonym': '-pmer',
-            'substance_meronym': 'smer', 'substance_holonym': '-smer',
+            'mero_member': 'mmer', 'holo_member': '-mmer',
+            'mero_part': 'pmer', 'holo_part': '-pmer',
+            'mero_substance': 'smer', 'holo_substance': '-smer',
             'opposite': 'opp',
-            'causes': 'cau', 'caused_by': '-cau',
-            'entails': 'ent', 'entailed_by': '-ent',
-            'agent_of_action': 'aga', 'action_of_agent': '-aga',
-            'patient_of_action': 'paa', 'action_of_patient': '-paa',
-            'result_of_action': 'rea', 'action_of_result': '-rea',
-            'instrument_of_agent': 'iag', 'agent_of_instrument': '-iag',
-            'instrument_of_action': 'iac', 'action_of_instrument': '-iac',
-            'result_of_agent': 'rag', 'agent_of_result': '-rag',
-            'patient_of_agent': 'pag', 'agent_of_patient': '-pag',
-            'instrument_of_patient': 'ipa', 'patient_of_instrument': '-ipa',
-            'instrument_of_result': 'ire', 'result_of_instrument': '-ire',
-            'patient_of_result': 'pre', 'result_of_patient': '-pre',
+            'causes': 'cau', 'is_caused_by': '-cau',
+            'entails': 'ent', 'is_entailed_by': '-ent',
         };
 
         const relationNames = {
             'ant': 'antonym', 'der': 'derivation', 'ptr': 'pertainym',
             'prt': 'participle', 'syn': 'synonym',
-            'hyp': 'class hypernym', 'ihyp': 'instance hypernym',
+            'hyp': 'hypernym', 'ihyp': 'instance hypernym',
             'mmer': 'member meronym', 'pmer': 'part meronym', 'smer': 'substance meronym',
             'opp': 'opposite', 'cau': 'causes', 'ent': 'entails',
-            'aga': 'agent of action', 'paa': 'patient of action', 'rea': 'result of action',
-            'iag': 'instrument of agent', 'iac': 'instrument of action',
-            'rag': 'result of agent', 'pag': 'patient of agent',
-            'ipa': 'instrument of patient', 'ire': 'instrument of result',
-            'pre': 'patient of result'
         };
 
         const relationColors = {
@@ -67,9 +52,6 @@
             'hyp': '#3b82f6', 'ihyp': '#6366f1',
             'mmer': '#8b5cf6', 'pmer': '#a855f7', 'smer': '#d946ef',
             'opp': '#ec4899', 'cau': '#f43f5e', 'ent': '#14b8a6',
-            'aga': '#84cc16', 'paa': '#22c55e', 'rea': '#eab308',
-            'iag': '#f97316', 'iac': '#dc2626', 'rag': '#059669',
-            'pag': '#0891b2', 'ipa': '#4f46e5', 'ire': '#7c3aed', 'pre': '#9333ea'
         };
 
         const posToHumanReadable = {
@@ -1362,7 +1344,7 @@
                     const addNode = (id) => {
                         if (nodesMap.has(id)) return;
                         const concept = loadedConcepts[id] || loadConcept(id);
-                        const pos = getPosName(concept?.oc || '', true);
+                        const pos = getPosName(concept?.oc || '');
                         const lblInfo = getConceptLabel(parseInt(id), definitionLanguage);
                         const labelBase = lblInfo?.form || concept?.d?.[definitionLanguage] || concept?.d?.en || '';
                         const labelActualLang = lblInfo?.lang;
@@ -1516,14 +1498,13 @@
                                 })
                                 .each(function(d) {
                                     const nodeGroup = d3.select(this);
-                                    const label = `${d.pos} ${d.label}`;
                                     const maxWidth = d.isCenter ? 250 : 200;
                                     const avgCharWidth = 7;
                                     const maxCharsPerLine = Math.floor(maxWidth / avgCharWidth);
-                                    const words = label.split(' ');
+                                    const labelWords = d.label.split(' ');
                                     const lines = [];
                                     let currentLine = '';
-                                    words.forEach(word => {
+                                    labelWords.forEach(word => {
                                         if (currentLine.length + word.length + 1 <= maxCharsPerLine) {
                                             currentLine += (currentLine ? ' ' : '') + word;
                                         } else {
@@ -1532,19 +1513,18 @@
                                         }
                                     });
                                     if (currentLine) lines.push(currentLine);
+                                    if (lines.length === 0) lines.push('');
 
                                     const padding = 12;
                                     const lineHeight = d.isCenter ? 18 : 17;
                                     const posWidth = d.pos.length * avgCharWidth;
                                     const posGap = 12;
 
-                                    let actualMaxWidth = posWidth + posGap;
-                                    lines.forEach((line, idx) => {
-                                        const lw = idx === 0
-                                            ? posWidth + posGap + (line.length - d.pos.length) * avgCharWidth
-                                            : line.length * avgCharWidth;
-                                        actualMaxWidth = Math.max(actualMaxWidth, lw);
-                                    });
+                                    const line0LabelWidth = lines[0].length * avgCharWidth;
+                                    let actualMaxWidth = line0LabelWidth + posGap + posWidth;
+                                    for (let i = 1; i < lines.length; i++) {
+                                        actualMaxWidth = Math.max(actualMaxWidth, lines[i].length * avgCharWidth);
+                                    }
 
                                     const boxWidth = Math.min(actualMaxWidth + padding * 2, maxWidth + padding * 2);
                                     const boxHeight = lines.length * lineHeight + padding * 2;
@@ -1559,15 +1539,12 @@
                                     textGroup.append('text')
                                         .attr('x', 0).attr('y', firstLineY)
                                         .attr('font-size', d.isCenter ? 15 : 14)
+                                        .text(lines[0]);
+                                    textGroup.append('text')
+                                        .attr('x', line0LabelWidth + posGap).attr('y', firstLineY)
+                                        .attr('font-size', d.isCenter ? 15 : 14)
                                         .attr('font-style', 'italic')
                                         .text(d.pos);
-
-                                    if (lines.length > 0) {
-                                        textGroup.append('text')
-                                            .attr('x', posWidth + posGap).attr('y', firstLineY)
-                                            .attr('font-size', d.isCenter ? 15 : 14)
-                                            .text(lines[0].substring(d.pos.length).trim());
-                                    }
                                     for (let i = 1; i < lines.length; i++) {
                                         textGroup.append('text')
                                             .attr('x', 0).attr('y', firstLineY + i * lineHeight)
@@ -2014,12 +1991,15 @@
                                     const mainDefIsFallback = shownLang && shownLang !== definitionLanguage;
                                     const altDefs = concept.d ? Object.entries(concept.d).filter(([l]) => l !== shownLang) : [];
 
+                                    const conceptLabelInfo = getConceptLabel(parseInt(selectedConcept), definitionLanguage);
+                                    const conceptLabel = conceptLabelInfo?.form || '';
+
                                     return (
                                         <div>
                                             <button onClick={handleBackToSearch} className="mb-4 text-blue-600 hover:underline">← Back to search</button>
                                             <div className="mb-4">
                                                 <p className="text-base">
-                                                    <span className="text-gray-600 italic">{getPosName(concept.oc)}.</span>{' '}
+                                                    {conceptLabel && <><span className="font-medium">{conceptLabel}</span>{' \u2014 '}</>}<span className="text-gray-600 italic">{getPosName(concept.oc)}.</span>{' '}
                                                     {concept.da ? renderDefinitionWithLinks(mainDef, concept.da) : mainDef}
                                                     {mainDefIsFallback && <span className="text-xs text-gray-400 ml-1">[{shownLang}]</span>}
                                                     {concept.dr?.[shownLang] && renderProvenance('definitions', concept.dr[shownLang])}
