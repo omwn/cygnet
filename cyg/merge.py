@@ -117,6 +117,10 @@ CREATE TABLE resources (
     synset_count     INTEGER,
     sense_count      INTEGER
 );
+CREATE TABLE arasaac (
+    synset_rowid INTEGER NOT NULL REFERENCES synsets(rowid),
+    arasaac_id   INTEGER NOT NULL
+);
 """
 
 PROV_SCHEMA = """
@@ -148,6 +152,7 @@ CREATE INDEX idx_synset_relations_source   ON synset_relations(source_rowid);
 CREATE INDEX idx_sense_relations_source    ON sense_relations(source_rowid);
 CREATE INDEX idx_sense_examples_sense      ON sense_examples(sense_rowid);
 CREATE INDEX idx_example_annotations_example ON example_annotations(example_rowid);
+CREATE INDEX idx_arasaac_synset ON arasaac(synset_rowid);
 """
 
 IMPLICIT_RESOURCES = {

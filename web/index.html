@@ -326,6 +326,12 @@
                 rid: rel.rid
             }));
 
+            // Get ARASAAC pictogram IDs
+            const arasaacRows = cachedExec(`
+                SELECT arasaac_id FROM arasaac WHERE synset_rowid = ?
+            `, [synsetRowid]);
+            const ara = arasaacRows.length > 0 ? arasaacRows.map(a => a.arasaac_id) : undefined;
+
             return {
                 oc: r.pos,
                 ili: r.ili,
@@ -333,7 +339,8 @@
                 dr: Object.keys(dr).length > 0 ? dr : undefined,
                 da,
                 s: Object.keys(s).length > 0 ? s : undefined,
-                cr: cr.length > 0 ? cr : undefined
+                cr: cr.length > 0 ? cr : undefined,
+                ara
             };
         }
 
@@ -2015,6 +2022,21 @@
                                                         </p>
                                                     );
                                                 })()}
+                                                {concept.ara && (
+                                                    <div className="mt-3 flex flex-wrap gap-2 items-end">
+                                                        {concept.ara.map(id => (
+                                                            <a key={id} href={`https://arasaac.org/pictograms/${id}`} target="_blank" rel="noopener noreferrer" title={`ARASAAC pictogram ${id}`}>
+                                                                <img
+                                                                    src={`https://static.arasaac.org/pictograms/${id}/${id}_300.png`}
+                                                                    alt={conceptLabel || concept.ili || ''}
+                                                                    className="h-24 w-24 object-contain rounded border border-gray-200 bg-white"
+                                                                    onError={e => { e.target.style.display = 'none'; }}
+                                                                />
+                                                            </a>
+                                                        ))}
+                                                        <span className="text-xs text-gray-400 self-end">Pictograms by <a href="https://arasaac.org" target="_blank" rel="noopener noreferrer" className="underline">ARASAAC</a>, CC BY-NC-SA 4.0</span>
+                                                    </div>
+                                                )}
                                             </div>
 
                                             {(relationsMap && hasRelationsToDisplay) && (() => {

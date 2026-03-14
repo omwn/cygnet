@@ -142,6 +142,17 @@ def build_test_db(db_path: Path, prov_path: Path,
     b.remove_orphans()
     b.compute_sense_indices()
     b.insert_resources()
+
+    # Insert a known ARASAAC pictogram ID for the dog synset (cili.i3 → id 2253)
+    # so UI tests can verify pictogram rendering.
+    dog_row = b.cur.execute("SELECT rowid FROM synsets WHERE ili = 'i3'").fetchone()
+    if dog_row:
+        b.cur.execute(
+            "INSERT INTO arasaac (synset_rowid, arasaac_id) VALUES (?, ?)",
+            (dog_row[0], 2253),
+        )
+        b.conn.commit()
+
     b.finalize(db_path, prov_path)
 
 

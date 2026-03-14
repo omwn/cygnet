@@ -7,6 +7,9 @@
 #
 # Prerequisites: uv, curl, tar, xz
 #
+# Optional data files (place in bin/ before building):
+#   bin/araasac-ili.json  ARASAAC pictogram ILI mapping (from chainnet-viz)
+#
 # Optional flags:
 #   --with-glosstag    Add Princeton GlossTag sense annotations to definitions
 #                      (requires WordNet 3.0 GlossTag corpus in bin/WordNet-3.0/)
@@ -215,6 +218,10 @@ if $DO_BUILD; then
 
     echo "=== Step 9: Populate language names ==="
     uv run python conversion_scripts/9_lang_codes.py
+    echo
+
+    echo "=== Step 11: Add ARASAAC pictogram IDs ==="
+    uv run python conversion_scripts/11_add_arasaac.py
     echo
 
     if $WITH_XML; then
