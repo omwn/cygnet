@@ -382,7 +382,10 @@ class WordNetToCygnetConverter:
 
         def _download_and_load(name: str):
             logger.info(f"  Downloading spaCy model '{name}'...")
-            version = get_version(name, get_compatibility())
+            try:
+                version = get_version(name, get_compatibility())
+            except Exception as exc:
+                raise OSError(f"No compatible package found for '{name}'") from exc
             wheel_url = (
                 f"https://github.com/explosion/spacy-models/releases/download/"
                 f"{name}-{version}/{name}-{version}-py3-none-any.whl"
