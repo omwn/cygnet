@@ -143,15 +143,17 @@ def build_test_db(db_path: Path, prov_path: Path,
     b.compute_sense_indices()
     b.insert_resources()
 
-    # Insert a known ARASAAC pictogram ID for the dog synset (cili.i3 → id 2253)
-    # so UI tests can verify pictogram rendering.
-    dog_row = b.cur.execute("SELECT rowid FROM synsets WHERE ili = 'i3'").fetchone()
-    if dog_row:
-        b.cur.execute(
-            "INSERT INTO arasaac (synset_rowid, arasaac_id) VALUES (?, ?)",
-            (dog_row[0], 2253),
-        )
-        b.conn.commit()
+    # Insert known ARASAAC pictogram IDs for UI tests:
+    #   dog (i3)    → id 2253  (direct image test)
+    #   entity (i1) → id 2254  (hypernym-fallback test: animal has entity as hypernym)
+    for ili, arasaac_id in [('i3', 2253), ('i1', 2254)]:
+        row = b.cur.execute("SELECT rowid FROM synsets WHERE ili = ?", (ili,)).fetchone()
+        if row:
+            b.cur.execute(
+                "INSERT INTO arasaac (synset_rowid, arasaac_id) VALUES (?, ?)",
+                (row[0], arasaac_id),
+            )
+    b.conn.commit()
 
     b.finalize(db_path, prov_path)
 

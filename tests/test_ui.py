@@ -428,3 +428,41 @@ class TestArasaac:
         page_ready.locator('.concept-inner').first.click()
         page_ready.wait_for_selector(_CONCEPT_LOADED, timeout=10_000)
         assert page_ready.locator('img[src*="arasaac.org"]').count() == 0
+
+    def test_direct_image_has_solid_border(self, page_ready: Page):
+        """Dog has a direct pictogram — its image must not have a dashed border."""
+        _search(page_ready, 'dog')
+        page_ready.locator('.concept-inner').first.click()
+        page_ready.wait_for_selector(_CONCEPT_LOADED, timeout=10_000)
+        img = page_ready.locator('img[src*="arasaac.org"]').first
+        expect(img).to_be_visible()
+        # dashed border class is only present on hypernym fallback images
+        classes = img.get_attribute('class') or ''
+        assert 'border-dashed' not in classes
+
+    def test_hypernym_fallback_image_has_dashed_border(self, page_ready: Page):
+        """Animal has no direct pictogram but entity (its hypernym) does.
+
+        The fallback image should be visible and have a dashed border.
+        """
+        _search(page_ready, 'animal')
+        page_ready.locator('.concept-inner').first.click()
+        page_ready.wait_for_selector(_CONCEPT_LOADED, timeout=10_000)
+        img = page_ready.locator('img[src*="arasaac.org"]').first
+        expect(img).to_be_visible()
+        classes = img.get_attribute('class') or ''
+        assert 'border-dashed' in classes
+
+    def test_about_tab_mentions_arasaac(self, page_ready: Page):
+        """The About tab contains an ARASAAC attribution link."""
+        page_ready.locator('button', has_text='About').click()
+        expect(
+            page_ready.locator('a[href*="arasaac.org"]')
+        ).to_be_visible(timeout=5_000)
+
+    def test_about_tab_explains_dashed_border(self, page_ready: Page):
+        """The About tab explains that dashed borders indicate hypernym images."""
+        page_ready.locator('button', has_text='About').click()
+        expect(
+            page_ready.locator('text=dashed border')
+        ).to_be_visible(timeout=5_000)
