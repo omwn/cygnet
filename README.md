@@ -196,6 +196,16 @@ Or go to *Actions → Build and release databases → Run workflow* in the GitHu
 Tests are not run during a release build; they run separately via
 `.github/workflows/tests.yml`.
 
+### GitHub Pages
+
+The web interface is automatically deployed to GitHub Pages when a release is
+published. Forks that mirror the site need to trigger the Pages workflow
+manually after each upstream release:
+
+```bash
+gh workflow run pages.yml
+```
+
 ---
 
 ## Contributing
