@@ -384,15 +384,15 @@ class WordNetToCygnetConverter:
             logger.info(f"  Downloading spaCy model '{name}'...")
             try:
                 version = get_version(name, get_compatibility())
+                wheel_url = (
+                    f"https://github.com/explosion/spacy-models/releases/download/"
+                    f"{name}-{version}/{name}-{version}-py3-none-any.whl"
+                )
+                runner = ['uv', 'pip'] if shutil.which('uv') else [sys.executable, '-m', 'pip']
+                subprocess.run([*runner, 'install', wheel_url], check=True)
+                return spacy.load(name, disable=disable)
             except Exception as exc:
-                raise OSError(f"No compatible package found for '{name}'") from exc
-            wheel_url = (
-                f"https://github.com/explosion/spacy-models/releases/download/"
-                f"{name}-{version}/{name}-{version}-py3-none-any.whl"
-            )
-            runner = ['uv', 'pip'] if shutil.which('uv') else [sys.executable, '-m', 'pip']
-            subprocess.run([*runner, 'install', wheel_url], check=True)
-            return spacy.load(name, disable=disable)
+                raise OSError(f"Could not download/load '{name}'") from exc
 
         # Prefer installed candidates; fall back to downloading the first one.
         ordered = [m for m in candidates if m in installed] + \
