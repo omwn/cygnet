@@ -3,11 +3,11 @@ name: Build and release databases
 on:
   push:
     tags:
-      - 'v*'
+      - '[0-9]*'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag (e.g. v2025.1)'
+        description: 'Release tag (e.g. 2026.03.14)'
         required: true
         type: string
 
