@@ -1,8 +1,6 @@
 """Shared pytest fixtures and test-data helpers for the Cygnet test suite."""
 
-import importlib.util
 import shutil
-import sys
 import textwrap
 import threading
 from http.server import HTTPServer, SimpleHTTPRequestHandler
@@ -10,17 +8,9 @@ from pathlib import Path
 
 import pytest
 
-_WORDNETS_DIR = Path(__file__).parent / 'wordnets'
+from cyg.merge import MergeBuilder
 
-# ---------------------------------------------------------------------------
-# Load MergeBuilder from the conversion script
-# ---------------------------------------------------------------------------
-_script = Path(__file__).parent.parent / 'conversion_scripts' / '6_synthesise.py'
-_spec = importlib.util.spec_from_file_location('synthesise', _script)
-_mod = importlib.util.module_from_spec(_spec)
-sys.modules['synthesise'] = _mod
-_spec.loader.exec_module(_mod)
-MergeBuilder = _mod.MergeBuilder
+_WORDNETS_DIR = Path(__file__).parent / 'wordnets'
 
 
 # ---------------------------------------------------------------------------

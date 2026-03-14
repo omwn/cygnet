@@ -7,8 +7,7 @@ import xml.etree.ElementTree as ET
 from collections import defaultdict
 from nltk.corpus import wordnet as wn
 from nltk.corpus.reader import WordNetError
-from typing import List, Tuple
-from simple_colors import *
+from simple_colors import green
 
 assert wn.get_version() == '3.0'
 
@@ -423,44 +422,6 @@ def main():
                         print(f'Definition assigned: {sentence_object.to_string()}')
                     assert synset not in definitions.keys()
                     definitions[synset] = sentence_object
-                # else:
-                #     assert code == 'Example'
-                #     synsets = {wn.lemma_from_key(sense).synset().name() for (start, end, sense) in sentence_stripped}
-                #     if synset not in synsets:
-                #         success = False
-                #         # Attempt to find it automatically
-                #         for synonym, sense_key in sorted(synonyms_additional, key=lambda x: len(x[0]), reverse=True):  # Go in reverse length order so that nested synonyms hit longest first
-                #             if synonym.lower() in raw_text.lower():
-                #                 start_index = raw_text.lower().find(synonym.lower())
-                #                 end_index = start_index + len(synonym)
-                #
-                #                 # Expand outwards
-                #                 while True:
-                #                     if start_index > 0:
-                #                         if raw_text[start_index-1] in alphabet:
-                #                             start_index -= 1
-                #                         else:
-                #                             break
-                #                     else:
-                #                         break
-                #                 while True:
-                #                     if end_index < len(raw_text)+1:
-                #                         if raw_text[end_index] in alphabet:
-                #                             end_index += 1
-                #                         else:
-                #                             break
-                #                     else:
-                #                         break
-                #
-                #                 sentence_stripped.append((start_index, end_index, sense_key))
-                #                 sentence_object = AnnotatedString(raw_text, sentence_stripped)
-                #                 print(f'Added {synset} ({sense_key}; {synonyms}) annotation to example: {sentence_object.to_string()}')
-                #                 success = True
-                #                 break
-                #         if not success:
-                #             print(f'Synset {synset} ({synonyms}) not found in example: {sentence_object.to_string()}')
-                #
-                #     examples[synset].append(sentence_object)
 
             expected_synonyms = set([lemma.name().replace('_', ' ') for lemma in wn.synset(synset).lemmas()])
             assert synonyms == expected_synonyms, f'Expected {expected_synonyms} but got {synonyms}'

@@ -1,13 +1,9 @@
 # Build outputs
 bin/
+website_data/
 cygnet.xml
 cygnet_log.json
 cygnet_small.xml
-website_data/concepts/
-website_data/senses/
-website_data/prefix_lookups/
-website_data/prefix_map.json
-website_data/lang_codes.json
 web/*.db
 web/*.db.gz
 

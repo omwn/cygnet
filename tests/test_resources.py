@@ -5,28 +5,8 @@ import sqlite3
 
 import pytest
 
+from cyg.merge import SCHEMA
 
-RESOURCES_DDL = """
-CREATE TABLE languages (
-    rowid INTEGER PRIMARY KEY,
-    code TEXT NOT NULL UNIQUE
-);
-
-CREATE TABLE resources (
-    rowid INTEGER PRIMARY KEY,
-    code TEXT NOT NULL,
-    version TEXT,
-    label TEXT,
-    language_rowid INTEGER REFERENCES languages(rowid),
-    url TEXT,
-    citation TEXT,
-    licence TEXT,
-    email TEXT,
-    status TEXT,
-    confidence_score REAL,
-    extra TEXT
-);
-"""
 
 SAMPLE_DATA = [
     # (lang_code, code, version, label, url, citation, licence, extra)
@@ -38,10 +18,10 @@ SAMPLE_DATA = [
 
 @pytest.fixture()
 def db():
-    """In-memory SQLite DB with resources schema and sample rows."""
+    """In-memory SQLite DB with the real Cygnet schema and sample rows."""
     conn = sqlite3.connect(':memory:')
     conn.row_factory = sqlite3.Row
-    conn.executescript(RESOURCES_DDL)
+    conn.executescript(SCHEMA)
 
     lang_rowids = {}
     for row in SAMPLE_DATA:

@@ -53,7 +53,7 @@ done
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_DIR"
 
-mkdir -p bin/raw_wns bin/cygnets_presynth website_data
+mkdir -p bin/raw_wns bin/cygnets_presynth
 
 # Download a wordnet archive and extract its XML files into bin/raw_wns/ (flat).
 download_standalone() {

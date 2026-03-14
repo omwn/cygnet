@@ -122,10 +122,14 @@ def batch_convert(cili_file, toml_path, raw_wns_dir="raw_wns", output_dir="cygne
             lexicon_id = converter.lexicon_id
             lexicon_version = converter.lexicon_version
 
-            if i == 1:
-                assert lexicon_id == "oewn"
-            else:
-                assert lexicon_id != "oewn"
+            if i == 1 and lexicon_id != "oewn":
+                raise ValueError(
+                    f"Expected OEWN first, got '{lexicon_id}' from {xml_file.name}"
+                )
+            if i != 1 and lexicon_id == "oewn":
+                raise ValueError(
+                    f"OEWN appeared at position {i}, expected position 1"
+                )
 
             if lexicon_id is None or lexicon_version is None:
                 print(f"  Skipping {xml_file.name} (could not read metadata)")
