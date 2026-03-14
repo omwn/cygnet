@@ -408,19 +408,12 @@ class TestArasaac:
         expect(img).to_be_visible()
 
     def test_arasaac_image_links_to_arasaac(self, page_ready: Page):
-        """ARASAAC pictogram links to the arasaac.org page for that pictogram."""
+        """ARASAAC pictogram links to the arasaac.org /en/pictograms/ page."""
         _search(page_ready, 'dog')
         page_ready.locator('.concept-inner').first.click()
         page_ready.wait_for_selector(_CONCEPT_LOADED, timeout=10_000)
-        link = page_ready.locator('a[href*="arasaac.org/pictograms"]').first
+        link = page_ready.locator('a[href*="arasaac.org/en/pictograms"]').first
         expect(link).to_be_visible()
-
-    def test_arasaac_attribution_shown(self, page_ready: Page):
-        """Concept view with a pictogram shows ARASAAC attribution text."""
-        _search(page_ready, 'dog')
-        page_ready.locator('.concept-inner').first.click()
-        page_ready.wait_for_selector(_CONCEPT_LOADED, timeout=10_000)
-        expect(page_ready.locator('text=ARASAAC')).to_be_visible()
 
     def test_no_arasaac_image_for_brightness(self, page_ready: Page):
         """Concept view for a word without a pictogram shows no ARASAAC image."""

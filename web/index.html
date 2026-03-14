@@ -2004,24 +2004,29 @@
                                     return (
                                         <div>
                                             <button onClick={handleBackToSearch} className="mb-4 text-blue-600 hover:underline">← Back to search</button>
-                                            <div className="mb-4">
-                                                <p className="text-base">
-                                                    {conceptLabel && <><span className="font-medium">{conceptLabel}</span>{' \u2014 '}</>}<span className="text-gray-600 italic">{getPosName(concept.oc)}.</span>{' '}
-                                                    {concept.da ? renderDefinitionWithLinks(mainDef, concept.da) : mainDef}
-                                                    {mainDefIsFallback && <span className="text-xs text-gray-400 ml-1">[{shownLang}]</span>}
-                                                    {concept.dr?.[shownLang] && renderProvenance('definitions', concept.dr[shownLang])}
-                                                    {concept.ili && <span className="text-sm ml-2">⟪{concept.ili}⟫</span>}
-                                                </p>
-                                                {(() => {
-                                                    const enExamples = (concept.s?.en || []).flatMap(sid => loadedSenses[sid.toString()]?.ex || []);
-                                                    return enExamples.length > 0 && (
-                                                        <p className="text-sm italic mt-1">
-                                                            {enExamples.map((ex, ei) => (
-                                                                <span key={ei}>{ei > 0 && '; '}{renderExample(ex)}</span>
-                                                            ))}
-                                                        </p>
-                                                    );
-                                                })()}
+                                            <div className="mb-3 text-sm text-gray-600">
+                                                <span className="font-medium text-gray-700">Language data</span>{' '}from individual wordnets — <button onClick={() => setActiveTab('wordnets')} className="text-blue-600 hover:underline">details here</button>.
+                                            </div>
+                                            <div className="mb-4 flex gap-4 items-start">
+                                                <div className="flex-1">
+                                                    <p className="text-base">
+                                                        {conceptLabel && <><span className="font-medium">{conceptLabel}</span>{' \u2014 '}</>}<span className="text-gray-600 italic">{getPosName(concept.oc)}.</span>{' '}
+                                                        {concept.da ? renderDefinitionWithLinks(mainDef, concept.da) : mainDef}
+                                                        {mainDefIsFallback && <span className="text-xs text-gray-400 ml-1">[{shownLang}]</span>}
+                                                        {concept.dr?.[shownLang] && renderProvenance('definitions', concept.dr[shownLang])}
+                                                        {concept.ili && <span className="text-sm ml-2">⟪{concept.ili}⟫</span>}
+                                                    </p>
+                                                    {(() => {
+                                                        const enExamples = (concept.s?.en || []).flatMap(sid => loadedSenses[sid.toString()]?.ex || []);
+                                                        return enExamples.length > 0 && (
+                                                            <p className="text-sm italic mt-1">
+                                                                {enExamples.map((ex, ei) => (
+                                                                    <span key={ei}>{ei > 0 && '; '}{renderExample(ex)}</span>
+                                                                ))}
+                                                            </p>
+                                                        );
+                                                    })()}
+                                                </div>
                                                 {(() => {
                                                     const directIds = concept.ara;
                                                     // Fallback: find first hypernym with a pictogram
@@ -2039,9 +2044,9 @@
                                                     if (!ids) return null;
                                                     const imgClass = `h-24 w-24 object-contain rounded bg-white ${isIndirect ? 'border-2 border-dashed border-gray-400' : 'border border-gray-200'}`;
                                                     return (
-                                                        <div className="mt-3 flex flex-wrap gap-2 items-end">
+                                                        <div className="flex flex-wrap gap-2 shrink-0">
                                                             {ids.map(id => (
-                                                                <a key={id} href={`https://arasaac.org/pictograms/${id}`} target="_blank" rel="noopener noreferrer" title={`ARASAAC pictogram ${id}${isIndirect ? ' (from hypernym)' : ''}`}>
+                                                                <a key={id} href={`https://arasaac.org/en/pictograms/${id}/`} target="_blank" rel="noopener noreferrer" title={`ARASAAC pictogram ${id}${isIndirect ? ' (from hypernym)' : ''}`}>
                                                                     <img
                                                                         src={`https://static.arasaac.org/pictograms/${id}/${id}_300.png`}
                                                                         alt={conceptLabel || concept.ili || ''}
@@ -2050,7 +2055,6 @@
                                                                     />
                                                                 </a>
                                                             ))}
-                                                            <span className="text-xs text-gray-400 self-end">Pictograms by <a href="https://arasaac.org" target="_blank" rel="noopener noreferrer" className="underline">ARASAAC</a>, CC BY-NC-SA 4.0</span>
                                                         </div>
                                                     );
                                                 })()}

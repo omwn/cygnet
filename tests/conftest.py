@@ -1,6 +1,7 @@
 """Shared pytest fixtures and test-data helpers for the Cygnet test suite."""
 
 import shutil
+import subprocess
 import textwrap
 import threading
 from http.server import HTTPServer, SimpleHTTPRequestHandler
@@ -156,6 +157,8 @@ def build_test_db(db_path: Path, prov_path: Path,
     b.conn.commit()
 
     b.finalize(db_path, prov_path)
+    for path in (db_path, prov_path):
+        subprocess.run(['gzip', '-k', '-9', '-f', str(path)], check=True)
 
 
 @pytest.fixture(scope='session')
