@@ -163,34 +163,24 @@ CONCEPT_RELATIONS_REQUIRING_SAME_CATEGORY = {
     'entails',
 }
 
-# ISO 639-1 language code to spaCy efficient (small) model mapping
-LANGUAGE_TO_SPACY_MODEL = {
-    'ca': 'ca_core_news_sm',      # Catalan
-    'zh': 'zh_core_web_sm',        # Chinese
-    'hr': 'hr_core_news_sm',       # Croatian
-    'da': 'da_core_news_sm',       # Danish
-    'nl': 'nl_core_news_sm',       # Dutch
-    'en': 'en_core_web_sm',        # English
-    'fi': 'fi_core_news_sm',       # Finnish
-    'fr': 'fr_core_news_sm',       # French
-    'de': 'de_core_news_sm',       # German
-    'el': 'el_core_news_sm',       # Greek
-    'it': 'it_core_news_sm',       # Italian
-    'ja': 'ja_core_news_sm',       # Japanese
-    'ko': 'ko_core_news_sm',       # Korean
-    'lt': 'lt_core_news_sm',       # Lithuanian
-    'mk': 'mk_core_news_sm',       # Macedonian
-    'nb': 'nb_core_news_sm',       # Norwegian Bokmål
-    'pl': 'pl_core_news_sm',       # Polish
-    'pt': 'pt_core_news_sm',       # Portuguese
-    'ro': 'ro_core_news_sm',       # Romanian
-    'ru': 'ru_core_news_sm',       # Russian
-    'sl': 'sl_core_news_sm',       # Slovenian
-    'es': 'es_core_news_sm',       # Spanish
-    'sv': 'sv_core_news_sm',       # Swedish
-    'uk': 'uk_core_news_sm',       # Ukrainian
-    'xx': 'xx_sent_ud_sm',         # Multi-language (fallback)
-}
+# Languages where spaCy's primary small model uses the 'web' corpus rather
+# than 'news'.  All other languages follow {lang}_core_news_sm.
+_SPACY_WEB_LANGS = {'en', 'zh'}
+_SPACY_FALLBACK = 'xx_sent_ud_sm'
+
+
+def _spacy_candidates(lang: str) -> list[str]:
+    """Return spaCy model names to try for *lang*, most-preferred first.
+
+    Order: web model (en/zh only) → news model → multilingual fallback.
+    Installed models are tried before downloading anything.
+    """
+    candidates: list[str] = []
+    if lang in _SPACY_WEB_LANGS:
+        candidates.append(f'{lang}_core_web_sm')
+    candidates.append(f'{lang}_core_news_sm')
+    candidates.append(_SPACY_FALLBACK)
+    return candidates
 class WordNetToCygnetConverter:
     """Converts WordNet LMF lexical resources to Cygnet format."""
 
@@ -374,30 +364,69 @@ class WordNetToCygnetConverter:
             pos = 'u'
         return NEW_POS_LABELS[pos]
 
+    def _load_spacy_model(self, candidates: list[str], disable: list[str]):
+        """Load the best available spaCy model from *candidates*.
+
+        Tries installed models first (no download).  For each candidate:
+        - OSError  → model not installed; download then retry once.
+        - ImportError → model's language dependency is missing (e.g. pymorphy3
+          for Russian, sudachipy for Japanese); skip to the next candidate and
+          log a hint about which optional extra to install.
+        Falls back to the multilingual model as the final candidate.
+        """
+        import shutil
+        import subprocess
+        from spacy.cli.download import get_compatibility, get_version
+
+        installed = set(spacy.util.get_installed_models())
+
+        def _download_and_load(name: str):
+            logger.info(f"  Downloading spaCy model '{name}'...")
+            version = get_version(name, get_compatibility())
+            wheel_url = (
+                f"https://github.com/explosion/spacy-models/releases/download/"
+                f"{name}-{version}/{name}-{version}-py3-none-any.whl"
+            )
+            runner = ['uv', 'pip'] if shutil.which('uv') else [sys.executable, '-m', 'pip']
+            subprocess.run([*runner, 'install', wheel_url], check=True)
+            return spacy.load(name, disable=disable)
+
+        # Prefer installed candidates; fall back to downloading the first one.
+        ordered = [m for m in candidates if m in installed] + \
+                  [m for m in candidates if m not in installed]
+
+        for model_name in ordered:
+            logger.info(f"  Loading spaCy model '{model_name}'...")
+            try:
+                nlp = spacy.load(model_name, disable=disable) \
+                      if model_name in installed else _download_and_load(model_name)
+                return nlp
+            except ImportError as exc:
+                logger.warning(
+                    f"  Skipping '{model_name}': missing language dependency "
+                    f"({exc}).  Install the relevant extra, e.g. "
+                    f"`uv pip install \"cygnet[{self.lexicon_language}]\"`."
+                )
+            except OSError:
+                logger.warning(f"  Could not load '{model_name}', trying next candidate.")
+
+        raise RuntimeError(f"No usable spaCy model found for language '{self.lexicon_language}'.")
+
     def _initialize_nlp_tools(self):
         """Initialize spaCy and NLTK tools for example processing."""
         logger.info(f"\nInitializing NLP tools for language '{self.lexicon_language}'...")
 
-        # Load appropriate spaCy model
-        model_name = LANGUAGE_TO_SPACY_MODEL.get(self.lexicon_language, 'xx_sent_ud_sm')
-        logger.info(f"  Loading spaCy model '{model_name}'...")
-        try:
-            self.nlp = spacy.load(model_name, disable=["parser", "ner", "tok2vec"])
-        except OSError:
-            logger.info(f"  Downloading spaCy model '{model_name}'...")
-            import shutil
-            import subprocess
-            from spacy.cli.download import get_compatibility, get_version
-            version = get_version(model_name, get_compatibility())
-            wheel_url = (
-                f"https://github.com/explosion/spacy-models/releases/download/"
-                f"{model_name}-{version}/{model_name}-{version}-py3-none-any.whl"
-            )
-            if shutil.which('uv'):
-                subprocess.run(['uv', 'pip', 'install', wheel_url], check=True)
-            else:
-                subprocess.run([sys.executable, '-m', 'pip', 'install', wheel_url], check=True)
-            self.nlp = spacy.load(model_name, disable=["parser", "ner", "tok2vec"])
+        # Select and load a spaCy model using the candidate priority list.
+        # Keep tok2vec so morphologizer can assign features the lemmatizer needs
+        # (disabling it silently breaks lemmatisation for morphologically rich
+        # languages such as Russian, Slovenian, and Portuguese).
+        #
+        # Some language models require extra pip packages (e.g. pymorphy3 for
+        # Russian, sudachipy for Japanese).  If a candidate raises ImportError
+        # we log a warning and try the next candidate rather than crashing.
+        # Install the relevant extras with e.g. `uv pip install "cygnet[ru]"`.
+        disable = ["parser", "ner"]
+        self.nlp = self._load_spacy_model(_spacy_candidates(self.lexicon_language), disable)
 
         # Initialize NLTK lemmatizer
         logger.info("  Loading NLTK WordNet lemmatizer...")
@@ -524,8 +553,14 @@ class WordNetToCygnetConverter:
         if len(doc) > 0:
             token = doc[0]
 
-            # 1. spaCy lemmatization
-            forms.add(token.lemma_)
+            # 1. spaCy lemmatization.  Some models (e.g. Korean) output
+            # morpheme-split lemmas like "크+다"; add the collapsed form and
+            # the leading stem so that "크+다" and "크+ㄴ" can match via "크".
+            lemma = token.lemma_
+            forms.add(lemma)
+            if '+' in lemma:
+                forms.add(lemma.replace('+', ''))
+                forms.add(lemma.split('+')[0])
 
             # 2. pyinflect - generate various inflections
             if pyinflect is not None:

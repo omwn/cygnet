@@ -540,7 +540,7 @@
         // ========== MAIN COMPONENT ==========
         function DictionaryBrowser() {
             const [dbReady, setDbReady] = useState(false);
-            const [relConfigLoaded, setRelConfigLoaded] = useState(false);
+            const [relConfigLoaded, setRelConfigLoaded] = useState(0);
             const [dbError, setDbError] = useState(null);
             const [dbProgress, setDbProgress] = useState('');
             const [downloadProgress, setDownloadProgress] = useState(null); // {loaded, total} or null
@@ -632,7 +632,7 @@
             useEffect(() => {
                 fetch(DB_BASE + 'relations.json')
                     .then(r => r.json())
-                    .then(cfg => { _relConfig = cfg; _buildRelLookups(); setRelConfigLoaded(true); })
+                    .then(cfg => { _relConfig = cfg; _buildRelLookups(); setRelConfigLoaded(v => v + 1); })
                     .catch(e => console.warn('relations.json fetch failed:', e));
             }, []);
 
@@ -902,6 +902,8 @@
 
             useEffect(() => {
                 localStorage.setItem('definitionLanguage', definitionLanguage);
+                _relLang = definitionLanguage;
+                setRelConfigLoaded(v => v + 1);
             }, [definitionLanguage]);
 
             useEffect(() => {
@@ -2039,7 +2041,8 @@
                                                         {concept.ili && <span className="text-sm ml-2">⟪{concept.ili}⟫</span>}
                                                     </p>
                                                     {(() => {
-                                                        const enExamples = (concept.s?.en || []).flatMap(sid => loadedSenses[sid.toString()]?.ex || []);
+                                                        const exLang = concept.s?.[definitionLanguage] ? definitionLanguage : 'en';
+                                                        const enExamples = (concept.s?.[exLang] || []).flatMap(sid => loadedSenses[sid.toString()]?.ex || []);
                                                         return enExamples.length > 0 && (
                                                             <p className="text-sm italic mt-1">
                                                                 {enExamples.map((ex, ei) => (

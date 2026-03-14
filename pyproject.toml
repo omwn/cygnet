@@ -14,6 +14,18 @@ dependencies = [
 [project.optional-dependencies]
 glosstag = ["simple-colors"]
 translate = ["argostranslate"]
+# Per-language spaCy tokenizer / lemmatizer dependencies.
+# Install with e.g. `uv pip install "cygnet[ja,ru]"`.
+# Korean (ko) also requires the system-level mecab binary and mecab-ko-dic;
+# install via your OS package manager before installing natto-py.
+ja = ["sudachipy", "sudachidict_core"]
+zh = ["jieba"]
+ru = ["pymorphy3"]
+th = ["pythainlp"]
+vi = ["pyvi"]
+ko = ["natto-py"]
+# Convenience group for all Python-installable language extras:
+nlp-languages = ["sudachipy", "sudachidict_core", "jieba", "pymorphy3", "pythainlp", "pyvi", "natto-py"]
 
 [build-system]
 requires = ["hatchling"]

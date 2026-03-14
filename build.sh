@@ -157,6 +157,10 @@ with open('bin/cili_defs.tsv') as fin, open('bin/cili.tsv', 'w', newline='') as 
         fi
     done < <(get_wordnet_urls)
 
+    # ODEnet archive uses 'deWordNet.xml' internally; rename to match stem.
+    [ -f bin/raw_wns/deWordNet.xml ] && [ ! -f bin/raw_wns/odenet.xml ] && \
+        mv bin/raw_wns/deWordNet.xml bin/raw_wns/odenet.xml || true
+
     echo "  Downloads complete."
     echo
 fi
