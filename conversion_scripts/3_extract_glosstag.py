@@ -369,14 +369,13 @@ def main():
             assert len(all_codes) == len(all_sentences)
 
             # Merge consecutive tokens with the same annotation
-            for j in range(len(all_sentences)):
-                sentence = all_sentences[j]
+            for j, sentence in enumerate(all_sentences):
                 found_merge = True
                 while found_merge:
                     found_merge = False
-                    for i in range(len(sentence)-1):
-                        (token_1, sense_1, start_index_1, end_index_1) = sentence[i]
-                        (token_2, sense_2, start_index_2, end_index_2) = sentence[i+1]
+                    for i, ((token_1, sense_1, start_index_1, end_index_1),
+                            (token_2, sense_2, start_index_2, end_index_2)) in enumerate(
+                                zip(sentence, sentence[1:])):
                         if sense_1 is not None and sense_1 == sense_2:
                             if raw_string[end_index_1:start_index_2] in {' ', '-', ''}:
                                 found_merge = True

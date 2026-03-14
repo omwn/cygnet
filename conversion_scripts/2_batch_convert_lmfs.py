@@ -6,10 +6,7 @@ Batch convert GlobalWordNet XML files to Cygnet XML format.
 import re
 from pathlib import Path
 
-try:
-    import tomllib
-except ImportError:
-    import tomli as tomllib  # type: ignore[no-redef]
+import tomllib
 
 from cyg.converters import WordNetToCygnetConverter
 
