@@ -393,3 +393,221 @@ class TestSecurity:
         expect(
             page_ready.locator('text=No results found')
         ).to_be_visible(timeout=_SEARCH_TIMEOUT)
+
+
+_CONCEPT_LOADED = 'text=All forms expressing this concept'
+
+
+class TestArasaac:
+    def test_arasaac_image_shown_for_dog(self, page_ready: Page):
+        """Concept view for dog shows an ARASAAC pictogram image."""
+        _search(page_ready, 'dog')
+        page_ready.locator('.concept-inner').first.click()
+        page_ready.wait_for_selector(_CONCEPT_LOADED, timeout=10_000)
+        img = page_ready.locator('img[src*="arasaac.org"]').first
+        expect(img).to_be_visible()
+
+    def test_arasaac_image_links_to_arasaac(self, page_ready: Page):
+        """ARASAAC pictogram links to the arasaac.org /en/pictograms/ page."""
+        _search(page_ready, 'dog')
+        page_ready.locator('.concept-inner').first.click()
+        page_ready.wait_for_selector(_CONCEPT_LOADED, timeout=10_000)
+        link = page_ready.locator('a[href*="arasaac.org/en/pictograms"]').first
+        expect(link).to_be_visible()
+
+    def test_no_arasaac_image_for_brightness(self, page_ready: Page):
+        """Concept view for a word without a pictogram shows no ARASAAC image."""
+        _search(page_ready, 'brightness')
+        page_ready.locator('.concept-inner').first.click()
+        page_ready.wait_for_selector(_CONCEPT_LOADED, timeout=10_000)
+        assert page_ready.locator('img[src*="arasaac.org"]').count() == 0
+
+    def test_direct_image_has_solid_border(self, page_ready: Page):
+        """Dog has a direct pictogram — its image must not have a dashed border."""
+        _search(page_ready, 'dog')
+        page_ready.locator('.concept-inner').first.click()
+        page_ready.wait_for_selector(_CONCEPT_LOADED, timeout=10_000)
+        img = page_ready.locator('img[src*="arasaac.org"]').first
+        expect(img).to_be_visible()
+        # dashed border class is only present on hypernym fallback images
+        classes = img.get_attribute('class') or ''
+        assert 'border-dashed' not in classes
+
+    def test_hypernym_fallback_image_has_dashed_border(self, page_ready: Page):
+        """Animal has no direct pictogram but entity (its hypernym) does.
+
+        The fallback image should be visible and have a dashed border.
+        """
+        _search(page_ready, 'animal')
+        page_ready.locator('.concept-inner').first.click()
+        page_ready.wait_for_selector(_CONCEPT_LOADED, timeout=10_000)
+        img = page_ready.locator('img[src*="arasaac.org"]').first
+        expect(img).to_be_visible()
+        classes = img.get_attribute('class') or ''
+        assert 'border-dashed' in classes
+
+    def test_about_tab_mentions_arasaac(self, page_ready: Page):
+        """The About tab contains an ARASAAC attribution link."""
+        page_ready.locator('button', has_text='About').click()
+        expect(
+            page_ready.locator('a[href*="arasaac.org"]')
+        ).to_be_visible(timeout=5_000)
+
+    def test_about_tab_explains_dashed_border(self, page_ready: Page):
+        """The About tab explains that dashed borders indicate hypernym images."""
+        page_ready.locator('button', has_text='About').click()
+        expect(
+            page_ready.locator('text=dashed border')
+        ).to_be_visible(timeout=5_000)
+
+
+class TestPublications:
+    def test_publications_tab_shows_main_papers(self, page_ready: Page):
+        """Publications tab lists the Cygnet and OMW papers."""
+        page_ready.locator('button', has_text='Publications').click()
+        expect(page_ready.locator('text=Maudslay')).to_be_visible(timeout=5_000)
+        expect(page_ready.locator('text=Bond').first).to_be_visible()
+
+    def test_publications_tab_shows_wordnet_citations_header(self, page_ready: Page):
+        """Publications tab has a Wordnet Citations section."""
+        page_ready.locator('button', has_text='Publications').click()
+        expect(page_ready.locator('text=Wordnet Citations')).to_be_visible(timeout=5_000)
+
+    def test_publications_tab_shows_disclaimer(self, page_ready: Page):
+        """Publications tab shows the disclaimer about citation source."""
+        page_ready.locator('button', has_text='Publications').click()
+        expect(
+            page_ready.locator('text=Citation data taken from')
+        ).to_be_visible(timeout=5_000)
+
+    def test_publications_tab_renders_wordnet_citation(self, page_ready: Page):
+        """Wordnet citation from fixture is rendered (RST converted to HTML)."""
+        page_ready.locator('button', has_text='Publications').click()
+        page_ready.wait_for_selector('text=Wordnet Citations', timeout=5_000)
+        expect(page_ready.locator('text=Test English WordNet')).to_be_visible()
+
+    def test_publications_tab_rst_link_rendered(self, page_ready: Page):
+        """RST hyperlink in citation is converted to a clickable <a> tag."""
+        page_ready.locator('button', has_text='Publications').click()
+        page_ready.wait_for_selector('text=Wordnet Citations', timeout=5_000)
+        expect(
+            page_ready.locator('a[href="https://github.com/rowanhm/cygnet"]')
+        ).to_be_visible()
+
+    def test_about_tab_citation_section(self, page_ready: Page):
+        """About tab has a Citation section with links to key papers."""
+        page_ready.locator('button', has_text='About').click()
+        expect(page_ready.locator('text=Citation')).to_be_visible(timeout=5_000)
+        expect(page_ready.locator('button', has_text='Maudslay')).to_be_visible()
+        expect(page_ready.locator('button', has_text='Bond & Foster')).to_be_visible()
+
+
+# ---------------------------------------------------------------------------
+# Relation display names (relations.json)
+# ---------------------------------------------------------------------------
+
+class TestRelationNames:
+    def _wait_for_rel_config(self, page: Page) -> None:
+        """Block until relations.json has been fetched and parsed."""
+        page.wait_for_function(
+            "() => Object.keys(window._relTestHook.getConfig()).length > 0",
+            timeout=5_000,
+        )
+
+    def test_english_hypernym_label(self, page_ready: Page):
+        """getRelLabel returns English display name from relations.json."""
+        self._wait_for_rel_config(page_ready)
+        label = page_ready.evaluate(
+            "() => window._relTestHook.getLabel('hypernym')"
+        )
+        assert label == 'class hypernym'
+
+    def test_english_hyponym_label(self, page_ready: Page):
+        """getRelLabel resolves label by short code too."""
+        self._wait_for_rel_config(page_ready)
+        # '-hyp' is the short code for hyponym
+        label = page_ready.evaluate(
+            "() => window._relTestHook.getLabel('-hyp')"
+        )
+        assert label == 'class hyponym'
+
+    def test_japanese_hypernym_label(self, page_ready: Page):
+        """getRelLabel returns Japanese when display language is 'ja'."""
+        self._wait_for_rel_config(page_ready)
+        label = page_ready.evaluate(
+            "() => { window._relTestHook.setLang('ja'); "
+            "return window._relTestHook.getLabel('hypernym'); }"
+        )
+        assert label == '上位語'
+
+    def test_japanese_hyponym_label(self, page_ready: Page):
+        """getRelLabel returns Japanese hyponym label."""
+        self._wait_for_rel_config(page_ready)
+        label = page_ready.evaluate(
+            "() => { window._relTestHook.setLang('ja'); "
+            "return window._relTestHook.getLabel('hyponym'); }"
+        )
+        assert label == '下位語'
+
+
+# ---------------------------------------------------------------------------
+# URL parameters: search_lang and display_lang
+# ---------------------------------------------------------------------------
+
+class TestUrlParams:
+    def _open_settings(self, page: Page) -> None:
+        page.locator('button[title="Settings"]').click()
+        page.wait_for_selector('text=Display results in', timeout=5_000)
+
+    def _display_lang_select(self, page: Page):
+        """Return the 'Display results in' language selector."""
+        return page.locator('label:has-text("Display results in") + select, '
+                            'label:has-text("Display results in") ~ select').first
+
+    def test_display_lang_in_url_after_change(self, page_ready: Page):
+        """Setting display language writes display_lang=xx to the URL hash."""
+        self._open_settings(page_ready)
+        self._display_lang_select(page_ready).select_option('fr')
+        page_ready.wait_for_timeout(300)
+        assert 'display_lang=fr' in page_ready.url
+
+    def test_display_lang_url_restores_on_load(self, page: Page, http_server):
+        """Loading a URL with display_lang=fr restores the display language."""
+        page.goto(http_server + '#/search?q=dog&display_lang=fr')
+        page.wait_for_selector('input[placeholder*="word"]', timeout=_DB_LOAD_TIMEOUT)
+        page.locator('button[title="Settings"]').click()
+        page.wait_for_selector('text=Display results in', timeout=5_000)
+        expect(self._display_lang_select(page)).to_have_value('fr', timeout=3_000)
+
+    def test_search_lang_in_url_after_filter(self, page_ready: Page):
+        """Selecting a language filter writes search_lang=xx to the URL hash."""
+        _search(page_ready, 'dog')
+        self._open_settings(page_ready)
+        page_ready.locator('label').filter(has_text='English').click()
+        page_ready.wait_for_timeout(300)
+        assert 'search_lang=en' in page_ready.url
+
+
+# ---------------------------------------------------------------------------
+# ARASAAC images in search results
+# ---------------------------------------------------------------------------
+
+class TestArasaacInSearch:
+    def test_arasaac_image_shown_in_search_results(self, page_ready: Page):
+        """Search results for 'dog' include a small ARASAAC pictogram."""
+        _search(page_ready, 'dog')
+        page_ready.wait_for_selector('img[src*="arasaac.org"]', timeout=10_000)
+        img = page_ready.locator('img[src*="arasaac.org"]').first
+        expect(img).to_be_visible()
+
+    def test_arasaac_image_in_search_links_to_arasaac(self, page_ready: Page):
+        """The search-result pictogram is wrapped in a link to arasaac.org."""
+        _search(page_ready, 'dog')
+        page_ready.wait_for_selector('a[href*="arasaac.org/en/pictograms"]', timeout=10_000)
+        expect(page_ready.locator('a[href*="arasaac.org/en/pictograms"]').first).to_be_visible()
+
+    def test_no_arasaac_image_for_brightness_in_search(self, page_ready: Page):
+        """Search results for 'brightness' (no ARASAAC data) show no pictogram."""
+        _search(page_ready, 'brightness')
+        page_ready.wait_for_selector('.concept-inner', timeout=_SEARCH_TIMEOUT)
+        expect(page_ready.locator('img[src*="arasaac.org"]')).to_have_count(0)

@@ -186,12 +186,11 @@ def check_overlapping_annotations(annotations):
     overlaps = []
     sorted_annots = sorted(annotations, key=lambda x: x[0])
 
-    for i in range(len(sorted_annots) - 1):
-        start1, end1, _ = sorted_annots[i]
-        start2, end2, _ = sorted_annots[i + 1]
-
+    for a1, a2 in zip(sorted_annots, sorted_annots[1:]):
+        start1, end1, _ = a1
+        start2, end2, _ = a2
         if end1 > start2:
-            overlaps.append((sorted_annots[i], sorted_annots[i + 1]))
+            overlaps.append((a1, a2))
 
     return overlaps
 

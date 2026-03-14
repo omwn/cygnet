@@ -7,8 +7,7 @@ import xml.etree.ElementTree as ET
 from collections import defaultdict
 from nltk.corpus import wordnet as wn
 from nltk.corpus.reader import WordNetError
-from typing import List, Tuple
-from simple_colors import *
+from simple_colors import green
 
 assert wn.get_version() == '3.0'
 
@@ -370,14 +369,13 @@ def main():
             assert len(all_codes) == len(all_sentences)
 
             # Merge consecutive tokens with the same annotation
-            for j in range(len(all_sentences)):
-                sentence = all_sentences[j]
+            for j, sentence in enumerate(all_sentences):
                 found_merge = True
                 while found_merge:
                     found_merge = False
-                    for i in range(len(sentence)-1):
-                        (token_1, sense_1, start_index_1, end_index_1) = sentence[i]
-                        (token_2, sense_2, start_index_2, end_index_2) = sentence[i+1]
+                    for i, ((token_1, sense_1, start_index_1, end_index_1),
+                            (token_2, sense_2, start_index_2, end_index_2)) in enumerate(
+                                zip(sentence, sentence[1:])):
                         if sense_1 is not None and sense_1 == sense_2:
                             if raw_string[end_index_1:start_index_2] in {' ', '-', ''}:
                                 found_merge = True
@@ -423,44 +421,6 @@ def main():
                         print(f'Definition assigned: {sentence_object.to_string()}')
                     assert synset not in definitions.keys()
                     definitions[synset] = sentence_object
-                # else:
-                #     assert code == 'Example'
-                #     synsets = {wn.lemma_from_key(sense).synset().name() for (start, end, sense) in sentence_stripped}
-                #     if synset not in synsets:
-                #         success = False
-                #         # Attempt to find it automatically
-                #         for synonym, sense_key in sorted(synonyms_additional, key=lambda x: len(x[0]), reverse=True):  # Go in reverse length order so that nested synonyms hit longest first
-                #             if synonym.lower() in raw_text.lower():
-                #                 start_index = raw_text.lower().find(synonym.lower())
-                #                 end_index = start_index + len(synonym)
-                #
-                #                 # Expand outwards
-                #                 while True:
-                #                     if start_index > 0:
-                #                         if raw_text[start_index-1] in alphabet:
-                #                             start_index -= 1
-                #                         else:
-                #                             break
-                #                     else:
-                #                         break
-                #                 while True:
-                #                     if end_index < len(raw_text)+1:
-                #                         if raw_text[end_index] in alphabet:
-                #                             end_index += 1
-                #                         else:
-                #                             break
-                #                     else:
-                #                         break
-                #
-                #                 sentence_stripped.append((start_index, end_index, sense_key))
-                #                 sentence_object = AnnotatedString(raw_text, sentence_stripped)
-                #                 print(f'Added {synset} ({sense_key}; {synonyms}) annotation to example: {sentence_object.to_string()}')
-                #                 success = True
-                #                 break
-                #         if not success:
-                #             print(f'Synset {synset} ({synonyms}) not found in example: {sentence_object.to_string()}')
-                #
-                #     examples[synset].append(sentence_object)
 
             expected_synonyms = set([lemma.name().replace('_', ' ') for lemma in wn.synset(synset).lemmas()])
             assert synonyms == expected_synonyms, f'Expected {expected_synonyms} but got {synonyms}'

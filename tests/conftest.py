@@ -1,8 +1,7 @@
 """Shared pytest fixtures and test-data helpers for the Cygnet test suite."""
 
-import importlib.util
 import shutil
-import sys
+import subprocess
 import textwrap
 import threading
 from http.server import HTTPServer, SimpleHTTPRequestHandler
@@ -10,17 +9,9 @@ from pathlib import Path
 
 import pytest
 
-_WORDNETS_DIR = Path(__file__).parent / 'wordnets'
+from cyg.merge import MergeBuilder
 
-# ---------------------------------------------------------------------------
-# Load MergeBuilder from the conversion script
-# ---------------------------------------------------------------------------
-_script = Path(__file__).parent.parent / 'conversion_scripts' / '6_synthesise.py'
-_spec = importlib.util.spec_from_file_location('synthesise', _script)
-_mod = importlib.util.module_from_spec(_spec)
-sys.modules['synthesise'] = _mod
-_spec.loader.exec_module(_mod)
-MergeBuilder = _mod.MergeBuilder
+_WORDNETS_DIR = Path(__file__).parent / 'wordnets'
 
 
 # ---------------------------------------------------------------------------
@@ -152,7 +143,22 @@ def build_test_db(db_path: Path, prov_path: Path,
     b.remove_orphans()
     b.compute_sense_indices()
     b.insert_resources()
+
+    # Insert known ARASAAC pictogram IDs for UI tests:
+    #   dog (i3)    → id 2253  (direct image test)
+    #   entity (i1) → id 2254  (hypernym-fallback test: animal has entity as hypernym)
+    for ili, arasaac_id in [('i3', 2253), ('i1', 2254)]:
+        row = b.cur.execute("SELECT rowid FROM synsets WHERE ili = ?", (ili,)).fetchone()
+        if row:
+            b.cur.execute(
+                "INSERT INTO arasaac (synset_rowid, arasaac_id) VALUES (?, ?)",
+                (row[0], arasaac_id),
+            )
+    b.conn.commit()
+
     b.finalize(db_path, prov_path)
+    for path in (db_path, prov_path):
+        subprocess.run(['gzip', '-k', '-9', '-f', str(path)], check=True)
 
 
 @pytest.fixture(scope='session')
@@ -168,8 +174,9 @@ def test_db_dir(tmp_path_factory):
 
     # Assemble the server root: index.html + compressed DBs
     serve_dir = tmp_path_factory.mktemp('serve')
-    shutil.copy(Path(__file__).parent.parent / 'web' / 'index.html',
-                serve_dir / 'index.html')
+    web_dir = Path(__file__).parent.parent / 'web'
+    shutil.copy(web_dir / 'index.html', serve_dir / 'index.html')
+    shutil.copy(web_dir / 'relations.json', serve_dir / 'relations.json')
     shutil.copy(db_path.with_suffix('.db.gz'), serve_dir / 'cygnet.db.gz')
     shutil.copy(prov_path.with_suffix('.db.gz'), serve_dir / 'provenance.db.gz')
     return serve_dir

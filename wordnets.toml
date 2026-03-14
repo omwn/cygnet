@@ -17,8 +17,9 @@ ca = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-ca-2.0.tar.xz
 # Chinese (Mandarin) — OMW Chinese
 cmn = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-cmn-2.0.tar.xz"]
 
-# Danish — OMW Danish
-da = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-da-2.0.tar.xz"]
+# Danish — DanNet
+#da = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-da-2.0.tar.xz"]
+da = ["https://github.com/kuhumcst/DanNet/releases/download/v2025-07-03/dannet-wn-lmf.xml.gz"]
 
 # German — OdeNet
 de = ["https://github.com/hdaSprachtechnologie/odenet/releases/download/v1.4/odenet-1.4.tar.xz"]
@@ -56,6 +57,21 @@ it = [
     "https://github.com/omwn/omw-data/releases/download/v2.0/omw-iwn-2.0.tar.xz",
 ]
 
+
+# Japanese
+# ToDo get better
+ja = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-ja-2.0.tar.xz"]
+
+# Malay
+# ToDo get better
+zsm = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-zsm-2.0.tar.xz"]
+
+# Indonesian
+# ToDo get better
+id = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-id-2.0.tar.xz"]
+
+
+
 # Kurdish (Kurmanji) — KurdNet
 kmr = ["https://github.com/sinaahmadi/kurdnet/releases/download/kurdnet-1.0.tar.xz/kurdnet-1.0.tar.xz"]
 
@@ -75,10 +91,7 @@ nn = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-nn-2.0.tar.xz
 pl = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-pl-2.0.tar.xz"]
 
 # Portuguese — OMW Portuguese + OpenWordNet-PT
-pt = [
-    "https://github.com/omwn/omw-data/releases/download/v2.0/omw-pt-2.0.tar.xz",
-    "https://github.com/own-pt/openWordnet-PT/releases/download/v1.0.0/own-pt.tar.gz",
-]
+pt = [ "https://github.com/own-pt/openWordnet-PT/releases/download/v1.0.0/own-pt.tar.gz"]
 
 # Romanian — OMW Romanian
 ro = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-ro-2.0.tar.xz"]
@@ -101,4 +114,49 @@ th = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-th-2.0.tar.xz
 # Latvian -
 # Note bug in data, the licence is wrong, I have confirmed it is CC BY-SA 4.0
 lv = ["https://repository.clarin.lv/repository/xmlui/bitstream/handle/20.500.12574/119/tezaurs_2025_1_lmf.xml"]
+
+
+## from TUFS
+
+# Assamese
+as = ["https://github.com/omwn/tufs/releases/download/2.0/tufs-as-2.0.tar.xz"]
+
+# Khmer
+km = ["https://github.com/omwn/tufs/releases/download/2.0/tufs-km-2.0.tar.xz"]
+
+# Korean
+ko = ["https://github.com/omwn/tufs/releases/download/2.0/tufs-ko-2.0.tar.xz"]
+
+# Lao
+lo = ["https://github.com/omwn/tufs/releases/download/2.0/tufs-ko-2.0.tar.xz"]
+
+# Mongolian
+# ToDO get newer version from https://github.com/myanmaropenwordnet/mow
+mn = ["https://github.com/omwn/tufs/releases/download/2.0/tufs-mn-2.0.tar.xz"]
+
+# Burmese
+# ToDo get newer version
+my = ["https://github.com/omwn/tufs/releases/download/2.0/tufs-my-2.0.tar.xz"]
+
+# Russian
+ru = ["https://github.com/omwn/tufs/releases/download/2.0/tufs-ru-2.0.tar.xz"]
+
+# Filipino
+tl = ["https://github.com/omwn/tufs/releases/download/2.0/tufs-tl-2.0.tar.xz"]
+
+# Turkish
+# ToDo get newer version
+tr = ["https://github.com/omwn/tufs/releases/download/2.0/tufs-tr-2.0.tar.xz"]
+
+# Urdu
+ur = ["https://github.com/omwn/tufs/releases/download/2.0/tufs-ur-2.0.tar.xz"]
+
+# Vietnamese
+vi = ["https://github.com/omwn/tufs/releases/download/2.0/tufs-vi-2.0.tar.xz"]
+
+# Cantonese
+yue = ["https://raw.githubusercontent.com/lmorgadodacosta/CantoneseWN/refs/heads/master/cantown.xml"]
+
+# Abui
+abz = ["https://raw.githubusercontent.com/fanacek/abuiwn/refs/heads/main/abwn.xml"]
 

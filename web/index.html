@@ -24,34 +24,36 @@
 
         // ========== RELATION MAPPINGS ==========
         // Map full DB relation names to short codes used by the UI
-        const RELATION_TO_SHORT = {
-            'antonym': 'ant', 'derivation': 'der', 'derivation_of': '-der',
-            'pertainym': 'ptr', 'pertainym_of': '-ptr',
-            'participle': 'prt', 'participle_of': '-prt',
-            'hypernym': 'hyp', 'hyponym': '-hyp',
-            'instance_hypernym': 'ihyp', 'instance_hyponym': '-ihyp',
-            'mero_member': 'mmer', 'holo_member': '-mmer',
-            'mero_part': 'pmer', 'holo_part': '-pmer',
-            'mero_substance': 'smer', 'holo_substance': '-smer',
-            'opposite': 'opp',
-            'causes': 'cau', 'is_caused_by': '-cau',
-            'entails': 'ent', 'is_entailed_by': '-ent',
+        // Relation config loaded from relations.json at startup.
+        // Structure: { dbName: { short, color, en, [langCode]: label, ... } }
+        let _relConfig = {};
+        let _relLang = 'en';
+
+        // Build lookup tables from _relConfig once loaded.
+        let RELATION_TO_SHORT = {};
+        let _relColors = {};
+        function _buildRelLookups() {
+            RELATION_TO_SHORT = {};
+            _relColors = {};
+            for (const [name, entry] of Object.entries(_relConfig)) {
+                if (entry.short) RELATION_TO_SHORT[name] = entry.short;
+                if (entry.color) _relColors[entry.short || name] = entry.color;
+            }
+        }
+
+        const getRelLabel = (shortOrName) => {
+            // Find entry by short code or DB name
+            const entry = _relConfig[shortOrName]
+                ?? Object.values(_relConfig).find(e => e.short === shortOrName);
+            if (entry) return entry[_relLang] ?? entry.en ?? shortOrName;
+            return shortOrName.replace(/_/g, ' ').replace(/^-/, '');
         };
 
-        const relationNames = {
-            'ant': 'antonym', 'der': 'derivation', 'ptr': 'pertainym',
-            'prt': 'participle', 'syn': 'synonym',
-            'hyp': 'hypernym', 'ihyp': 'instance hypernym',
-            'mmer': 'member meronym', 'pmer': 'part meronym', 'smer': 'substance meronym',
-            'opp': 'opposite', 'cau': 'causes', 'ent': 'entails',
-        };
-
-        const relationColors = {
-            'ant': '#ef4444', 'der': '#f59e0b', 'ptr': '#10b981',
-            'prt': '#06b6d4', 'syn': '#10b981',
-            'hyp': '#3b82f6', 'ihyp': '#6366f1',
-            'mmer': '#8b5cf6', 'pmer': '#a855f7', 'smer': '#d946ef',
-            'opp': '#ec4899', 'cau': '#f43f5e', 'ent': '#14b8a6',
+        // Test hook — allows Playwright tests to inspect and manipulate rel config
+        window._relTestHook = {
+            setLang: (l) => { _relLang = l; },
+            getLabel: (s) => getRelLabel(s),
+            getConfig: () => _relConfig,
         };
 
         const posToHumanReadable = {
@@ -326,6 +328,12 @@
                 rid: rel.rid
             }));
 
+            // Get ARASAAC pictogram IDs
+            const arasaacRows = cachedExec(`
+                SELECT arasaac_id FROM arasaac WHERE synset_rowid = ?
+            `, [synsetRowid]);
+            const ara = arasaacRows.length > 0 ? arasaacRows.map(a => a.arasaac_id) : undefined;
+
             return {
                 oc: r.pos,
                 ili: r.ili,
@@ -333,7 +341,8 @@
                 dr: Object.keys(dr).length > 0 ? dr : undefined,
                 da,
                 s: Object.keys(s).length > 0 ? s : undefined,
-                cr: cr.length > 0 ? cr : undefined
+                cr: cr.length > 0 ? cr : undefined,
+                ara
             };
         }
 
@@ -531,6 +540,7 @@
         // ========== MAIN COMPONENT ==========
         function DictionaryBrowser() {
             const [dbReady, setDbReady] = useState(false);
+            const [relConfigLoaded, setRelConfigLoaded] = useState(false);
             const [dbError, setDbError] = useState(null);
             const [dbProgress, setDbProgress] = useState('');
             const [downloadProgress, setDownloadProgress] = useState(null); // {loaded, total} or null
@@ -618,6 +628,13 @@
                 document.addEventListener('mousedown', handleClick);
                 return () => document.removeEventListener('mousedown', handleClick);
             }, [settingsOpen]);
+
+            useEffect(() => {
+                fetch(DB_BASE + 'relations.json')
+                    .then(r => r.json())
+                    .then(cfg => { _relConfig = cfg; _buildRelLookups(); setRelConfigLoaded(true); })
+                    .catch(e => console.warn('relations.json fetch failed:', e));
+            }, []);
 
             // Initialize database
             useEffect(() => {
@@ -709,6 +726,7 @@
                         setAllResources(queryResources());
                         setDbStats(queryStats());
                         setDbReady(true);
+
                     } catch (e) {
                         console.error('DB init error:', e);
                         setDbError(e.message);
@@ -908,8 +926,9 @@
                 } else if (view === 'search') {
                     const params = new URLSearchParams();
                     if (currentSearch) params.set('q', currentSearch);
-                    if (languageFilter.size > 0) params.set('lang', Array.from(languageFilter).join(','));
+                    if (languageFilter.size > 0) params.set('search_lang', Array.from(languageFilter).join(','));
                     if (posFilter.size > 0) params.set('pos', Array.from(posFilter).join(','));
+                    if (definitionLanguage !== 'en') params.set('display_lang', definitionLanguage);
                     if (senseFilter) params.set('s', senseFilter);
                     const qs = params.toString();
                     newUrl = qs ? '#/search?' + qs : '#/search';
@@ -921,7 +940,7 @@
                 if (newUrl && newUrl !== window.location.hash) {
                     window.history.pushState({}, '', newUrl);
                 }
-            }, [view, currentSearch, languageFilter, posFilter, senseFilter, selectedConcept, selectedSense, dbReady, activeTab]);
+            }, [view, currentSearch, languageFilter, posFilter, senseFilter, selectedConcept, selectedSense, dbReady, activeTab, definitionLanguage]);
 
             // Handle popstate
             useEffect(() => {
@@ -936,13 +955,15 @@
                         setActiveTab('browser');
                         const params = new URLSearchParams(queryString || '');
                         const urlSearch = params.get('q');
-                        const urlLang = params.get('lang') ? new Set(params.get('lang').split(',')) : new Set();
+                        const urlSearchLang = params.get('search_lang') ? new Set(params.get('search_lang').split(',')) : new Set();
+                        const urlDisplayLang = params.get('display_lang');
                         const urlPos = params.get('pos') ? new Set(params.get('pos').split(',')) : new Set();
                         const urlSense = params.get('sense');
                         const urlSenseFilter = params.get('s');
                         const urlConcept = params.get('concept');
 
-                        setLanguageFilter(urlLang);
+                        setLanguageFilter(urlSearchLang);
+                        if (urlDisplayLang) setDefinitionLanguage(urlDisplayLang);
                         setPosFilter(urlPos);
                         setSenseFilter(urlSenseFilter);
                         setSynonymsCollapsed({});
@@ -1372,7 +1393,7 @@
                                     linksArray.push({
                                         source: sourceId, target: targetId,
                                         type: relType,
-                                        color: relationColors[shortCode] || '#999'
+                                        color: _relColors[shortCode] || '#999'
                                     });
                                 }
                             });
@@ -1911,6 +1932,17 @@
                                                                                                                     </span>
                                                                                                                 </div>
                                                                                                             </div>
+                                                                                                            {concept?.ara && (
+                                                                                                                <a href={`https://arasaac.org/en/pictograms/${concept.ara[0]}/`}
+                                                                                                                    target="_blank" rel="noopener noreferrer"
+                                                                                                                    onClick={e => e.stopPropagation()}
+                                                                                                                    title="ARASAAC pictogram">
+                                                                                                                    <img src={`https://static.arasaac.org/pictograms/${concept.ara[0]}/${concept.ara[0]}_300.png`}
+                                                                                                                        alt=""
+                                                                                                                        className="h-14 w-14 object-contain rounded bg-white border border-gray-200 flex-shrink-0"
+                                                                                                                        onError={e => { e.target.parentElement.style.display = 'none'; }} />
+                                                                                                                </a>
+                                                                                                            )}
                                                                                                             {hasExtra && (
                                                                                                                 <div className="text-gray-500 text-sm pt-1 flex-shrink-0">
                                                                                                                     {synonymsCollapsed[sense.id] === false ? '▼' : '▶'}
@@ -1997,22 +2029,55 @@
                                     return (
                                         <div>
                                             <button onClick={handleBackToSearch} className="mb-4 text-blue-600 hover:underline">← Back to search</button>
-                                            <div className="mb-4">
-                                                <p className="text-base">
-                                                    {conceptLabel && <><span className="font-medium">{conceptLabel}</span>{' \u2014 '}</>}<span className="text-gray-600 italic">{getPosName(concept.oc)}.</span>{' '}
-                                                    {concept.da ? renderDefinitionWithLinks(mainDef, concept.da) : mainDef}
-                                                    {mainDefIsFallback && <span className="text-xs text-gray-400 ml-1">[{shownLang}]</span>}
-                                                    {concept.dr?.[shownLang] && renderProvenance('definitions', concept.dr[shownLang])}
-                                                    {concept.ili && <span className="text-sm ml-2">⟪{concept.ili}⟫</span>}
-                                                </p>
+                                            <div className="mb-4 flex gap-4 items-start">
+                                                <div className="flex-1">
+                                                    <p className="text-base">
+                                                        {conceptLabel && <><span className="font-medium">{conceptLabel}</span>{' \u2014 '}</>}<span className="text-gray-600 italic">{getPosName(concept.oc)}.</span>{' '}
+                                                        {concept.da ? renderDefinitionWithLinks(mainDef, concept.da) : mainDef}
+                                                        {mainDefIsFallback && <span className="text-xs text-gray-400 ml-1">[{shownLang}]</span>}
+                                                        {concept.dr?.[shownLang] && renderProvenance('definitions', concept.dr[shownLang])}
+                                                        {concept.ili && <span className="text-sm ml-2">⟪{concept.ili}⟫</span>}
+                                                    </p>
+                                                    {(() => {
+                                                        const enExamples = (concept.s?.en || []).flatMap(sid => loadedSenses[sid.toString()]?.ex || []);
+                                                        return enExamples.length > 0 && (
+                                                            <p className="text-sm italic mt-1">
+                                                                {enExamples.map((ex, ei) => (
+                                                                    <span key={ei}>{ei > 0 && '; '}{renderExample(ex)}</span>
+                                                                ))}
+                                                            </p>
+                                                        );
+                                                    })()}
+                                                </div>
                                                 {(() => {
-                                                    const enExamples = (concept.s?.en || []).flatMap(sid => loadedSenses[sid.toString()]?.ex || []);
-                                                    return enExamples.length > 0 && (
-                                                        <p className="text-sm italic mt-1">
-                                                            {enExamples.map((ex, ei) => (
-                                                                <span key={ei}>{ei > 0 && '; '}{renderExample(ex)}</span>
+                                                    const directIds = concept.ara;
+                                                    // Fallback: find first hypernym with a pictogram
+                                                    let hypIds = null;
+                                                    if (!directIds && concept.cr) {
+                                                        for (const rel of concept.cr) {
+                                                            if (rel.t === 'hyp' || rel.t === 'ihyp') {
+                                                                const hypConcept = getConceptData(rel.to.toString());
+                                                                if (hypConcept?.ara) { hypIds = hypConcept.ara; break; }
+                                                            }
+                                                        }
+                                                    }
+                                                    const ids = directIds || hypIds;
+                                                    const isIndirect = !directIds && !!hypIds;
+                                                    if (!ids) return null;
+                                                    const imgClass = `h-24 w-24 object-contain rounded bg-white ${isIndirect ? 'border-2 border-dashed border-gray-400' : 'border border-gray-200'}`;
+                                                    return (
+                                                        <div className="flex flex-wrap gap-2 shrink-0">
+                                                            {ids.map(id => (
+                                                                <a key={id} href={`https://arasaac.org/en/pictograms/${id}/`} target="_blank" rel="noopener noreferrer" title={`ARASAAC pictogram ${id}${isIndirect ? ' (from hypernym)' : ''}`}>
+                                                                    <img
+                                                                        src={`https://static.arasaac.org/pictograms/${id}/${id}_300.png`}
+                                                                        alt={conceptLabel || concept.ili || ''}
+                                                                        className={imgClass}
+                                                                        onError={e => { e.target.style.display = 'none'; }}
+                                                                    />
+                                                                </a>
                                                             ))}
-                                                        </p>
+                                                        </div>
                                                     );
                                                 })()}
                                             </div>
@@ -2089,7 +2154,7 @@
                                                                 }, {})
                                                             ).map(([relType, rels]) => (
                                                                 <div key={relType} className="flex gap-2 flex-wrap items-baseline">
-                                                                    <span className="text-gray-500 italic flex-shrink-0">{relationNames[relType] || relType}:</span>
+                                                                    <span className="text-gray-500 italic flex-shrink-0">{getRelLabel(relType)}:</span>
                                                                     {rels.map(rel => {
                                                                         const li = getConceptLabel(parseInt(rel.to), definitionLanguage);
                                                                         return (
@@ -2107,7 +2172,7 @@
                                                             ))}
                                                             {hasSenseRels && Object.entries(senseRelsByType).map(([relType, rels]) => (
                                                                 <div key={`sr-${relType}`} className="flex gap-2 flex-wrap items-baseline">
-                                                                    <span className="text-gray-500 italic flex-shrink-0">{relationNames[relType] || relType}:</span>
+                                                                    <span className="text-gray-500 italic flex-shrink-0">{getRelLabel(relType)}:</span>
                                                                     {rels.map(({ fromLemma, toSenseId, rid }, i) => {
                                                                         const toSense = loadedSenses[toSenseId];
                                                                         const cid = toSense?.c?.toString();
@@ -2190,7 +2255,7 @@
                                                                 return (
                                                                     <React.Fragment key={i}>
                                                                         {i > 0 && step.rel && (
-                                                                            <span className="text-gray-400 text-xs italic whitespace-nowrap">—{relationNames[RELATION_TO_SHORT[step.rel]] || step.rel.replace(/_/g,' ')}→</span>
+                                                                            <span className="text-gray-400 text-xs italic whitespace-nowrap">—{getRelLabel(step.rel)}→</span>
                                                                         )}
                                                                         <button
                                                                             onClick={() => handleConceptClick(step.node)}
@@ -2299,7 +2364,7 @@
                                                     <div className="ml-2 space-y-1 text-sm">
                                                         {sense.sr.map((rel, i) => (
                                                             <div key={i}>
-                                                                <span className="text-gray-600">{relationNames[rel.t] || rel.t}:</span>{' '}
+                                                                <span className="text-gray-600">{getRelLabel(rel.t)}:</span>{' '}
                                                                 <button onClick={() => handleSenseClick(rel.to)} className="text-blue-600 hover:underline">{rel.to}</button>
                                                             </div>
                                                         ))}
@@ -2364,6 +2429,25 @@
                                         </div>
                                     </div>
                                 )}
+                                <div className="border-t border-gray-200 pt-4 mb-4">
+                                    <h3 className="font-medium text-sm text-gray-700 mb-2">Citation</h3>
+                                    <p className="text-sm text-gray-600">If you use Cygnet, please cite <button onClick={() => setActiveTab('publications')} className="text-blue-600 hover:underline">Maudslay &amp; Bond (2026)</button> for Cygnet and <button onClick={() => setActiveTab('publications')} className="text-blue-600 hover:underline">Bond &amp; Foster (2013)</button> for the underlying Open Multilingual Wordnet, as well as the individual <button onClick={() => setActiveTab('wordnets')} className="text-blue-600 hover:underline">wordnets</button> whose data you use.</p>
+                                </div>
+                                <div className="border-t border-gray-200 pt-4 mb-4">
+                                    <h3 className="font-medium text-sm text-gray-700 mb-2">Language Data</h3>
+                                    <p className="text-sm text-gray-600">
+                                        The lexical data in Cygnet is drawn from a collection of open wordnets covering many languages — see the <button onClick={() => setActiveTab('wordnets')} className="text-blue-600 hover:underline">Wordnets tab</button> for the full list of contributing projects and their licences. We are deeply grateful to every team that has worked to build and freely share these resources. Thanks to all the projects that have released their data openly!
+                                    </p>
+                                </div>
+                                <div className="border-t border-gray-200 pt-4 mb-4">
+                                    <h3 className="font-medium text-sm text-gray-700 mb-2">Images</h3>
+                                    <p className="text-sm text-gray-600">
+                                        Concept images are pictograms from <a href="https://arasaac.org/" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">ARASAAC</a> (Aragonese Portal of Augmentative and Alternative Communication), by Sergio Palao. License: <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">CC BY-NC-SA 4.0</a>. Owner: Government of Aragon (Spain).
+                                    </p>
+                                    <p className="text-sm text-gray-500 mt-1">
+                                        A dashed border on a pictogram indicates the image comes from a hypernym (a more general concept) rather than the concept itself.
+                                    </p>
+                                </div>
                                 <div className="border-t border-gray-200 pt-4">
                                     <h3 className="font-medium text-sm text-gray-700 mb-2">Cache</h3>
                                     <p className="text-sm text-gray-500 mb-2">
@@ -2382,10 +2466,27 @@
                                 </div>
                             </div>
                         )}
-                        {activeTab === 'publications' && (
+                        {activeTab === 'publications' && (() => {
+                            const rstToHtml = (text) => {
+                                // RST hyperlink: `Title <URL>`_
+                                let html = text.replace(/`([^`]+?)\s+<([^>]+)>`_+/g, (_, title, url) =>
+                                    `<a href="${url}" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline">${title}</a>`
+                                );
+                                // *italic*
+                                html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+                                // LaTeX-style braces {word} → word
+                                html = html.replace(/\{([^}]+)\}/g, '$1');
+                                // Paragraph breaks
+                                html = html.replace(/\n\n+/g, '<br><br>');
+                                // Remaining single newlines → space
+                                html = html.replace(/\n/g, ' ');
+                                return html;
+                            };
+                            const wnsWithCitation = allResources.filter(r => r.citation);
+                            return (
                             <div>
                                 <h2 className="text-xl font-bold mb-4">Publications</h2>
-                                <ul className="space-y-4">
+                                <ul className="space-y-4 mb-8">
                                     <li className="text-sm text-gray-800">
                                         Rowan Hall Maudslay &amp; Francis Bond (2026). Cygnet: Refactoring the Open Multilingual Wordnet. In <em>Proceedings of the 15th International Conference on Language Resources and Evaluation (LREC 2026)</em>. (to appear)
                                     </li>
@@ -2396,8 +2497,22 @@
                                         Francis Bond &amp; Kyonghee Paik (2012). A survey of wordnets and their licenses. In <em>Proceedings of the 6th Global WordNet Conference (GWC 2012)</em>. Matsue. pp. 64–71.
                                     </li>
                                 </ul>
+                                <h2 className="text-xl font-bold mb-2">Wordnet Citations</h2>
+                                <p className="text-sm text-gray-500 italic mb-4">Citation data taken from each wordnet's source XML.</p>
+                                {wnsWithCitation.length === 0
+                                    ? <p className="text-sm text-gray-500">No wordnet citation data available (database not loaded).</p>
+                                    : <ul className="space-y-4">
+                                        {wnsWithCitation.map(r => (
+                                            <li key={r.code} className="text-sm text-gray-800">
+                                                <span className="font-medium">{r.label}:</span>{' '}
+                                                <span dangerouslySetInnerHTML={{ __html: rstToHtml(r.citation) }} />
+                                            </li>
+                                        ))}
+                                    </ul>
+                                }
                             </div>
-                        )}
+                            );
+                        })()}
                         {activeTab === 'wordnets' && (() => {
                             const shortLicence = (url) => {
                                 if (!url) return null;

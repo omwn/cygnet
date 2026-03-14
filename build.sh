@@ -7,6 +7,9 @@
 #
 # Prerequisites: uv, curl, tar, xz
 #
+# Optional data files (place in bin/ before building):
+#   bin/araasac-ili.json  ARASAAC pictogram ILI mapping (from chainnet-viz)
+#
 # Optional flags:
 #   --with-glosstag    Add Princeton GlossTag sense annotations to definitions
 #                      (requires WordNet 3.0 GlossTag corpus in bin/WordNet-3.0/)
@@ -53,7 +56,7 @@ done
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_DIR"
 
-mkdir -p bin/raw_wns bin/cygnets_presynth website_data
+mkdir -p bin/raw_wns bin/cygnets_presynth
 
 # Download a wordnet archive and extract its XML files into bin/raw_wns/ (flat).
 download_standalone() {
@@ -217,6 +220,10 @@ if $DO_BUILD; then
     uv run python conversion_scripts/9_lang_codes.py
     echo
 
+    echo "=== Step 11: Add ARASAAC pictogram IDs ==="
+    uv run python conversion_scripts/11_add_arasaac.py
+    echo
+
     if $WITH_XML; then
         echo "=== Step 7: Generate and validate XML ==="
         uv run python conversion_scripts/7_validate_and_export.py
@@ -225,6 +232,11 @@ if $DO_BUILD; then
 
     echo "=== Tests ==="
     uv run pytest tests/ -v
+    echo
+
+    echo "=== Step 12: Compress databases ==="
+    gzip -k -9 -f web/cygnet.db
+    gzip -k -9 -f web/provenance.db
     echo
 
     echo "=== Build complete! ==="
@@ -237,4 +249,6 @@ if $DO_BUILD; then
         echo "  cygnet.xml            - full merged resource (with provenance)"
         echo "  cygnet_small.xml      - without provenance metadata"
     fi
+    echo
+    echo "You can test with: bash run.sh"
 fi

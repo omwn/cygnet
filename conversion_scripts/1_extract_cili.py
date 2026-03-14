@@ -4,191 +4,158 @@ Convert CILI TSV data to Cygnet XML format.
 """
 
 import csv
-from lxml import etree as ET
 import re
 import sys
+from lxml import etree as ET
 
-NEW_POS_LABELS = {
-    'n': 'NOUN',
-    'v': 'VERB',
-    'a': 'ADJ',
-    'r': 'ADV',
-    's': 'ADJ',  # adjective satellite -> adjective
-    'c': 'CONJ',
-    'p': 'ADP',
-    'x': 'NREF',
-    'u': 'UNK'
-}
+from cyg.converters import NEW_POS_LABELS
 
-def normalize_whitespace(text):
-    """Normalize whitespace in text."""
+_WHITESPACE_RE = re.compile(r'\s+')
+
+VALID_POS_CHARS = set(NEW_POS_LABELS.keys())
+
+
+def normalize_whitespace(text: str) -> str:
+    """Collapse runs of whitespace and strip leading/trailing space."""
     if not text:
         return text
-    # Collapse multiple spaces
-    text = re.sub(r'\s+', ' ', text)
-    # Strip leading/trailing whitespace
-    return text.strip()
+    return _WHITESPACE_RE.sub(' ', text).strip()
 
 
-def process_definition(definition):
-    """Process definition text: strip tags, normalize whitespace, escape XML."""
-    if not definition:
-        return definition
-    # Normalize whitespace
-    text = normalize_whitespace(definition)
-    # Note: We don't escape here because ET will handle it when creating text nodes
-    return text
+def get_ontological_category(origin: str) -> str:
+    """Extract POS category from the last character of the origin field.
 
+    Args:
+        origin: Origin string ending in a POS character (e.g. 'pwn-3.0:...-n').
 
-def get_ontological_category(origin):
-    """Extract ontological category from origin field (last character)."""
+    Returns:
+        Cygnet POS label (e.g. 'NOUN').
+
+    Raises:
+        ValueError: If origin is empty or the trailing character is unrecognised.
+    """
     if not origin or not origin.strip():
-        assert False
-    category = origin.strip()[-1].lower()
-    assert category in {'n', 'v', 'a', 's', 'r', 'p', 'u', 'c', 'x'}
-    category = NEW_POS_LABELS[category]
-    return category
+        raise ValueError(f"Empty origin field: {origin!r}")
+    char = origin.strip()[-1].lower()
+    if char not in VALID_POS_CHARS:
+        raise ValueError(f"Unrecognised POS character {char!r} in origin {origin!r}")
+    return NEW_POS_LABELS[char]
 
 
-def get_from(origin):
+def get_from(origin: str) -> tuple[str, str, str]:
+    """Parse 'wn_name-version:original_id' from origin field.
 
+    Args:
+        origin: Origin string of the form 'pwn-3.0:synset_id'.
+
+    Returns:
+        Tuple of (wn_name, version, original_id).
+
+    Raises:
+        ValueError: If the origin format is unexpected.
+    """
     wn_code, original_id = origin.split(':')
     wn_name, version = wn_code.split('-')
-    assert wn_name == 'pwn'
-    assert version == "3.0"
+    if wn_name != 'pwn':
+        raise ValueError(f"Expected 'pwn' wordnet, got {wn_name!r} in {origin!r}")
+    if version != "3.0":
+        raise ValueError(f"Expected version '3.0', got {version!r} in {origin!r}")
     return wn_name, version, original_id
 
 
-def load_tsv_data(tsv_file):
-    """Load CILI TSV data."""
+def load_tsv_data(tsv_file: str) -> list[dict]:
+    """Load CILI TSV data.
+
+    Args:
+        tsv_file: Path to the CILI TSV file.
+
+    Returns:
+        List of row dicts.
+    """
     print(f"Loading TSV data from {tsv_file}...")
-
-    rows = []
     with open(tsv_file, 'r', encoding='utf-8') as f:
-        reader = csv.DictReader(f, delimiter='\t')
-        for row in reader:
-            rows.append(row)
-
+        rows = list(csv.DictReader(f, delimiter='\t'))
     print(f"Loaded {len(rows)} rows from TSV")
     return rows
 
 
-def validate_data(tsv_rows):
-    """Validate TSV data."""
+def validate_data(tsv_rows: list[dict]) -> None:
+    """Validate TSV data, exiting on errors.
+
+    Args:
+        tsv_rows: Rows loaded from the CILI TSV file.
+    """
     print("Validating data...")
-
-    errors = []
-
-    for i, row in enumerate(tsv_rows, 1):
-        ili_id = row['ili_id']
-        definition = row['definition']
-
-        # Check for empty definitions
-        if not definition or not definition.strip():
-            errors.append(f"Row {i}: ILI {ili_id} has empty definition")
-
+    errors = [
+        f"Row {i}: ILI {row['ili_id']} has empty definition"
+        for i, row in enumerate(tsv_rows, 1)
+        if not row.get('definition', '').strip()
+    ]
     if errors:
         print(f"ERROR: Found {len(errors)} validation errors:")
-        for error in errors[:20]:  # Show first 20
+        for error in errors[:20]:
             print(f"  {error}")
         if len(errors) > 20:
             print(f"  ... and {len(errors) - 20} more")
         sys.exit(1)
-
     print("Validation passed!")
 
 
-def create_cygnet_xml(tsv_rows, output_file):
-    """Create Cygnet XML from TSV data."""
+def create_cygnet_xml(tsv_rows: list[dict], output_file: str) -> None:
+    """Create Cygnet XML from TSV data and write to file.
+
+    Args:
+        tsv_rows: Validated rows from the CILI TSV file.
+        output_file: Destination XML file path.
+    """
     print("Creating Cygnet XML...")
 
-    # Create root element
     root = ET.Element('CygnetResource')
     root.set('id', 'cili')
     root.set('label', 'Collaborative Interlingua Index')
     root.set('version', '1.0')
 
-    # Create ConceptLayer
     concept_layer = ET.SubElement(root, 'ConceptLayer')
-
     for row in tsv_rows:
-        ili_id = row['ili_id']
-        status = row['status']
-        superseded_by = row['superseded_by']
-        origin = row['origin']
-
-        # Get ontological category from last character of origin
-        ontological_category = get_ontological_category(origin)
-
+        ontological_category = get_ontological_category(row['origin'])
         concept = ET.SubElement(concept_layer, 'Concept')
-        concept.set('id', f'cili.{ili_id}')
+        concept.set('id', f"cili.{row['ili_id']}")
         concept.set('ontological_category', ontological_category)
-        concept.set('status', status)
+        concept.set('status', row['status'])
+        if row['superseded_by'].strip():
+            concept.set('superseded_by', row['superseded_by'])
+        wn_name, version, original_id = get_from(row['origin'])
+        prov = ET.SubElement(concept, 'Provenance')
+        prov.set('resource', wn_name)
+        prov.set('version', version)
+        prov.set('original_id', original_id)
 
-        wn_name, version, original_id = get_from(origin)
-
-        from_ele = ET.SubElement(concept, 'Provenance')
-        from_ele.set('resource', wn_name)
-        from_ele.set('version', version)
-        from_ele.set('original_id', original_id)
-
-        # Only include superseded_by if not empty
-        if superseded_by and superseded_by.strip():
-            concept.set('superseded_by', superseded_by)
-
-    # Create GlossLayer
     gloss_layer = ET.SubElement(root, 'GlossLayer')
-
     for row in tsv_rows:
-        ili_id = row['ili_id']
-        definition = row['definition']
-        origin = row['origin']
-
-        # Process definition
-        processed_def = process_definition(definition)
-
         gloss = ET.SubElement(gloss_layer, 'Gloss')
-        gloss.set('definiendum', f'cili.{ili_id}')
+        gloss.set('definiendum', f"cili.{row['ili_id']}")
         gloss.set('language', 'en')
+        wn_name, version, original_id = get_from(row['origin'])
+        annotated = ET.SubElement(gloss, 'AnnotatedSentence')
+        annotated.text = normalize_whitespace(row['definition'])
+        prov = ET.SubElement(gloss, 'Provenance')
+        prov.set('resource', wn_name)
+        prov.set('version', version)
+        prov.set('original_id', original_id)
 
-        wn_name, version, original_id = get_from(origin)
-
-        # Create AnnotatedSentence container for the definition text
-        annotated_sentence = ET.SubElement(gloss, 'AnnotatedSentence')
-        annotated_sentence.text = processed_def
-
-        from_ele = ET.SubElement(gloss, 'Provenance')
-        from_ele.set('resource', wn_name)
-        from_ele.set('version', version)
-        from_ele.set('original_id', original_id)
-
-
-    # Create the tree and write to file with pretty printing
-    tree = ET.ElementTree(root)
-    tree.write(output_file,
-               encoding='UTF-8',
-               xml_declaration=True,
-               pretty_print=True)
-
+    ET.ElementTree(root).write(
+        output_file, encoding='UTF-8', xml_declaration=True, pretty_print=True
+    )
     print(f"Created {output_file}")
     print(f"  Concepts: {len(tsv_rows)}")
     print(f"  Glosses: {len(tsv_rows)}")
 
 
-def main():
+def main() -> None:
     """Main conversion process."""
-    tsv_file = 'bin/cili.tsv'
-    output_file = 'bin/cygnets_presynth/cili-1.0.xml'
-
-    # Load data
-    tsv_rows = load_tsv_data(tsv_file)
-
-    # Validate
+    tsv_rows = load_tsv_data('bin/cili.tsv')
     validate_data(tsv_rows)
-
-    # Create XML
-    create_cygnet_xml(tsv_rows, output_file)
-
+    create_cygnet_xml(tsv_rows, 'bin/cygnets_presynth/cili-1.0.xml')
     print("\nConversion complete!")
 
 

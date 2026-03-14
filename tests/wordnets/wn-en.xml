@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='UTF-8'?>
-<CygnetResource id="wn-en" label="Test English WordNet" language="en" version="1.0">
+<CygnetResource id="wn-en" label="Test English WordNet" language="en" version="1.0" citation="Bond, F. 2025. `Test WordNet &lt;https://github.com/rowanhm/cygnet&gt;`_. In *Proceedings of a Test Conference*.">
 
   <!-- Concepts (ILI declarations shared by all wordnets) -->
   <Concept id="cili.i1" ontological_category="NOUN" status="1">

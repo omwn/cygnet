@@ -5,15 +5,17 @@ Converters for transforming external lexical resources into Cygnet format.
 import argparse
 import json
 import gzip
+import logging
 import lzma
 import sys
 from collections import defaultdict
-from typing import Dict, List, Set, Tuple, Optional
 from lxml import etree
 import spacy
 import pyinflect
 from nltk.stem import WordNetLemmatizer
 import nltk
+
+logger = logging.getLogger(__name__)
 
 NEW_POS_LABELS = {
     'n': 'NOUN',
@@ -192,7 +194,7 @@ LANGUAGE_TO_SPACY_MODEL = {
 class WordNetToCygnetConverter:
     """Converts WordNet LMF lexical resources to Cygnet format."""
 
-    def __init__(self, cili_path: str, relations_path: Optional[str] = None, skip_cili_defns=False):
+    def __init__(self, cili_path: str, relations_path: str | None = None, skip_cili_defns=False):
 
         self.skip_cili_defns = skip_cili_defns
 
@@ -200,24 +202,24 @@ class WordNetToCygnetConverter:
         self.relations_path = relations_path
 
         # Mapping dictionaries
-        self.synset_to_concept: Dict[str, str] = {}
-        self.old_sense_to_new_sense: Dict[str, str] = {}
-        self.lexentry_to_lexeme: Dict[str, str] = {}
+        self.synset_to_concept: dict[str, str] = {}
+        self.old_sense_to_new_sense: dict[str, str] = {}
+        self.lexentry_to_lexeme: dict[str, str] = {}
 
         # CILI data structures
-        self.cili_concepts: Dict[str, etree.Element] = {}
-        self.cili_glosses: Dict[str, str] = {}
+        self.cili_concepts: dict[str, etree.Element] = {}
+        self.cili_glosses: dict[str, str] = {}
 
         # Relations file data structures
-        self.existing_concept_relations: Set[Tuple[str, str, str]] = set()
+        self.existing_concept_relations: set[tuple[str, str, str]] = set()
 
         # Output data structures
-        self.concepts: List[etree.Element] = []
-        self.lexemes: List[etree.Element] = []
-        self.senses: List[etree.Element] = []
-        self.glosses: List[etree.Element] = []
-        self.sense_relations: List[etree.Element] = []
-        self.concept_relations: List[etree.Element] = []
+        self.concepts: list[etree.Element] = []
+        self.lexemes: list[etree.Element] = []
+        self.senses: list[etree.Element] = []
+        self.glosses: list[etree.Element] = []
+        self.sense_relations: list[etree.Element] = []
+        self.concept_relations: list[etree.Element] = []
 
         # Logging
         self.log = {
@@ -303,35 +305,35 @@ class WordNetToCygnetConverter:
         self.lexicon_language = None
 
         # Example processing
-        self.examples: List[etree.Element] = []
+        self.examples: list[etree.Element] = []
 
         # NLP tools (loaded in convert())
         self.nlp = None
         self.nltk_lemmatizer = None
 
         # Caching for performance
-        self.doc_cache: Dict[str, any] = {}  # spaCy document cache
-        self.form_cache: Dict[str, Set[str]] = {}  # morphological forms cache
+        self.doc_cache: dict[str, any] = {}  # spaCy document cache
+        self.form_cache: dict[str, set[str]] = {}  # morphological forms cache
 
         # Build reverse mapping: concept_id -> list of sense_ids
-        self.concept_to_senses: Dict[str, List[str]] = defaultdict(list)
+        self.concept_to_senses: dict[str, list[str]] = defaultdict(list)
 
         # Lookup dictionaries for fast access (populated in pass2)
-        self.sense_lookup: Dict[str, etree.Element] = {}
-        self.lexeme_lookup: Dict[str, etree.Element] = {}
+        self.sense_lookup: dict[str, etree.Element] = {}
+        self.lexeme_lookup: dict[str, etree.Element] = {}
 
         # Lookup dictionary for concept ontological categories (populated in pass1)
-        self.concept_categories: Dict[str, str] = {}
+        self.concept_categories: dict[str, str] = {}
 
-        self.lexeme_dedup_lookup: Dict[
-            Tuple[tuple, str, str], str] = {}  # (sorted_written_forms, grammatical_category, language) -> lexeme_id
-        self.created_senses: Set[Tuple[str, str]] = set()  # (lexeme_id, concept_id) pairs already created
-        self.created_concepts: Set[str] = set()  # concept_ids already created
+        self.lexeme_dedup_lookup: dict[
+            tuple[tuple, str, str], str] = {}  # (sorted_written_forms, grammatical_category, language) -> lexeme_id
+        self.created_senses: set[tuple[str, str]] = set()  # (lexeme_id, concept_id) pairs already created
+        self.created_concepts: set[str] = set()  # concept_ids already created
 
         self.lexicon_version = None
-        self.lexicon_attrs: Dict[str, str] = {}
+        self.lexicon_attrs: dict[str, str] = {}
 
-    def read_metadata(self, input_path: str) -> Tuple[etree.Element, etree.ElementTree]:
+    def read_metadata(self, input_path: str) -> tuple[etree.Element, etree.ElementTree]:
         """Parse the input file and extract metadata without full conversion."""
         with self._open_file(input_path) as f:
             tree = etree.parse(f)
@@ -347,7 +349,6 @@ class WordNetToCygnetConverter:
             self.lexicon_id = lexicon_elem.get('id')
             self.lexicon_version = lexicon_elem.get('version')
             self.lexicon_language = lexicon_elem.get('language')
-            self.lexicon_label = lexicon_elem.get('label')
 
         return root, tree
 
@@ -368,22 +369,22 @@ class WordNetToCygnetConverter:
         Convert old POS codes to new labels using NEW_POS_LABELS dict.
         Should be called after validation.
         """
-        if pos not in NEW_POS_LABELS.keys():
-            print('Warning! Invalid POS! Setting to unknown!')
+        if pos not in NEW_POS_LABELS:
+            logger.warning('Warning! Invalid POS! Setting to unknown!')
             pos = 'u'
         return NEW_POS_LABELS[pos]
 
     def _initialize_nlp_tools(self):
         """Initialize spaCy and NLTK tools for example processing."""
-        print(f"\nInitializing NLP tools for language '{self.lexicon_language}'...")
+        logger.info(f"\nInitializing NLP tools for language '{self.lexicon_language}'...")
 
         # Load appropriate spaCy model
         model_name = LANGUAGE_TO_SPACY_MODEL.get(self.lexicon_language, 'xx_sent_ud_sm')
-        print(f"  Loading spaCy model '{model_name}'...")
+        logger.info(f"  Loading spaCy model '{model_name}'...")
         try:
             self.nlp = spacy.load(model_name, disable=["parser", "ner", "tok2vec"])
         except OSError:
-            print(f"  Downloading spaCy model '{model_name}'...")
+            logger.info(f"  Downloading spaCy model '{model_name}'...")
             import shutil
             import subprocess
             from spacy.cli.download import get_compatibility, get_version
@@ -399,17 +400,17 @@ class WordNetToCygnetConverter:
             self.nlp = spacy.load(model_name, disable=["parser", "ner", "tok2vec"])
 
         # Initialize NLTK lemmatizer
-        print("  Loading NLTK WordNet lemmatizer...")
+        logger.info("  Loading NLTK WordNet lemmatizer...")
         self.nltk_lemmatizer = WordNetLemmatizer()
         try:
             nltk.data.find('corpora/wordnet')
         except LookupError:
-            print("  Downloading NLTK wordnet data...")
+            logger.info("  Downloading NLTK wordnet data...")
             nltk.download('wordnet')
 
-        print("  NLP tools initialized successfully")
+        logger.info("  NLP tools initialized successfully")
 
-    def _merge_wordform_data(self, existing_lexeme: etree.Element, new_lemma, new_forms: List) -> int:
+    def _merge_wordform_data(self, existing_lexeme: etree.Element, new_lemma, new_forms: list) -> int:
         """
         Merge wordform data (Pronunciations and Scripts) from new_lemma and new_forms into existing_lexeme.
         Returns count of new Pronunciations added.
@@ -506,7 +507,7 @@ class WordNetToCygnetConverter:
         return self.doc_cache[text]
 
 
-    def _get_all_forms(self, word: str) -> Set[str]:
+    def _get_all_forms(self, word: str) -> set[str]:
         """
         Get all possible morphological forms/lemmas of a word.
         Uses spaCy, NLTK, and pyinflect for comprehensive coverage.
@@ -545,7 +546,7 @@ class WordNetToCygnetConverter:
         self.form_cache[word_lower] = forms
         return forms
 
-    def _match_single_word(self, wordform: str, text: str) -> Optional[str]:
+    def _match_single_word(self, wordform: str, text: str) -> str | None:
         """Match a single word using morphological form matching."""
         # Get all possible forms of the wordform
         wordform_forms = self._get_all_forms(wordform)
@@ -563,7 +564,7 @@ class WordNetToCygnetConverter:
 
         return None
 
-    def _match_multi_word(self, form_words: List[str], text: str) -> Optional[str]:
+    def _match_multi_word(self, form_words: list[str], text: str) -> str | None:
         """Match a multi-word expression using morphological form matching."""
         # Identify content words (not function words)
         function_words = {'a', 'an', 'the', 'of', 'in', 'on', 'at', 'to', 'for', 'with', 'by', 'from'}
@@ -617,7 +618,7 @@ class WordNetToCygnetConverter:
 
         return None
 
-    def _get_lexeme_written_forms(self, lexeme_id: str) -> List[str]:
+    def _get_lexeme_written_forms(self, lexeme_id: str) -> list[str]:
         """
         Get all written wordforms for a lexeme.
 
@@ -632,7 +633,7 @@ class WordNetToCygnetConverter:
             return []
         return [wf.get('form') for wf in lexeme_elem.findall('Wordform') if wf.get('form')]
 
-    def _find_best_match(self, text: str, candidates: List[Tuple[str, str]]) -> Tuple[Optional[str], Optional[str]]:
+    def _find_best_match(self, text: str, candidates: list[tuple[str, str]]) -> tuple[str | None, str | None]:
         """
         Find the best matching wordform in the text.
 
@@ -692,7 +693,7 @@ class WordNetToCygnetConverter:
 
         return None, None
 
-    def _expand_to_token_boundaries(self, text: str, match_start: int, match_end: int) -> Tuple[int, int]:
+    def _expand_to_token_boundaries(self, text: str, match_start: int, match_end: int) -> tuple[int, int]:
         """Expand match to complete token boundaries."""
         # Stage 1: Check if already at boundaries (CHEAP)
         token_boundaries = {' ', '.', ',', '!', '?', ';', ':', '"', "'", "'", '"', '"',
@@ -762,7 +763,7 @@ class WordNetToCygnetConverter:
 
     def load_cili(self):
         """Load and parse the CILI file."""
-        print(f"Loading CILI from {self.cili_path}...")
+        logger.info(f"Loading CILI from {self.cili_path}...")
         with self._open_file(self.cili_path) as f:
             tree = etree.parse(f)
         root = tree.getroot()
@@ -783,7 +784,7 @@ class WordNetToCygnetConverter:
                 gloss_text = self._extract_text_content(gloss)
                 self.cili_glosses[definiendum] = gloss_text
 
-        print(f"Loaded {len(self.cili_concepts)} CILI concepts and {len(self.cili_glosses)} glosses")
+        logger.info(f"Loaded {len(self.cili_concepts)} CILI concepts and {len(self.cili_glosses)} glosses")
 
     def _extract_text_content(self, element: etree.Element) -> str:
         """Extract all text content from an element (including mixed content)."""
@@ -802,7 +803,7 @@ class WordNetToCygnetConverter:
         if not self.relations_path:
             return
 
-        print(f"Loading existing relations from {self.relations_path}...")
+        logger.info(f"Loading existing relations from {self.relations_path}...")
         with self._open_file(self.relations_path) as f:
             tree = etree.parse(f)
         root = tree.getroot()
@@ -817,22 +818,21 @@ class WordNetToCygnetConverter:
                 if source and target and relation_type:
                     self.existing_concept_relations.add((source, target, relation_type))
 
-        print(f"Loaded {len(self.existing_concept_relations)} existing concept relations")
+        logger.info(f"Loaded {len(self.existing_concept_relations)} existing concept relations")
 
     def pass1_synsets_to_concepts_and_glosses(self, root: etree.Element):
         """
         Pass 1: Convert Synsets to Concepts and create Glosses.
         """
-        print("\nPass 1: Converting Synsets to Concepts and Glosses...")
+        logger.info("\nPass 1: Converting Synsets to Concepts and Glosses...")
 
         # Process all lexicons (including extensions)
         for lexicon in root.findall('Lexicon') + root.findall('LexiconExtension'):
             if self.lexicon_id is None:
                 self.lexicon_id = lexicon.get('id')
                 self.lexicon_language = lexicon.get('language')
-                self.lexicon_label = lexicon.get('label')
-                self.lexicon_version = lexicon.get('version', '1.0')
-                print(f"  Using lexicon ID: {self.lexicon_id}, language: {self.lexicon_language}")
+                self.lexicon_version = lexicon.get('version')
+                logger.info(f"  Using lexicon ID: {self.lexicon_id}, language: {self.lexicon_language}")
 
             for synset in lexicon.findall('Synset'):
                 synset_id = synset.get('id')
@@ -935,17 +935,17 @@ class WordNetToCygnetConverter:
                         self.glosses.append(gloss)
                         self.log['statistics']['glosses']['created'] += 1
 
-        print(f"  Created {self.log['statistics']['concepts']['newly_created']} new concepts")
-        print(f"  Mapped to {self.log['statistics']['concepts']['from_cili']} CILI concepts")
-        print(f"  Total concepts: {self.log['statistics']['concepts']['total']}")
-        print(f"  Created {self.log['statistics']['glosses']['created']} glosses")
-        print(f"  Found {self.log['synset_concept_pos_mismatches']['total_count']} synset-concept POS mismatches")
+        logger.info(f"  Created {self.log['statistics']['concepts']['newly_created']} new concepts")
+        logger.info(f"  Mapped to {self.log['statistics']['concepts']['from_cili']} CILI concepts")
+        logger.info(f"  Total concepts: {self.log['statistics']['concepts']['total']}")
+        logger.info(f"  Created {self.log['statistics']['glosses']['created']} glosses")
+        logger.warning(f"  Found {self.log['synset_concept_pos_mismatches']['total_count']} synset-concept POS mismatches")
 
     def pass2_lexical_entries_to_lexemes_and_senses(self, root: etree.Element):
         """
         Pass 2: Convert LexicalEntries to Lexemes and create Senses.
         """
-        print("\nPass 2: Converting LexicalEntries to Lexemes and Senses...")
+        logger.info("\nPass 2: Converting LexicalEntries to Lexemes and Senses...")
 
         # First, build a map of concept IDs to their ontological categories
         concept_pos_map = {}
@@ -1146,18 +1146,18 @@ class WordNetToCygnetConverter:
                     self.created_senses.add(sense_key)
                     self.log['statistics']['senses']['created'] += 1
 
-        print(f"  Created {self.log['statistics']['lexemes']['created']} lexemes")
-        print(f"  Merged {self.log['lexeme_merging']['total_merges']} duplicate lexemes")
-        print(f"  Created {self.log['statistics']['senses']['created']} senses")
-        print(f"  Found {self.log['lexeme_concept_pos_mismatches']['total_count']} lexeme-concept POS mismatches")
+        logger.info(f"  Created {self.log['statistics']['lexemes']['created']} lexemes")
+        logger.info(f"  Merged {self.log['lexeme_merging']['total_merges']} duplicate lexemes")
+        logger.info(f"  Created {self.log['statistics']['senses']['created']} senses")
+        logger.warning(f"  Found {self.log['lexeme_concept_pos_mismatches']['total_count']} lexeme-concept POS mismatches")
 
-    def _get_concept_ontological_category(self, concept_id: str) -> Optional[str]:
+    def _get_concept_ontological_category(self, concept_id: str) -> str | None:
         """Get the ontological category for a concept (O(1) lookup)."""
         return self.concept_categories.get(concept_id)
 
 
     def _normalize_relation_tuple(self, source: str, target: str, rel_type: str,
-                                  is_concept: bool) -> Tuple[str, str, str]:
+                                  is_concept: bool) -> tuple[str, str, str]:
         """
         Normalize relation tuple for consistent ordering.
         For symmetric relations, order by source/target lexicographically.
@@ -1174,7 +1174,7 @@ class WordNetToCygnetConverter:
 
         return (source, target, rel_type)
 
-    def _get_relation_type_from_inverse(self, inverse_type: str, is_concept: bool) -> Optional[str]:
+    def _get_relation_type_from_inverse(self, inverse_type: str, is_concept: bool) -> str | None:
         """
         Given an inverse relation type, find the corresponding forward type.
         E.g., given 'hyponym', return 'hypernym'
@@ -1203,7 +1203,7 @@ class WordNetToCygnetConverter:
         8. Check ontological categories
         9. Create final XML elements
         """
-        print("\nPass 3: Converting Relations...")
+        logger.info("\nPass 3: Converting Relations...")
 
         # Helper function to build bidirectional relation dict
         def build_bidirectional_dict(pairs_dict):
@@ -1293,7 +1293,7 @@ class WordNetToCygnetConverter:
             return remapped, unknown_count, dup_count, inverses_added
 
         # Load all relations from XML
-        print("  Loading all relations...")
+        logger.info("  Loading all relations...")
         raw_concept_relations = []
         raw_sense_relations = []
 
@@ -1330,11 +1330,11 @@ class WordNetToCygnetConverter:
                             target_sense = self.old_sense_to_new_sense[target_old_sense]
                             raw_sense_relations.append((source_sense, target_sense, rel_type))
 
-        print(f"    Loaded {len(raw_concept_relations)} concept relations")
-        print(f"    Loaded {len(raw_sense_relations)} sense relations")
+        logger.info(f"    Loaded {len(raw_concept_relations)} concept relations")
+        logger.info(f"    Loaded {len(raw_sense_relations)} sense relations")
 
         # Process concept relations
-        print("  Processing concept relations...")
+        logger.info("  Processing concept relations...")
         final_concept_relations, c_unknown, c_dup, c_inv = process_relations(
             raw_concept_relations,
             CONCEPT_RELATION_PAIRS,
@@ -1344,13 +1344,13 @@ class WordNetToCygnetConverter:
             existing_relations=self.existing_concept_relations
         )
 
-        print(f"    Filtered {c_unknown} unknown types")
-        print(f"    Removed {c_dup} duplicates")
-        print(f"    Added {c_inv} missing inverses")
-        print(f"    Final: {len(final_concept_relations)} concept relations")
+        logger.warning(f"    Filtered {c_unknown} unknown types")
+        logger.info(f"    Removed {c_dup} duplicates")
+        logger.info(f"    Added {c_inv} missing inverses")
+        logger.info(f"    Final: {len(final_concept_relations)} concept relations")
 
         # Process sense relations
-        print("  Processing sense relations...")
+        logger.info("  Processing sense relations...")
         final_sense_relations, s_unknown, s_dup, s_inv = process_relations(
             raw_sense_relations,
             SENSE_RELATION_PAIRS,
@@ -1360,13 +1360,13 @@ class WordNetToCygnetConverter:
             existing_relations=None
         )
 
-        print(f"    Filtered {s_unknown} unknown types")
-        print(f"    Removed {s_dup} duplicates")
-        print(f"    Added {s_inv} missing inverses")
-        print(f"    Final: {len(final_sense_relations)} sense relations")
+        logger.warning(f"    Filtered {s_unknown} unknown types")
+        logger.info(f"    Removed {s_dup} duplicates")
+        logger.info(f"    Added {s_inv} missing inverses")
+        logger.info(f"    Final: {len(final_sense_relations)} sense relations")
 
         # Check ontological categories for concept relations
-        print("  Checking ontological categories...")
+        logger.info("  Checking ontological categories...")
         for source, target, rel_type in final_concept_relations:
             if rel_type in CONCEPT_RELATIONS_REQUIRING_SAME_CATEGORY:
                 source_cat = self._get_concept_ontological_category(source)
@@ -1376,10 +1376,10 @@ class WordNetToCygnetConverter:
                     self.log['relation_processing']['ontological_category_mismatches']['count'] += 1
 
         mismatch_count = self.log['relation_processing']['ontological_category_mismatches']['count']
-        print(f"    Found {mismatch_count} ontological category mismatches")
+        logger.warning(f"    Found {mismatch_count} ontological category mismatches")
 
         # Create XML elements
-        print("  Creating XML elements...")
+        logger.info("  Creating XML elements...")
 
         for source, target, rel_type in final_concept_relations:
             concept_rel = etree.Element('ConceptRelation',
@@ -1403,18 +1403,18 @@ class WordNetToCygnetConverter:
             self.sense_relations.append(sense_rel)
             self.log['statistics']['relations']['sense_relations_created'] += 1
 
-        print(f"  Created {self.log['statistics']['relations']['concept_relations_created']} concept relations")
-        print(f"  Created {self.log['statistics']['relations']['sense_relations_created']} sense relations")
+        logger.info(f"  Created {self.log['statistics']['relations']['concept_relations_created']} concept relations")
+        logger.info(f"  Created {self.log['statistics']['relations']['sense_relations_created']} sense relations")
 
         skipped_count = self.log['relation_processing']['skipped_existing_relations']['concept_relations']['count']
         if skipped_count > 0:
-            print(f"  Skipped {skipped_count} concept relations that already exist in relations file")
+            logger.warning(f"  Skipped {skipped_count} concept relations that already exist in relations file")
 
     def pass4_examples(self, root: etree.Element):
         """
         Pass 4: Process examples from Synsets and Senses, tagging with sense annotations.
         """
-        print("\nPass 4: Processing examples...")
+        logger.info("\nPass 4: Processing examples...")
 
         self._initialize_nlp_tools()
 
@@ -1440,7 +1440,7 @@ class WordNetToCygnetConverter:
                     total_examples += len(sense.findall('Example'))
 
         self.log['statistics']['examples']['total_found'] = total_examples
-        print(f"  Total examples to process: {total_examples}")
+        logger.info(f"  Total examples to process: {total_examples}")
 
         # Process synset examples
         for lexicon in root.findall('Lexicon') + root.findall('LexiconExtension'):
@@ -1466,8 +1466,9 @@ class WordNetToCygnetConverter:
 
                         # Progress logging
                         if example_counter % 10000 == 0:
-                            print(f"    Processed {example_counter}/{total_examples} examples "
-                                  f"(skipped: {self.log['statistics']['examples']['skipped']})")
+                            logger.info(
+                                f"    Processed {example_counter}/{total_examples} examples "
+                                f"(skipped: {self.log['statistics']['examples']['skipped']})")
 
         # Process sense examples
         for lexicon in root.findall('Lexicon') + root.findall('LexiconExtension'):
@@ -1489,15 +1490,16 @@ class WordNetToCygnetConverter:
 
                             # Progress logging
                             if example_counter % 100 == 0:
-                                print(f"    Processed {example_counter}/{total_examples} examples "
-                                      f"(skipped: {self.log['statistics']['examples']['skipped']})")
+                                logger.info(
+                                    f"    Processed {example_counter}/{total_examples} examples "
+                                    f"(skipped: {self.log['statistics']['examples']['skipped']})")
 
-        print(f"  Examples processed: {self.log['statistics']['examples']['processed']}")
-        print(f"  Examples skipped: {self.log['statistics']['examples']['skipped']}")
+        logger.info(f"  Examples processed: {self.log['statistics']['examples']['processed']}")
+        logger.warning(f"  Examples skipped: {self.log['statistics']['examples']['skipped']}")
         if total_examples > 0:
             success_rate = (self.log['statistics']['examples']['processed'] / total_examples) * 100
             self.log['statistics']['examples']['success_rate_pct'] = round(success_rate, 1)
-            print(f"  Success rate: {success_rate:.1f}%")
+            logger.info(f"  Success rate: {success_rate:.1f}%")
 
     def _process_single_example(self, text: str, example_id: str,
                                 is_synset_example: bool = False,
@@ -1611,7 +1613,7 @@ class WordNetToCygnetConverter:
 
     def build_output_xml(self) -> etree.Element:
         """Build the output CygnetResource XML tree."""
-        print("\nBuilding output XML...")
+        logger.info("\nBuilding output XML...")
 
         # Create root element with all source attributes preserved
         cygnet_root = etree.Element('CygnetResource', **self.lexicon_attrs)
@@ -1670,21 +1672,10 @@ class WordNetToCygnetConverter:
 
 
     def convert(self, input_path: str):
-        """Main conversion process."""
-        # Parse input
-        print(f"\nParsing input file...")
-        with self._open_file(input_path) as f:
-            tree = etree.parse(f)
-        root = tree.getroot()
-
-        # Convert
+        """Parse input file, convert, and return the output XML tree."""
+        root, _ = self.read_metadata(input_path)
         self.convert_from_tree(root)
-
-        # Build output
-        output_root = self.build_output_xml()
-        output_tree = etree.ElementTree(output_root)
-
-        return output_tree
+        return etree.ElementTree(self.build_output_xml())
 
 
     def save(self, output_path: str):
@@ -1697,33 +1688,33 @@ class WordNetToCygnetConverter:
         log_path = output_path[:-4] + '_log.json'
 
         # Write output XML
-        print(f"Writing output to {output_path}...")
+        logger.info(f"Writing output to {output_path}...")
         output_tree.write(output_path,
                           pretty_print=True,
                           xml_declaration=True,
                           encoding='UTF-8')
 
         # Write log
-        print(f"Writing log to {log_path}...")
+        logger.info(f"Writing log to {log_path}...")
         with open(log_path, 'w', encoding='utf-8') as f:
             json.dump(self.log, f, indent=2, ensure_ascii=False)
 
 
 
-def convert_wordnet_to_cygnet(lmf_xml, cili_xml=None, relations_xml=None, return_log=False, skip_cili_defns=False):
-    """
-    Convert WordNet LMF XML to Cygnet XML structure.
+def convert_wordnet_to_cygnet(lmf_xml, cili_xml=None, relations_xml=None, skip_cili_defns=False):
+    """Convert WordNet LMF XML to Cygnet XML structure.
 
     Args:
         lmf_xml: LMF XML data (can be file path, etree.Element, or string)
+        cili_xml: Optional CILI XML path
+        relations_xml: Optional relations XML path
+        skip_cili_defns: If True, skip CILI definitions for concepts
 
     Returns:
         etree.Element: Root element of Cygnet XML structure
     """
-
-    converter = WordNetToCygnetConverter(cili_xml, relations_xml, skip_cili_defns=False)
-    output_tree = converter.convert(lmf_xml)
-    return output_tree
+    converter = WordNetToCygnetConverter(cili_xml, relations_xml, skip_cili_defns=skip_cili_defns)
+    return converter.convert(lmf_xml)
 
 def save_wordnet_to_cygnet(lmf_xml, output, cili_xml=None, relations_xml=None, skip_cili_defns=False):
 
@@ -1731,7 +1722,7 @@ def save_wordnet_to_cygnet(lmf_xml, output, cili_xml=None, relations_xml=None, s
     converter.convert_from_tree(lmf_xml)
     converter.save(output)
 
-    print("\nConversion complete!")
+    logger.info("\nConversion complete!")
 
 def main():
     parser = argparse.ArgumentParser(
