@@ -234,6 +234,11 @@ if $DO_BUILD; then
     uv run pytest tests/ -v
     echo
 
+    echo "=== Step 12: Compress databases ==="
+    gzip -k -9 -f web/cygnet.db
+    gzip -k -9 -f web/provenance.db
+    echo
+
     echo "=== Build complete! ==="
     echo "Output:"
     echo "  web/cygnet.db         - SQLite database for web interface"
@@ -244,4 +249,6 @@ if $DO_BUILD; then
         echo "  cygnet.xml            - full merged resource (with provenance)"
         echo "  cygnet_small.xml      - without provenance metadata"
     fi
+    echo
+    echo "You can test with: bash run.sh"
 fi

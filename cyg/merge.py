@@ -6,7 +6,6 @@ import json
 import logging
 import re
 import sqlite3
-import subprocess
 import unicodedata
 from pathlib import Path
 
@@ -1329,7 +1328,7 @@ class MergeBuilder:
         self.cur.executescript(INDEXES)
 
     def finalize(self, db_path: Path, prov_db_path: Path) -> None:
-        """Run ANALYZE, commit, and gzip both databases."""
+        """Run ANALYZE and commit both databases."""
         print('Running ANALYZE...')
         self.cur.execute('ANALYZE')
 
@@ -1341,10 +1340,6 @@ class MergeBuilder:
         for path in (db_path, prov_db_path):
             size = path.stat().st_size / 1024 ** 2
             print(f'  {path} ({size:.1f} MB)')
-            subprocess.run(['gzip', '-k', '-9', '-f', str(path)], check=True)
-            gz = path.with_suffix(path.suffix + '.gz')
-            gz_size = gz.stat().st_size / 1024 ** 2
-            print(f'  {gz} ({gz_size:.1f} MB compressed)')
 
 
 # ---------------------------------------------------------------------------
