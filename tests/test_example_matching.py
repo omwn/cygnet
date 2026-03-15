@@ -35,10 +35,7 @@ def _make_converter(lang: str) -> WordNetToCygnetConverter:
         conv.nltk_lemmatizer = WordNetLemmatizer()
     except (ImportError, LookupError):
         pass
-    installed = set(spacy.util.get_installed_models())
-    candidates = _spacy_candidates(lang)
-    model_name = next((m for m in candidates if m in installed), candidates[0])
-    conv.nlp = spacy.load(model_name, disable=["parser", "ner"])
+    conv.nlp = conv._load_spacy_model(_spacy_candidates(lang), disable=["parser", "ner"])
     return conv
 
 

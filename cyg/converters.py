@@ -284,7 +284,7 @@ class WordNetToCygnetConverter:
                     'processed': 0,
                     'skipped': 0,
                     'success_rate_pct': 0.0,
-                    'first_20_failed_matches': []
+                    'failed_matches': []
                 }
             }
         }
@@ -1586,11 +1586,10 @@ class WordNetToCygnetConverter:
 
         if not candidates:
             self.log['statistics']['examples']['skipped'] += 1
-            if len(self.log['statistics']['examples']['first_20_failed_matches']) < 20:
-                self.log['statistics']['examples']['first_20_failed_matches'].append({
-                    'text': text,
-                    'candidate_wordforms': []
-                })
+            self.log['statistics']['examples']['failed_matches'].append({
+                'text': text,
+                'candidate_wordforms': [],
+            })
             return
 
         # Find best match
@@ -1598,14 +1597,10 @@ class WordNetToCygnetConverter:
 
         if not target_sense_id:
             self.log['statistics']['examples']['skipped'] += 1
-
-            # Log first 20 failures only
-            if len(self.log['statistics']['examples']['first_20_failed_matches']) < 20:
-                candidate_forms = [form for _, form in candidates]
-                self.log['statistics']['examples']['first_20_failed_matches'].append({
-                    'text': text,
-                    'candidate_wordforms': candidate_forms
-                })
+            self.log['statistics']['examples']['failed_matches'].append({
+                'text': text,
+                'candidate_wordforms': [form for _, form in candidates],
+            })
             return
 
         # Create annotated example

@@ -408,11 +408,11 @@ class TestArasaac:
         expect(img).to_be_visible()
 
     def test_arasaac_image_links_to_arasaac(self, page_ready: Page):
-        """ARASAAC pictogram links to the arasaac.org /en/pictograms/ page."""
+        """ARASAAC pictogram links to the arasaac.org /pictograms/en/ page."""
         _search(page_ready, 'dog')
         page_ready.locator('.concept-inner').first.click()
         page_ready.wait_for_selector(_CONCEPT_LOADED, timeout=10_000)
-        link = page_ready.locator('a[href*="arasaac.org/en/pictograms"]').first
+        link = page_ready.locator('a[href*="arasaac.org/pictograms/en"]').first
         expect(link).to_be_visible()
 
     def test_no_arasaac_image_for_brightness(self, page_ready: Page):
@@ -694,8 +694,8 @@ class TestArasaacInSearch:
     def test_arasaac_image_in_search_links_to_arasaac(self, page_ready: Page):
         """The search-result pictogram is wrapped in a link to arasaac.org."""
         _search(page_ready, 'dog')
-        page_ready.wait_for_selector('a[href*="arasaac.org/en/pictograms"]', timeout=10_000)
-        expect(page_ready.locator('a[href*="arasaac.org/en/pictograms"]').first).to_be_visible()
+        page_ready.wait_for_selector('a[href*="arasaac.org/pictograms/en"]', timeout=10_000)
+        expect(page_ready.locator('a[href*="arasaac.org/pictograms/en"]').first).to_be_visible()
 
     def test_no_arasaac_image_for_brightness_in_search(self, page_ready: Page):
         """Search results for 'brightness' (no ARASAAC data) show no pictogram."""

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cygnet (SQL)</title>
+    <title>Cygnet — A Network of Signs</title>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -770,6 +770,31 @@
                 if (!cid) return null;
                 return loadedConcepts[cid] || null;
             };
+
+            // Returns [text, actualLang] for a concept's definitions, falling back
+            // through English then the first available language.
+            const selectDef = (defs, lang, fallback = '') => {
+                if (!defs) return [fallback, null];
+                if (defs[lang]) return [defs[lang], lang];
+                if (defs.en) return [defs.en, 'en'];
+                const first = Object.entries(defs)[0];
+                return first ? [first[1], first[0]] : [fallback, null];
+            };
+
+            // Renders a language-code badge when the displayed language differs
+            // from the preferred one, e.g. [fr].  Pass ml='ml-1' or 'ml-0.5'.
+            const LangBadge = ({ lang, currentLang, ml = 'ml-1' }) =>
+                lang && lang !== currentLang
+                    ? <span className={`text-xs text-gray-400 ${ml}`}>[{lang}]</span>
+                    : null;
+
+            // Renders a comma-separated list of clickable wordforms.
+            const renderWordformList = (items, onClick) => items.map((item, i) => (
+                <span key={i}>{i > 0 && ', '}
+                    <span onClick={(e) => { e.stopPropagation(); onClick(item); }}
+                        className="text-blue-600 hover:underline cursor-pointer">{item}</span>
+                </span>
+            ));
 
             // Returns { ids, isIndirect } for the best available ARASAAC pictogram(s).
             // Priority: direct image > hypernym > eq_synonym > similar.
@@ -1653,8 +1678,11 @@
                                         <h1 className="text-4xl -mt-0.5">🦢</h1>
                                         <h1 className="text-3xl font-bold text-gray-800"> Cygnet</h1>
                                     </button>
-                                    <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded mt-1">SQL</span>
+                                    <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded mt-1">A Network of Signs</span>
                                 </div>
+                                <a href="https://omwn.org" target="_blank" rel="noopener noreferrer" className="hover:opacity-80">
+                                    <img src="omw-logo.svg" alt="Open Multilingual Wordnet" className="h-10" />
+                                </a>
                             </div>
                             <nav className="flex items-end gap-3 mt-3 -mb-3">
                                 {['browser', 'python', 'data', 'about', 'publications', 'wordnets'].map(tab => (
@@ -1924,8 +1952,7 @@
                                                                                                         }
                                                                                                     });
                                                                                                 }
-                                                                                                const defEntry = concept?.d ? (concept.d[definitionLanguage] ? [concept.d[definitionLanguage], definitionLanguage] : concept.d.en ? [concept.d.en, 'en'] : Object.entries(concept.d)[0] ? [Object.values(concept.d)[0], Object.keys(concept.d)[0]] : ['', null]) : ['', null];
-                                                                                                const [definition, defLang] = defEntry;
+                                                                                                const [definition, defLang] = selectDef(concept?.d, definitionLanguage);
                                                                                                 const defIsFallback = defLang && defLang !== definitionLanguage;
                                                                                                 const hasExtra = !!(sense.v?.length || synonyms.length || sense.ex?.length);
                                                                                                 return (
@@ -1939,30 +1966,30 @@
                                                                                                                     {renderPronunciations(sense.p)}
                                                                                                                 </div>
                                                                                                                 <div onClick={(e) => { e.stopPropagation(); handleConceptClick(group.conceptId); }}
-                                                                                                                    className="bg-white px-2 py-1 rounded border border-gray-300 hover:border-blue-400 hover:shadow-sm transition-all text-left cursor-pointer flex-shrink concept-inner">
-                                                                                                                    <span className="text-base">
-                                                                                                                        {(() => { const li = getConceptLabel(parseInt(group.conceptId), definitionLanguage); return li ? <><span className="font-semibold text-gray-800">{li.form}</span>{li.lang !== definitionLanguage && <span className="text-xs text-gray-400 ml-0.5">[{li.lang}]</span>}{' · '}</> : null; })()}
+                                                                                                                    className="bg-white px-2 py-1 rounded border border-gray-300 hover:border-blue-400 hover:shadow-sm transition-all text-left cursor-pointer flex-shrink concept-inner flex items-start gap-2">
+                                                                                                                    <span className="text-base flex-1">
+                                                                                                                        {(() => { const li = getConceptLabel(parseInt(group.conceptId), definitionLanguage); return li ? <><span className="font-semibold text-gray-800">{li.form}</span>{<LangBadge lang={li.lang} currentLang={definitionLanguage} ml="ml-0.5" />}{' · '}</> : null; })()}
                                                                                                                         <span className="text-gray-600 italic">{getPosName(pos)}.</span>
-                                                                                                                        {' '}<span className="text-gray-700">{definition}</span>{defIsFallback && <span className="text-xs text-gray-400 ml-1">[{defLang}]</span>}
+                                                                                                                        {' '}<span className="text-gray-700">{definition}</span>{<LangBadge lang={defLang} currentLang={definitionLanguage} />}
                                                                                                                     </span>
+                                                                                                                    {(() => {
+                                                                                                                        const { ids, isIndirect } = getArasaacFallback(concept);
+                                                                                                                        const araId = ids?.[0];
+                                                                                                                        if (!araId) return null;
+                                                                                                                        const imgClass = `h-12 w-12 object-contain rounded bg-white flex-shrink-0 ${isIndirect ? 'border-2 border-dashed border-gray-400' : 'border border-gray-200'}`;
+                                                                                                                        return (
+                                                                                                                            <a href={`https://arasaac.org/pictograms/en/${araId}`}
+                                                                                                                                target="_blank" rel="noopener noreferrer"
+                                                                                                                                onClick={e => e.stopPropagation()}
+                                                                                                                                title="ARASAAC pictogram">
+                                                                                                                                <img src={`https://static.arasaac.org/pictograms/${araId}/${araId}_300.png`}
+                                                                                                                                    alt="" className={imgClass}
+                                                                                                                                    onError={e => { e.target.parentElement.style.display = 'none'; }} />
+                                                                                                                            </a>
+                                                                                                                        );
+                                                                                                                    })()}
                                                                                                                 </div>
                                                                                                             </div>
-                                                                                                            {(() => {
-                                                                                                                const { ids, isIndirect } = getArasaacFallback(concept);
-                                                                                                                const araId = ids?.[0];
-                                                                                                                if (!araId) return null;
-                                                                                                                const imgClass = `h-14 w-14 object-contain rounded bg-white flex-shrink-0 ${isIndirect ? 'border-2 border-dashed border-gray-400' : 'border border-gray-200'}`;
-                                                                                                                return (
-                                                                                                                    <a href={`https://arasaac.org/en/pictograms/${araId}/`}
-                                                                                                                        target="_blank" rel="noopener noreferrer"
-                                                                                                                        onClick={e => e.stopPropagation()}
-                                                                                                                        title="ARASAAC pictogram">
-                                                                                                                        <img src={`https://static.arasaac.org/pictograms/${araId}/${araId}_300.png`}
-                                                                                                                            alt="" className={imgClass}
-                                                                                                                            onError={e => { e.target.parentElement.style.display = 'none'; }} />
-                                                                                                                    </a>
-                                                                                                                );
-                                                                                                            })()}
                                                                                                             {hasExtra && (
                                                                                                                 <div className="text-gray-500 text-sm pt-1 flex-shrink-0">
                                                                                                                     {synonymsCollapsed[sense.id] === false ? '▼' : '▶'}
@@ -1974,23 +2001,13 @@
                                                                                                                 {sense.v && sense.v.length > 0 && (
                                                                                                                     <div className="text-sm text-gray-600">
                                                                                                                         <span className="font-medium">Variants:</span>{' '}
-                                                                                                                        {sense.v.map((variant, vi) => (
-                                                                                                                            <span key={vi}>{vi > 0 && ', '}
-                                                                                                                                <span onClick={(e) => { e.stopPropagation(); handleWordformClick(variant); }}
-                                                                                                                                    className="text-blue-600 hover:underline cursor-pointer">{variant}</span>
-                                                                                                                            </span>
-                                                                                                                        ))}
+                                                                                                                        {renderWordformList(sense.v, handleWordformClick)}
                                                                                                                     </div>
                                                                                                                 )}
                                                                                                                 {synonyms.length > 0 && (
                                                                                                                     <div className="text-sm text-gray-600">
                                                                                                                         <span className="font-medium">Synonyms:</span>{' '}
-                                                                                                                        {synonyms.map((syn, si) => (
-                                                                                                                            <span key={si}>{si > 0 && ', '}
-                                                                                                                                <span onClick={(e) => { e.stopPropagation(); handleWordformClick(syn); }}
-                                                                                                                                    className="text-blue-600 hover:underline cursor-pointer">{syn}</span>
-                                                                                                                            </span>
-                                                                                                                        ))}
+                                                                                                                        {renderWordformList(synonyms, handleWordformClick)}
                                                                                                                     </div>
                                                                                                                 )}
                                                                                                                 {sense.ex && sense.ex.length > 0 && (
@@ -2034,12 +2051,7 @@
                                         });
                                     }
 
-                                    const mainDefEntry = concept.d
-                                        ? (concept.d[definitionLanguage] ? [concept.d[definitionLanguage], definitionLanguage]
-                                            : concept.d.en ? [concept.d.en, 'en']
-                                            : Object.entries(concept.d)[0] || ['(No definition available)', null])
-                                        : ['(No definition available)', null];
-                                    const [mainDef, shownLang] = mainDefEntry;
+                                    const [mainDef, shownLang] = selectDef(concept.d, definitionLanguage, '(No definition available)');
                                     const mainDefIsFallback = shownLang && shownLang !== definitionLanguage;
                                     const altDefs = concept.d ? Object.entries(concept.d).filter(([l]) => l !== shownLang) : [];
 
@@ -2054,7 +2066,7 @@
                                                     <p className="text-base">
                                                         {conceptLabel && <><span className="font-medium">{conceptLabel}</span>{' \u2014 '}</>}<span className="text-gray-600 italic">{getPosName(concept.oc)}.</span>{' '}
                                                         {concept.da ? renderDefinitionWithLinks(mainDef, concept.da) : mainDef}
-                                                        {mainDefIsFallback && <span className="text-xs text-gray-400 ml-1">[{shownLang}]</span>}
+                                                        {<LangBadge lang={shownLang} currentLang={definitionLanguage} />}
                                                         {concept.dr?.[shownLang] && renderProvenance('definitions', concept.dr[shownLang])}
                                                         {concept.ili && <span className="text-sm ml-2">⟪{concept.ili}⟫</span>}
                                                     </p>
@@ -2077,7 +2089,7 @@
                                                     return (
                                                         <div className="flex flex-wrap gap-2 shrink-0">
                                                             {ids.map(id => (
-                                                                <a key={id} href={`https://arasaac.org/en/pictograms/${id}/`} target="_blank" rel="noopener noreferrer" title={`ARASAAC pictogram ${id}${isIndirect ? ' (from hypernym)' : ''}`}>
+                                                                <a key={id} href={`https://arasaac.org/pictograms/en/${id}`} target="_blank" rel="noopener noreferrer" title={`ARASAAC pictogram ${id}${isIndirect ? ' (from hypernym)' : ''}`}>
                                                                     <img
                                                                         src={`https://static.arasaac.org/pictograms/${id}/${id}_300.png`}
                                                                         alt={conceptLabel || concept.ili || ''}
@@ -2171,7 +2183,7 @@
                                                                                 <button onClick={() => handleConceptClick(rel.to)}
                                                                                     className="text-blue-600 hover:underline">
                                                                                     {li?.form || `#${rel.to}`}
-                                                                                    {li?.lang && li.lang !== definitionLanguage && <span className="text-gray-400 text-xs ml-0.5">[{li.lang}]</span>}
+                                                                                    {<LangBadge lang={li?.lang} currentLang={definitionLanguage} ml="ml-0.5" />}
                                                                                 </button>
                                                                                 {renderCompactProvenance('synsets', rel.to)}
                                                                             </span>
@@ -2195,11 +2207,11 @@
                                                                                 </button>
                                                                                 {conceptLabel && conceptLabel !== toSense?.l && (
                                                                                     <span className="text-gray-500">
-                                                                                        ({conceptLabel}{li.lang !== definitionLanguage && <span className="text-gray-400 text-xs ml-0.5">[{li.lang}]</span>})
+                                                                                        ({conceptLabel}{<LangBadge lang={li.lang} currentLang={definitionLanguage} ml="ml-0.5" />})
                                                                                     </span>
                                                                                 )}
                                                                                 {li?.lang && li.lang !== definitionLanguage && conceptLabel === toSense?.l && (
-                                                                                    <span className="text-gray-400 text-xs">[{li.lang}]</span>
+                                                                                    <LangBadge lang={li.lang} currentLang={definitionLanguage} ml="" />
                                                                                 )}
                                                                                 {renderCompactProvenance('senses', parseInt(toSenseId))}
                                                                             </span>
@@ -2247,7 +2259,7 @@
                                                             placeholder={`e.g. i${fromIli?.replace(/^i/,'') || '46360'}`}
                                                             className="w-40 border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:border-blue-400 font-mono"
                                                         />
-                                                        {targetLabel && <span className="text-sm text-gray-600">{targetLabel.form}{targetLabel.lang !== definitionLanguage && <span className="text-xs text-gray-400 ml-1">[{targetLabel.lang}]</span>}</span>}
+                                                        {targetLabel && <span className="text-sm text-gray-600">{targetLabel.form}{<LangBadge lang={targetLabel.lang} currentLang={definitionLanguage} />}</span>}
                                                         {pathTargetIli && !pathTargetRowid && <span className="text-xs text-gray-400 italic">not found</span>}
                                                         <button
                                                             onClick={() => pathTargetRowid && runPath(pathTargetRowid)}
@@ -2270,7 +2282,7 @@
                                                                             onClick={() => handleConceptClick(step.node)}
                                                                             className={`px-1.5 py-0.5 rounded text-xs border ${step.node === parseInt(selectedConcept) ? 'bg-blue-100 border-blue-400 text-blue-800 font-semibold' : 'bg-white border-gray-300 text-blue-600 hover:border-blue-400'}`}>
                                                                             {li?.form || `#${step.node}`}
-                                                                            {li?.lang && li.lang !== definitionLanguage && <span className="text-gray-400 ml-0.5">[{li.lang}]</span>}
+                                                                            {<LangBadge lang={li?.lang} currentLang={definitionLanguage} ml="ml-0.5" />}
                                                                         </button>
                                                                     </React.Fragment>
                                                                 );
