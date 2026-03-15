@@ -15,7 +15,7 @@ single SQLite database, indexed by the
 | Senses | ~2,100,000 |
 | Languages | 40+ |
 
-The database is browsable at  **[cygnet.maudslay.eu](cygnet.maudslay.eu)** or **[fcbond.github.io/cygnet](https://fcbond.github.io/cygnet)**
+The database is browsable at  **[cygnet.maudslay.eu](http://cygnet.maudslay.eu)** or **[fcbond.github.io/cygnet](https://fcbond.github.io/cygnet)**
 and queryable directly as a SQLite file.
 
 It is made and maintained by Rowan Hall Maudslay and Francis Bond.
