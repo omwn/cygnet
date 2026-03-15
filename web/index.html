@@ -451,6 +451,7 @@
                 entries:   get(`SELECT COUNT(*) FROM entries`),
                 senses:    get(`SELECT COUNT(*) FROM senses`),
                 languages: get(`SELECT COUNT(DISTINCT language_rowid) FROM entries`),
+                wordnets:  get(`SELECT COUNT(*) FROM resources`),
             };
         }
 
@@ -2435,12 +2436,13 @@
                                 {dbStats && (
                                     <div className="border-t border-gray-200 pt-4 mb-4">
                                         <h3 className="font-medium text-sm text-gray-700 mb-3">Database statistics</h3>
-                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                                             {[
+                                                ['Wordnets',  dbStats.wordnets],
+                                                ['Languages', dbStats.languages],
                                                 ['Concepts',  dbStats.synsets],
                                                 ['Entries',   dbStats.entries],
                                                 ['Senses',    dbStats.senses],
-                                                ['Languages', dbStats.languages],
                                             ].map(([label, n]) => (
                                                 <div key={label} className="bg-gray-50 rounded p-3 text-center">
                                                     <div className="text-lg font-semibold text-gray-800">{n?.toLocaleString()}</div>
