@@ -1679,7 +1679,6 @@
                                         <h1 className="text-4xl -mt-0.5">🦢</h1>
                                         <h1 className="text-3xl font-bold text-gray-800"> Cygnet</h1>
                                     </button>
-                                    <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded mt-1">A Network of Signs</span>
                                 </div>
                                 <a href="https://omwn.org" target="_blank" rel="noopener noreferrer" className="hover:opacity-80">
                                     <img src="omw-logo.svg" alt="Open Multilingual Wordnet" className="h-10" />
@@ -1970,8 +1969,8 @@
                                                                                                                     className="bg-white px-2 py-1 rounded border border-gray-300 hover:border-blue-400 hover:shadow-sm transition-all text-left cursor-pointer flex-shrink concept-inner flex items-start gap-2">
                                                                                                                     <span className="text-base flex-1">
                                                                                                                         {(() => { const li = getConceptLabel(parseInt(group.conceptId), definitionLanguage); return li ? <><span className="font-semibold text-gray-800">{li.form}</span>{<LangBadge lang={li.lang} currentLang={definitionLanguage} ml="ml-0.5" />}{' · '}</> : null; })()}
-                                                                                                                        <span className="text-gray-600 italic">{getPosName(pos)}.</span>
-                                                                                                                        {' '}<span className="text-gray-700">{definition}</span>{<LangBadge lang={defLang} currentLang={definitionLanguage} />}
+                                                                                                                        <span className="text-gray-600 italic">{getPosName(pos)}</span>
+                                                                                                                        {' · '}<span className="text-gray-700">{definition}</span>{<LangBadge lang={defLang} currentLang={definitionLanguage} />}
                                                                                                                     </span>
                                                                                                                     {(() => {
                                                                                                                         const { ids, isIndirect } = getArasaacFallback(concept);
@@ -2065,7 +2064,7 @@
                                             <div className="mb-4 flex gap-4 items-start">
                                                 <div className="flex-1">
                                                     <p className="text-base">
-                                                        {conceptLabel && <><span className="font-medium">{conceptLabel}</span>{' \u2014 '}</>}<span className="text-gray-600 italic">{getPosName(concept.oc)}.</span>{' '}
+                                                        {conceptLabel && <><span className="font-medium">{conceptLabel}</span>{' · '}</>}<span className="text-gray-600 italic">{getPosName(concept.oc)}</span>{' · '}
                                                         {concept.da ? renderDefinitionWithLinks(mainDef, concept.da) : mainDef}
                                                         {<LangBadge lang={shownLang} currentLang={definitionLanguage} />}
                                                         {concept.dr?.[shownLang] && renderProvenance('definitions', concept.dr[shownLang])}
@@ -2622,8 +2621,17 @@
                     </main>
 
                     <footer className="mt-auto py-4">
-                        <div className="max-w-4xl mx-auto px-4 border-t border-gray-200 pt-4 text-center text-sm text-gray-600">
-                            <span>Cygnet — SQL interface</span>
+                        <div className="max-w-4xl mx-auto px-4 border-t border-gray-200 pt-4">
+                            <div className="max-w-4xl mx-auto text-center text-sm text-gray-600">
+                                <div className="mb-2">
+                                    <span>Produced with the support of</span>
+                                </div>
+                                <div>
+                                    <a href="https://www.culturelab.psl.eu/" target="_blank" rel="noopener noreferrer" className="inline-block hover:opacity-80">
+                                        <img src="website_data/culturelab.png" alt="Culture Lab" className="h-14 inline-block" />
+                                    </a>
+                                </div>
+                            </div>
                         </div>
                     </footer>
 
