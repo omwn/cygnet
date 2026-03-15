@@ -968,8 +968,14 @@ def format_report(
 
 
 def report_file(path: Path, markdown: bool = False) -> None:
-    """Parse, check, and print a report for one XML file."""
+    """Parse, check, and print a report for one XML file.
+
+    Returns without printing anything for the CILI file, which is an
+    infrastructure resource rather than a wordnet.
+    """
     data = parse_xml(path)
+    if data.resource_id == "cili":
+        return
     issues = run_checks(data)
 
     # Augment with converter log (created at pre-synth time)
