@@ -16,15 +16,11 @@ from cyg.merge import MergeBuilder
 def main() -> None:
     sys.stdout.reconfigure(line_buffering=True)
 
-    log_path = Path('bin/relation_conflicts.log')
-    log_path.parent.mkdir(exist_ok=True)
+    conflicts_path = Path('bin/relation_conflicts.json')
     logging.basicConfig(
         level=logging.WARNING,
         format='%(message)s',
-        handlers=[
-            logging.FileHandler(log_path, mode='w', encoding='utf-8'),
-            logging.StreamHandler(),
-        ],
+        handlers=[logging.StreamHandler()],
     )
 
     input_dir = Path('bin/cygnets_presynth')
@@ -51,8 +47,8 @@ def main() -> None:
         resource_code = xml_file.stem
         removed = builder.check_and_remove_new_cycles(resource_code, first_new_rowid)
         if removed:
-            print(f'    Removed {removed} cycle-causing relation(s) from {resource_code}'
-                  f' (see {log_path})', flush=True)
+            print(f'    Removed {removed} cycle-causing relation(s) from {resource_code}',
+                  flush=True)
             n_cycles_removed += removed
 
     print(f'\n  Synsets: {builder.n_synsets:,}')
@@ -67,10 +63,10 @@ def main() -> None:
     print(f'  Provenance rows: {builder.n_prov:,}')
     if builder.n_rel_conflicts:
         print(f'  Relation conflicts skipped: {builder.n_rel_conflicts:,}'
-              f' (see {log_path})')
+              f' (see {conflicts_path})')
     if n_cycles_removed:
         print(f'  Cycle-causing relations removed: {n_cycles_removed:,}'
-              f' (see {log_path})')
+              f' (see {conflicts_path})')
 
     print('\nCreating indexes...')
     builder.create_indexes()
@@ -78,9 +74,12 @@ def main() -> None:
     print('\nPhase 1b: Validating no cycles remain...')
     n_cycles = builder.detect_cycles()
     if n_cycles:
-        print(f'  WARNING: {n_cycles:,} residual cycle(s) found (see {log_path})')
+        print(f'  WARNING: {n_cycles:,} residual cycle(s) found')
     else:
         print('  OK — no cycles.')
+
+    print(f'\nWriting conflict log to {conflicts_path}...')
+    builder.write_conflicts_json(conflicts_path)
 
     print('\nPhase 2: Merging case-variant lexemes...')
     removed = builder.merge_case_variants()

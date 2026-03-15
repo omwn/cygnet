@@ -23,7 +23,7 @@ from lxml import etree as ET
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PRESYNTH_DIR = PROJECT_ROOT / "bin" / "cygnets_presynth"
-CONFLICTS_LOG = PROJECT_ROOT / "bin" / "relation_conflicts.log"
+CONFLICTS_JSON = PROJECT_ROOT / "bin" / "relation_conflicts.json"
 
 HYPERNYM_TYPES = frozenset({"hypernym", "instance_hypernym"})
 
@@ -614,28 +614,30 @@ def load_json_log(xml_path: Path) -> dict:
         return json.load(f)
 
 
-def parse_conflicts_log(resource_id: str, xml_stem: str) -> tuple[list[str], list[str]]:
-    """Scan the global relation_conflicts.log for entries attributed to this resource.
+def parse_conflicts_json(resource_id: str, xml_stem: str) -> tuple[list[dict], list[dict]]:
+    """Load conflict records for this resource from the structured JSON conflict log.
 
-    Returns (reversed_rel_lines, cycle_lines).
+    Args:
+        resource_id: The wordnet's resource ID (e.g. ``'dn'``).
+        xml_stem: The pre-synth filename stem (e.g. ``'dn-2025-07-03'``).
+
+    Returns:
+        ``(reversed_rels, cycles)`` — lists of record dicts for this resource.
     """
-    if not CONFLICTS_LOG.exists():
+    if not CONFLICTS_JSON.exists():
         return [], []
 
-    # The log uses [resource_id] for reversed relations and [xml_stem] for cycles.
-    tag_resource = f"[{resource_id}]"
-    tag_stem = f"[{xml_stem}]"
-    reversed_rels: list[str] = []
-    cycles: list[str] = []
+    with open(CONFLICTS_JSON, encoding='utf-8') as fh:
+        data = json.load(fh)
 
-    with open(CONFLICTS_LOG) as fh:
-        for raw in fh:
-            line = raw.rstrip()
-            if f"skipped {tag_resource}:" in line or f"skipped {tag_stem}:" in line:
-                reversed_rels.append(line)
-            elif f"Cycle removed {tag_stem}:" in line or f"Cycle removed {tag_resource}:" in line:
-                cycles.append(line)
-
+    reversed_rels = [
+        r for r in data.get('reversed_relations', [])
+        if r.get('resource_id') == resource_id
+    ]
+    cycles = [
+        c for c in data.get('cycles', [])
+        if c.get('xml_stem') == xml_stem
+    ]
     return reversed_rels, cycles
 
 
@@ -781,7 +783,7 @@ def issues_from_json_log(log: dict) -> list[Issue]:
     ex_stats = log.get("statistics", {}).get("examples", {})
     ex_skipped = ex_stats.get("skipped", 0)
     if ex_skipped:
-        failed = ex_stats.get("first_20_failed_matches", [])
+        failed = ex_stats.get("failed_matches", [])
         items = []
         for entry in failed[:MAX_EXAMPLES]:
             text = entry.get("text", "")[:70]
@@ -821,25 +823,22 @@ def _label_ids_in(text: str, data: WordnetData) -> str:
 
 
 def issues_from_conflicts_log(
-    reversed_rels: list[str], cycles: list[str], data: WordnetData
+    reversed_rels: list[dict], cycles: list[dict], data: WordnetData
 ) -> list[Issue]:
-    """Build Issue objects from lines extracted from relation_conflicts.log."""
+    """Build Issue objects from structured conflict records."""
     issues: list[Issue] = []
 
     if reversed_rels:
-        # Parse lines: "... skipped [RES]: SRC REL TGT (conflicts with TGT REL SRC from [OTHER])"
-        _pat = re.compile(
-            r"skipped \[.+?\]: (\S+) (\S+) (\S+) \(conflicts with .+? from \[(.+?)\]\)"
-        )
-        items: list[str] = []
         other_resources: set[str] = set()
-        for line in reversed_rels[:MAX_EXAMPLES]:
-            m = _pat.search(line)
-            if m:
-                src, rel, tgt, other = m.groups()
-                item = f"{label_concept(src, data)} {rel} {label_concept(tgt, data)}  (contradicts [{other}])"
-                items.append(item)
-                other_resources.add(other)
+        items: list[str] = []
+        for rec in reversed_rels[:MAX_EXAMPLES]:
+            src, rel, tgt = rec['src'], rec['rel'], rec['tgt']
+            other = rec.get('prior_resource', '?')
+            items.append(
+                f"{label_concept(src, data)} {rel} {label_concept(tgt, data)}"
+                f"  (contradicts [{other}])"
+            )
+            other_resources.add(other)
         others_str = ", ".join(sorted(other_resources)) or "another wordnet"
         issues.append(Issue(
             severity="CRITICAL",
@@ -861,22 +860,15 @@ def issues_from_conflicts_log(
         ))
 
     if cycles:
-        # Parse lines: "Cycle removed [RES]: SRC REL TGT (existing chain: A → B → C → SRC)"
-        _cpat = re.compile(
-            r"Cycle removed \[.+?\]: (\S+) (\S+) (\S+) \(existing chain: (.+)\)"
-        )
         items = []
-        for line in cycles[:MAX_EXAMPLES]:
-            m = _cpat.search(line)
-            if m:
-                src, rel, tgt, chain = m.groups()
-                labelled_chain = _label_ids_in(chain, data)
-                item = f"{label_concept(src, data)} {rel} {label_concept(tgt, data)}  (chain: {labelled_chain})"
-                items.append(item)
-            else:
-                items.append(_label_ids_in(
-                    line.split(": ", 1)[-1] if ": " in line else line, data
-                ))
+        for rec in cycles[:MAX_EXAMPLES]:
+            src, rel, tgt = rec['src'], rec['rel'], rec['tgt']
+            chain_ids = rec.get('chain', [])
+            labelled_chain = " → ".join(label_concept(n, data) for n in chain_ids)
+            items.append(
+                f"{label_concept(src, data)} {rel} {label_concept(tgt, data)}"
+                f"  (chain: {labelled_chain})"
+            )
         issues.append(Issue(
             severity="CRITICAL",
             title="Hypernym cycles spanning multiple wordnets",
@@ -1000,7 +992,7 @@ def report_file(path: Path, markdown: bool = False) -> None:
     issues.extend(issues_from_json_log(json_log))
 
     # Augment with merge-time relation conflicts log
-    reversed_rels, cycles = parse_conflicts_log(data.resource_id, path.stem)
+    reversed_rels, cycles = parse_conflicts_json(data.resource_id, path.stem)
     issues.extend(issues_from_conflicts_log(reversed_rels, cycles, data))
 
     print(format_report(path, data, issues, markdown))

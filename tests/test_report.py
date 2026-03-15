@@ -29,7 +29,7 @@ check_non_standard_relations = _mod.check_non_standard_relations
 check_duplicate_ids = _mod.check_duplicate_ids
 check_glossed_concepts_without_senses = _mod.check_glossed_concepts_without_senses
 load_json_log = _mod.load_json_log
-parse_conflicts_log = _mod.parse_conflicts_log
+parse_conflicts_json = _mod.parse_conflicts_json
 issues_from_json_log = _mod.issues_from_json_log
 issues_from_conflicts_log = _mod.issues_from_conflicts_log
 label_concept = _mod.label_concept
@@ -656,7 +656,7 @@ class TestIssuesFromJsonLog:
             "statistics": {
                 "examples": {
                     "skipped": 2,
-                    "first_20_failed_matches": [
+                    "failed_matches": [
                         {"text": "The dog barked loudly.", "candidate_wordforms": ["bark"]},
                     ],
                 }
@@ -679,38 +679,56 @@ class TestIssuesFromJsonLog:
 
 
 # ---------------------------------------------------------------------------
-# parse_conflicts_log
+# parse_conflicts_json
 # ---------------------------------------------------------------------------
 
-class TestParseConflictsLog:
+import json as _json
+
+
+class TestParseConflictsJson:
+    _sample = {
+        "reversed_relations": [
+            {"resource_id": "wn-test", "kind": "synset",
+             "src": "cili.i1", "rel": "hypernym", "tgt": "cili.i2",
+             "prior_resource": "oewn"},
+            {"resource_id": "other-wn", "kind": "synset",
+             "src": "cili.i3", "rel": "hypernym", "tgt": "cili.i4",
+             "prior_resource": "oewn"},
+        ],
+        "cycles": [
+            {"xml_stem": "wn-test-1.0", "src": "cili.i1", "rel": "hypernym",
+             "tgt": "cili.i2", "chain": ["cili.i2", "cili.i1"]},
+        ],
+    }
+
+    def _write_json(self, tmp_path):
+        p = tmp_path / "conflicts.json"
+        p.write_text(_json.dumps(self._sample))
+        return p
+
     def test_returns_empty_when_no_log(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(_mod, "CONFLICTS_LOG", tmp_path / "nonexistent.log")
-        rev, cyc = parse_conflicts_log("wn-test", "wn-test-1.0")
+        monkeypatch.setattr(_mod, "CONFLICTS_JSON", tmp_path / "nonexistent.json")
+        rev, cyc = parse_conflicts_json("wn-test", "wn-test-1.0")
         assert rev == [] and cyc == []
 
     def test_parses_reversed_relation_by_resource_id(self, tmp_path, monkeypatch):
-        log = tmp_path / "conflicts.log"
-        log.write_text(
-            "Reversed synset_relation skipped [wn-test]: cili.i1 hypernym cili.i2 "
-            "(conflicts with cili.i2 hypernym cili.i1 from [oewn])\n"
-            "Reversed synset_relation skipped [other-wn]: cili.i3 hypernym cili.i4 "
-            "(conflicts with cili.i4 hypernym cili.i3 from [oewn])\n"
-        )
-        monkeypatch.setattr(_mod, "CONFLICTS_LOG", log)
-        rev, cyc = parse_conflicts_log("wn-test", "wn-test-1.0")
+        monkeypatch.setattr(_mod, "CONFLICTS_JSON", self._write_json(tmp_path))
+        rev, cyc = parse_conflicts_json("wn-test", "wn-test-1.0")
         assert len(rev) == 1
-        assert "cili.i1" in rev[0]
+        assert rev[0]["src"] == "cili.i1"
+
+    def test_excludes_other_resource(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(_mod, "CONFLICTS_JSON", self._write_json(tmp_path))
+        rev, _cyc = parse_conflicts_json("other-wn", "other-wn-1.0")
+        assert len(rev) == 1
+        assert rev[0]["src"] == "cili.i3"
 
     def test_parses_cycle_by_xml_stem(self, tmp_path, monkeypatch):
-        log = tmp_path / "conflicts.log"
-        log.write_text(
-            "Cycle removed [wn-test-1.0]: cili.i1 hypernym cili.i2 "
-            "(existing chain: cili.i2 → cili.i1 → cili.i1)\n"
-        )
-        monkeypatch.setattr(_mod, "CONFLICTS_LOG", log)
-        _rev, cyc = parse_conflicts_log("wn-test", "wn-test-1.0")
+        monkeypatch.setattr(_mod, "CONFLICTS_JSON", self._write_json(tmp_path))
+        _rev, cyc = parse_conflicts_json("wn-test", "wn-test-1.0")
         assert len(cyc) == 1
-        assert "cili.i1" in cyc[0]
+        assert cyc[0]["src"] == "cili.i1"
+        assert "cili.i2" in cyc[0]["chain"]
 
 
 # ---------------------------------------------------------------------------
@@ -724,13 +742,15 @@ class TestIssuesFromConflictsLog:
         assert issues_from_conflicts_log([], [], self._empty_data) == []
 
     def test_reversed_relations_produce_critical_issue(self):
-        lines = [
-            "Reversed synset_relation skipped [wn]: cili.i1 hypernym cili.i2 "
-            "(conflicts with cili.i2 hypernym cili.i1 from [oewn])",
-            "Reversed synset_relation skipped [wn]: cili.i3 hypernym cili.i4 "
-            "(conflicts with cili.i4 hypernym cili.i3 from [oewn])",
+        recs = [
+            {"resource_id": "wn", "kind": "synset",
+             "src": "cili.i1", "rel": "hypernym", "tgt": "cili.i2",
+             "prior_resource": "oewn"},
+            {"resource_id": "wn", "kind": "synset",
+             "src": "cili.i3", "rel": "hypernym", "tgt": "cili.i4",
+             "prior_resource": "oewn"},
         ]
-        result = issues_from_conflicts_log(lines, [], self._empty_data)
+        result = issues_from_conflicts_log(recs, [], self._empty_data)
         assert len(result) == 1
         issue = result[0]
         assert issue.severity == "CRITICAL"
@@ -738,11 +758,11 @@ class TestIssuesFromConflictsLog:
         assert any("cili.i1" in item for item in issue.items)
 
     def test_cycles_produce_critical_issue(self):
-        lines = [
-            "Cycle removed [wn-1.0]: cili.i1 hypernym cili.i2 "
-            "(existing chain: cili.i2 → cili.i1 → cili.i1)",
+        recs = [
+            {"xml_stem": "wn-1.0", "src": "cili.i1", "rel": "hypernym",
+             "tgt": "cili.i2", "chain": ["cili.i2", "cili.i1"]},
         ]
-        result = issues_from_conflicts_log([], lines, self._empty_data)
+        result = issues_from_conflicts_log([], recs, self._empty_data)
         assert len(result) == 1
         issue = result[0]
         assert issue.severity == "CRITICAL"

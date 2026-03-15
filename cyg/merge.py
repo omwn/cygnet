@@ -358,6 +358,12 @@ class MergeBuilder:
         self._synset_rels_buf: list[tuple] = []
         self._prov_buf: list[tuple] = []
 
+        # Structured conflict records (written to JSON at the end of synthesis)
+        self._conflicts: dict[str, list] = {
+            'reversed_relations': [],
+            'cycles': [],
+        }
+
         # Counters for progress reporting
         self.n_synsets = self.n_entries = self.n_forms = self.n_pronunciations = 0
         self.n_senses = self.n_defs = self.n_examples = 0
@@ -620,6 +626,14 @@ class MergeBuilder:
                     current_resource, src_id, rel_type, tgt_id,
                     tgt_id, rel_type, src_id, prior,
                 )
+                self._conflicts['reversed_relations'].append({
+                    'resource_id': current_resource,
+                    'kind': 'sense',
+                    'src': src_id,
+                    'rel': rel_type,
+                    'tgt': tgt_id,
+                    'prior_resource': prior,
+                })
                 self.n_rel_conflicts += 1
                 return
 
@@ -666,6 +680,14 @@ class MergeBuilder:
                     current_resource, src_ili, rel_type, tgt_ili,
                     tgt_ili, rel_type, src_ili, prior,
                 )
+                self._conflicts['reversed_relations'].append({
+                    'resource_id': current_resource,
+                    'kind': 'synset',
+                    'src': src_ili,
+                    'rel': rel_type,
+                    'tgt': tgt_ili,
+                    'prior_resource': prior,
+                })
                 self.n_rel_conflicts += 1
                 return
 
@@ -1226,6 +1248,16 @@ class MergeBuilder:
                         resource_code, src_ili, rel_type, tgt_ili,
                         chain_str, src_ili,
                     )
+                    self._conflicts['cycles'].append({
+                        'xml_stem': resource_code,
+                        'src': src_ili,
+                        'rel': rel_type,
+                        'tgt': tgt_ili,
+                        'chain': [
+                            self._synset_rowid_to_ili.get(n) or f'#{n}'
+                            for n in chain
+                        ],
+                    })
                     # Remove the offending edge and its auto-inverse
                     self.cur.execute(
                         'DELETE FROM synset_relations WHERE rowid = ?',
@@ -1252,6 +1284,16 @@ class MergeBuilder:
                     removed += 1
                     self.n_synset_rels -= 2
         return removed
+
+    def write_conflicts_json(self, path: Path) -> None:
+        """Write all collected conflict records to a structured JSON file.
+
+        Args:
+            path: Destination path (e.g. ``bin/relation_conflicts.json``).
+        """
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as fh:
+            json.dump(self._conflicts, fh, indent=2, ensure_ascii=False)
 
     def detect_cycles(self) -> int:
         """Validate that no cycles remain in the IS-A hierarchy.

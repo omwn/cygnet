@@ -40,7 +40,7 @@ The script combines three sources, using whichever are available:
 |---|---|
 | The pre-synth XML file itself | Always |
 | `bin/cygnets_presynth/{name}_log.json` | After running conversion scripts 1–5 |
-| `bin/relation_conflicts.log` | After running the full build (`build.sh`) |
+| `bin/relation_conflicts.json` | After running the full build (`build.sh`) |
 
 ---
 
