@@ -451,7 +451,7 @@
                 entries:   get(`SELECT COUNT(*) FROM entries`),
                 senses:    get(`SELECT COUNT(*) FROM senses`),
                 languages: get(`SELECT COUNT(DISTINCT language_rowid) FROM entries`),
-                wordnets:  get(`SELECT COUNT(*) FROM resources`),
+                wordnets:  get(`SELECT COUNT(*) FROM resources WHERE code NOT IN ('cili', 'pwn')`),
             };
         }
 
