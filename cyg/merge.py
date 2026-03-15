@@ -213,6 +213,35 @@ def remove_accents(text: str) -> str:
     return _COMBINING_RE.sub('', unicodedata.normalize('NFD', text))
 
 
+def build_annotated_sentence(parent, text: str, annotations: list[tuple]) -> None:
+    """Add an AnnotatedSentence child to *parent* with inline AnnotatedToken elements.
+
+    Args:
+        parent: lxml element to append to.
+        text: plain text of the sentence.
+        annotations: list of (start_offset, end_offset, sense_id_str) tuples,
+                     sorted by start_offset.
+    """
+    el = ET.SubElement(parent, 'AnnotatedSentence')
+    pos = 0
+    prev = None
+    for start, end, sense_id in annotations:
+        preceding = text[pos:start]
+        if prev is None:
+            el.text = preceding
+        else:
+            prev.tail = preceding
+        tok = ET.SubElement(el, 'AnnotatedToken', sense=sense_id)
+        tok.text = text[start:end]
+        prev = tok
+        pos = end
+    trailing = text[pos:]
+    if prev is None:
+        el.text = trailing
+    else:
+        prev.tail = trailing
+
+
 def parse_annotated_sentence(elem) -> tuple[str, list[dict]]:
     """Return (plain_text, annotations) from an AnnotatedSentence element."""
     if not len(elem):
@@ -336,6 +365,22 @@ class MergeBuilder:
 
     # --- Lookup helpers ---
 
+    @staticmethod
+    def _get_or_insert_rowid(
+        cache: dict, cur: sqlite3.Cursor,
+        table: str, col: str, value: str,
+    ) -> int:
+        """Return the rowid for *value* in *table.col*, inserting if absent.
+
+        Uses INSERT OR IGNORE so concurrent or repeated inserts are safe.
+        Results are cached in *cache* to avoid repeated round-trips.
+        """
+        if value not in cache:
+            cur.execute(f'INSERT OR IGNORE INTO {table} ({col}) VALUES (?)', (value,))
+            cur.execute(f'SELECT rowid FROM {table} WHERE {col} = ?', (value,))
+            cache[value] = cur.fetchone()[0]
+        return cache[value]
+
     def _lang_rowid(self, code: str) -> int:
         if code not in self._lang_cache:
             try:
@@ -349,37 +394,19 @@ class MergeBuilder:
         return self._lang_cache[code]
 
     def _rel_type_rowid(self, rel_type: str) -> int:
-        if rel_type not in self._rel_type_cache:
-            self.cur.execute(
-                'INSERT OR IGNORE INTO relation_types (type) VALUES (?)', (rel_type,)
-            )
-            self.cur.execute(
-                'SELECT rowid FROM relation_types WHERE type = ?', (rel_type,)
-            )
-            self._rel_type_cache[rel_type] = self.cur.fetchone()[0]
-        return self._rel_type_cache[rel_type]
+        return self._get_or_insert_rowid(
+            self._rel_type_cache, self.cur, 'relation_types', 'type', rel_type,
+        )
 
     def _prov_resource_rowid(self, code: str) -> int:
-        if code not in self._prov_resource_cache:
-            self.prov_cur.execute(
-                'INSERT OR IGNORE INTO prov_resources (code) VALUES (?)', (code,)
-            )
-            self.prov_cur.execute(
-                'SELECT rowid FROM prov_resources WHERE code = ?', (code,)
-            )
-            self._prov_resource_cache[code] = self.prov_cur.fetchone()[0]
-        return self._prov_resource_cache[code]
+        return self._get_or_insert_rowid(
+            self._prov_resource_cache, self.prov_cur, 'prov_resources', 'code', code,
+        )
 
     def _prov_table_rowid(self, name: str) -> int:
-        if name not in self._prov_table_cache:
-            self.prov_cur.execute(
-                'INSERT OR IGNORE INTO prov_tables (name) VALUES (?)', (name,)
-            )
-            self.prov_cur.execute(
-                'SELECT rowid FROM prov_tables WHERE name = ?', (name,)
-            )
-            self._prov_table_cache[name] = self.prov_cur.fetchone()[0]
-        return self._prov_table_cache[name]
+        return self._get_or_insert_rowid(
+            self._prov_table_cache, self.prov_cur, 'prov_tables', 'name', name,
+        )
 
     def _insert_prov(self, table_name: str, item_rowid: int, prov_elems) -> int:
         table_rowid = self._prov_table_rowid(table_name)

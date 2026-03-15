@@ -14,6 +14,8 @@ from pathlib import Path
 
 from lxml import etree as ET
 
+from cyg.merge import build_annotated_sentence
+
 # Only forward (non-inverse) relation types are written to XML
 FORWARD_SENSE_RELS: set[str] = {'antonym', 'derivation', 'pertainym', 'participle'}
 FORWARD_CONCEPT_RELS: set[str] = {
@@ -27,36 +29,6 @@ FORWARD_CONCEPT_RELS: set[str] = {
 }
 # Symmetric relations: only write where source_rowid < target_rowid
 SYMMETRIC_RELS: set[str] = {'antonym', 'opposite'}
-
-
-def build_annotated_sentence(parent, text: str, annotations: list[tuple]) -> None:
-    """
-    Add an AnnotatedSentence child to parent with inline AnnotatedToken elements.
-
-    Args:
-        parent: lxml element to append to
-        text: plain text of the sentence
-        annotations: list of (start_offset, end_offset, sense_id_str) tuples
-                     sorted by start_offset
-    """
-    el = ET.SubElement(parent, 'AnnotatedSentence')
-    pos = 0
-    prev = None
-    for start, end, sense_id in annotations:
-        preceding = text[pos:start]
-        if prev is None:
-            el.text = preceding
-        else:
-            prev.tail = preceding
-        tok = ET.SubElement(el, 'AnnotatedToken', sense=sense_id)
-        tok.text = text[start:end]
-        prev = tok
-        pos = end
-    trailing = text[pos:]
-    if prev is None:
-        el.text = trailing
-    else:
-        prev.tail = trailing
 
 
 def load_provenance(
