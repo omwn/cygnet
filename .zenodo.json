@@ -4,8 +4,8 @@
   "creators": [
     {
       "name": "Hall Maudslay, Rowan",
-	"affiliation": "Paris PSL",
-	"orcid": "0009-0009-1339-0646"
+      "affiliation": "Paris PSL",
+      "orcid": "0009-0009-1339-0646"
     },
     {
       "name": "Bond, Francis",
@@ -32,7 +32,7 @@
       "scheme": "url"
     },
     {
-      "relation": "isRelatedTo",
+      "relation": "references",
       "identifier": "https://github.com/omwn/omwn.github.io",
       "scheme": "url"
     }
