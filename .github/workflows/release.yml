@@ -63,3 +63,9 @@ jobs:
               web/cygnet.db.gz \
               web/provenance.db.gz
           fi
+
+      - name: Upload to Zenodo
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ZENODO_TOKEN: ${{ secrets.ZENODO_TOKEN }}
+        run: python3 scripts/zenodo_upload.py "${{ steps.tag.outputs.value }}"
