@@ -63,6 +63,17 @@ def setup_wn(data_dir: Path, urls: list[str]) -> None:
     """Download all wordnets into wn's local database, skipping those already present."""
     data_dir.mkdir(parents=True, exist_ok=True)
     wn.config.data_directory = str(data_dir)
+
+    # Delete the wn database if it is incompatible with the installed wn version.
+    # The downloaded source files (data_dir/downloads/) are kept as a cache.
+    wn_db = data_dir / "wn.db"
+    if wn_db.exists():
+        try:
+            wn.lexicons()
+        except wn.DatabaseError:
+            print("  (wn database schema changed — rebuilding)")
+            wn_db.unlink()
+
     for url in urls:
         pkg_id = url_to_wn_id(url)
         print(f"  {pkg_id} ...", end=" ", flush=True)
