@@ -59,8 +59,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "${{ steps.tag.outputs.value }}" \
-            --title "Cygnet ${{ steps.tag.outputs.value }}" \
-            --generate-notes \
-            web/cygnet.db.gz \
-            web/provenance.db.gz
+          TAG="${{ steps.tag.outputs.value }}"
+          if gh release view "$TAG" &>/dev/null; then
+            echo "Release $TAG already exists, uploading assets only"
+            gh release upload "$TAG" web/cygnet.db.gz web/provenance.db.gz --clobber
+          else
+            gh release create "$TAG" \
+              --title "Cygnet $TAG" \
+              --generate-notes \
+              web/cygnet.db.gz \
+              web/provenance.db.gz
+          fi
