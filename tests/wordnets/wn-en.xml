@@ -122,5 +122,9 @@
   <ConceptRelation relation_type="similar" source="cili.i7" target="cili.i3">
     <Provenance resource="wn-en" version="1.0"/>
   </ConceptRelation>
+  <!-- sense relation: gleaming antonym glowing -->
+  <SenseRelation relation_type="antonym" source="sense.gleaming" target="sense.glowing">
+    <Provenance resource="wn-en" version="1.0"/>
+  </SenseRelation>
 
 </CygnetResource>

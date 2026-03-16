@@ -582,6 +582,7 @@
                 localStorage.getItem('definitionLanguage') || 'en'
             );
             const [relatedConcepts, setRelatedConcepts] = useState({});
+            const [expandedRelGroups, setExpandedRelGroups] = useState(new Set());
             const [visibleNodes, setVisibleNodes] = useState(new Set());
             const [hoveredNode, setHoveredNode] = useState(null);
             const [hoverMenuPosition, setHoverMenuPosition] = useState(null);
@@ -844,7 +845,7 @@
             const categorizeRelations = useCallback((relations) => {
                 const categories = {
                     hypernyms: [], hyponyms: [], meronyms: [], holonyms: [],
-                    roles: [], inferences: [], opposites: []
+                    roles: [], inferences: [], opposites: [], other: []
                 };
                 for (const relType in relations) {
                     const targets = relations[relType];
@@ -863,6 +864,8 @@
                         categories.inferences.push(...targets.map(t => ({ type: relType, target: t })));
                     } else if (baseType === 'opp') {
                         categories.opposites.push(...targets.map(t => ({ type: relType, target: t })));
+                    } else {
+                        categories.other.push(...targets.map(t => ({ type: relType, target: t })));
                     }
                 }
                 return categories;
@@ -1149,6 +1152,7 @@
                 setPathNotFound(false);
                 setPathTargetIli('');
                 setPathTargetRowid(null);
+                setExpandedRelGroups(new Set());
                 loadConceptWithRelations(conceptId.toString());
             };
 
@@ -1326,6 +1330,7 @@
                 if (categories.roles.length > 0) available.push('roles');
                 if (categories.inferences.length > 0) available.push('inferences');
                 if (categories.opposites.length > 0) available.push('opposites');
+                if (categories.other.length > 0) available.push('other');
                 return available;
             };
 
@@ -1954,7 +1959,7 @@
                                                                                                 }
                                                                                                 const [definition, defLang] = selectDef(concept?.d, definitionLanguage);
                                                                                                 const defIsFallback = defLang && defLang !== definitionLanguage;
-                                                                                                const hasExtra = !!(sense.v?.length || synonyms.length || sense.ex?.length);
+                                                                                                const hasExtra = !!(sense.v?.length || synonyms.length || sense.ex?.length || sense.sr?.length);
                                                                                                 return (
                                                                                                     <div key={sense.id}
                                                                                                         className={`bg-gray-50 p-3 rounded border border-gray-200 sense-box ${hasExtra ? 'hover:border-blue-400 cursor-pointer' : ''}`}
@@ -2018,6 +2023,34 @@
                                                                                                                         ))}
                                                                                                                     </div>
                                                                                                                 )}
+                                                                                                                {sense.sr && sense.sr.length > 0 && (() => {
+                                                                                                                    const srByType = sense.sr.reduce((acc, rel) => {
+                                                                                                                        if (!acc[rel.t]) acc[rel.t] = [];
+                                                                                                                        acc[rel.t].push(rel);
+                                                                                                                        return acc;
+                                                                                                                    }, {});
+                                                                                                                    return Object.entries(srByType).map(([relType, rels]) => {
+                                                                                                                        const shown = rels.slice(0, 10);
+                                                                                                                        const hidden = rels.length - 10;
+                                                                                                                        return (
+                                                                                                                            <div key={relType} className="text-sm text-gray-600 flex gap-2 flex-wrap items-baseline">
+                                                                                                                                <span className="font-medium">{getRelLabel(relType)}:</span>
+                                                                                                                                {shown.map((rel, i) => {
+                                                                                                                                    const toId = rel.to.toString();
+                                                                                                                                    const toSense = loadedSenses[toId] ?? querySense(parseInt(toId));
+                                                                                                                                    return (
+                                                                                                                                        <button key={i}
+                                                                                                                                            onClick={(e) => { e.stopPropagation(); if (toSense?.l) handleWordformClickWithSense(toSense.l, toId); }}
+                                                                                                                                            className="text-blue-600 hover:underline">
+                                                                                                                                            {toSense?.l || '…'}
+                                                                                                                                        </button>
+                                                                                                                                    );
+                                                                                                                                })}
+                                                                                                                                {hidden > 0 && <span className="text-gray-400 text-xs italic">…{hidden} more</span>}
+                                                                                                                            </div>
+                                                                                                                        );
+                                                                                                                    });
+                                                                                                                })()}
                                                                                                             </div>
                                                                                                         )}
                                                                                                     </div>
@@ -2103,7 +2136,7 @@
                                                 })()}
                                             </div>
 
-                                            {(relationsMap && hasRelationsToDisplay) && (() => {
+                                            {(() => {
                                                 // Sense relations: collect from all senses in this concept
                                                 const allSenseIds = concept.s ? Object.values(concept.s).flat().map(s => s.toString()) : [];
                                                 const senseRelsByType = {};
@@ -2112,12 +2145,14 @@
                                                     if (!sd?.sr) return;
                                                     sd.sr.forEach(rel => {
                                                         const toId = rel.to.toString();
-                                                        if (!loadedSenses[toId]) loadSenseData(toId);
                                                         if (!senseRelsByType[rel.t]) senseRelsByType[rel.t] = [];
                                                         senseRelsByType[rel.t].push({ fromLemma: sd.l, toSenseId: toId, rid: rel.rid });
                                                     });
                                                 });
                                                 const hasSenseRels = Object.keys(senseRelsByType).length > 0;
+
+                                                if (!relationsMap && !hasSenseRels) return null;
+                                                if (!hasRelationsToDisplay && !hasSenseRels) return null;
 
                                                 return (
                                                 <div className="mb-4">
@@ -2173,10 +2208,15 @@
                                                                     acc[rel.t].push(rel);
                                                                     return acc;
                                                                 }, {})
-                                                            ).map(([relType, rels]) => (
+                                                            ).map(([relType, rels]) => {
+                                                                const groupKey = `cr-${relType}`;
+                                                                const isExpanded = expandedRelGroups.has(groupKey);
+                                                                const shown = isExpanded ? rels : rels.slice(0, 10);
+                                                                const hidden = rels.length - 10;
+                                                                return (
                                                                 <div key={relType} className="flex gap-2 flex-wrap items-baseline">
                                                                     <span className="text-gray-500 italic flex-shrink-0">{getRelLabel(relType)}:</span>
-                                                                    {rels.map(rel => {
+                                                                    {shown.map(rel => {
                                                                         const li = getConceptLabel(parseInt(rel.to), definitionLanguage);
                                                                         return (
                                                                             <span key={rel.to} className="inline-flex items-baseline gap-0.5">
@@ -2189,18 +2229,32 @@
                                                                             </span>
                                                                         );
                                                                     })}
+                                                                    {!isExpanded && hidden > 0 && (
+                                                                        <button onClick={() => setExpandedRelGroups(prev => new Set([...prev, groupKey]))}
+                                                                            className="text-gray-400 hover:text-gray-600 text-xs italic">
+                                                                            …{hidden} more
+                                                                        </button>
+                                                                    )}
                                                                 </div>
-                                                            ))}
-                                                            {hasSenseRels && Object.entries(senseRelsByType).map(([relType, rels]) => (
+                                                                );
+                                                            })}
+                                                            {hasSenseRels && Object.entries(senseRelsByType).map(([relType, rels]) => {
+                                                                const groupKey = `sr-${relType}`;
+                                                                const isExpanded = expandedRelGroups.has(groupKey);
+                                                                const shown = isExpanded ? rels : rels.slice(0, 10);
+                                                                const hidden = rels.length - 10;
+                                                                return (
                                                                 <div key={`sr-${relType}`} className="flex gap-2 flex-wrap items-baseline">
                                                                     <span className="text-gray-500 italic flex-shrink-0">{getRelLabel(relType)}:</span>
-                                                                    {rels.map(({ fromLemma, toSenseId, rid }, i) => {
-                                                                        const toSense = loadedSenses[toSenseId];
+                                                                    {shown.map(({ fromLemma, toSenseId, rid }, i) => {
+                                                                        const toSense = loadedSenses[toSenseId] ?? querySense(parseInt(toSenseId));
                                                                         const cid = toSense?.c?.toString();
                                                                         const li = cid ? getConceptLabel(parseInt(cid), definitionLanguage) : null;
                                                                         const conceptLabel = li?.form;
                                                                         return (
                                                                             <span key={i} className="inline-flex items-baseline gap-0.5 whitespace-nowrap">
+                                                                                <span className="text-gray-600">{fromLemma}</span>
+                                                                                <span className="text-gray-400">→</span>
                                                                                 <button onClick={() => toSense?.l && handleWordformClickWithSense(toSense.l, toSenseId)}
                                                                                     className="text-blue-600 hover:underline">
                                                                                     {toSense?.l || '…'}
@@ -2217,8 +2271,15 @@
                                                                             </span>
                                                                         );
                                                                     })}
+                                                                    {!isExpanded && hidden > 0 && (
+                                                                        <button onClick={() => setExpandedRelGroups(prev => new Set([...prev, groupKey]))}
+                                                                            className="text-gray-400 hover:text-gray-600 text-xs italic">
+                                                                            …{hidden} more
+                                                                        </button>
+                                                                    )}
                                                                 </div>
-                                                            ))}
+                                                                );
+                                                            })}
                                                         </div>
                                                     )}
                                                 </div>

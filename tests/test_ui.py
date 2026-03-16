@@ -734,3 +734,82 @@ class TestArasaacInSearch:
         expect(img).to_be_visible()
         classes = img.get_attribute('class') or ''
         assert 'border-dashed' in classes
+
+
+# ---------------------------------------------------------------------------
+# Sense relations
+# ---------------------------------------------------------------------------
+
+_CONCEPT_LOADED = 'text=All forms expressing this concept'
+_TEXT_VIEW_TIMEOUT = 8_000
+
+
+def _open_concept_text_view(page: Page, term: str) -> None:
+    """Search for *term*, open the first concept, switch to text relations view."""
+    _search(page, term)
+    page.locator('.concept-inner').first.click()
+    page.wait_for_selector(_CONCEPT_LOADED, timeout=10_000)
+    # Switch to text view
+    page.locator('button', has_text='Text').click()
+
+
+class TestSenseRelations:
+    """Sense-level relations (antonym gleaming ↔ glowing) appear in the UI."""
+
+    def test_concept_text_view_shows_sense_relation_type(self, page_ready: Page):
+        """Gleaming concept text view lists 'opposite' from the antonym sense relation."""
+        _open_concept_text_view(page_ready, 'gleaming')
+        expect(
+            page_ready.locator('span.italic', has_text='opposite')
+        ).to_be_visible(timeout=_TEXT_VIEW_TIMEOUT)
+
+    def test_concept_text_view_shows_from_lemma(self, page_ready: Page):
+        """Gleaming concept text view shows the source lemma 'gleaming' in the sense rel."""
+        _open_concept_text_view(page_ready, 'gleaming')
+        page_ready.wait_for_selector('span.italic:has-text("opposite")', timeout=_TEXT_VIEW_TIMEOUT)
+        content = page_ready.content()
+        # Both the from-lemma and the target lemma should appear in the page
+        assert 'gleaming' in content
+        assert 'glowing' in content
+
+    def test_concept_text_view_antonym_link_navigates(self, page_ready: Page):
+        """Clicking the antonym 'glowing' link in gleaming's concept view navigates to glowing."""
+        _open_concept_text_view(page_ready, 'gleaming')
+        page_ready.wait_for_selector('span.italic:has-text("opposite")', timeout=_TEXT_VIEW_TIMEOUT)
+        # Click the 'glowing' button in the sense relations section
+        page_ready.locator('button', has_text='glowing').first.click()
+        # App switches back to search view — wait for results summary
+        page_ready.locator('span.text-sm.text-gray-500').filter(has_text='across').or_(
+            page_ready.locator('text=No results found')
+        ).wait_for(timeout=_SEARCH_TIMEOUT)
+        content = page_ready.content()
+        assert 'glowing' in content
+
+    def _expand_gleaming_card(self, page: Page) -> None:
+        """Search for gleaming, wait for the expand arrow, then click the arrow
+        (avoiding the concept-inner which would navigate instead of expanding)."""
+        _search(page, 'gleaming')
+        # Sense data loads asynchronously — wait for the expand arrow
+        page.wait_for_selector('.sense-box .text-gray-500.text-sm.pt-1', timeout=_TEXT_VIEW_TIMEOUT)
+        # Click the expand arrow (not concept-inner, which has stopPropagation)
+        page.locator('.sense-box .text-gray-500.text-sm.pt-1').first.click()
+
+    def test_search_sense_card_shows_sense_relation(self, page_ready: Page):
+        """Expanded gleaming sense card shows the antonym relation to glowing."""
+        self._expand_gleaming_card(page_ready)
+        expect(
+            page_ready.locator('.sense-box span.font-medium', has_text='opposite')
+        ).to_be_visible(timeout=_TEXT_VIEW_TIMEOUT)
+
+    def test_search_sense_card_relation_target_clickable(self, page_ready: Page):
+        """Antonym link in expanded gleaming sense card navigates to glowing."""
+        self._expand_gleaming_card(page_ready)
+        page_ready.wait_for_selector('.sense-box span.font-medium:has-text("opposite")', timeout=_TEXT_VIEW_TIMEOUT)
+        # Target sense loads async; locator retries until the '…' resolves to 'glowing'
+        page_ready.locator('.sense-box button', has_text='glowing').first.click(timeout=_TEXT_VIEW_TIMEOUT * 2)
+        # App switches to search view with glowing results
+        page_ready.locator('span.text-sm.text-gray-500').filter(has_text='across').or_(
+            page_ready.locator('text=No results found')
+        ).wait_for(timeout=_SEARCH_TIMEOUT)
+        content = page_ready.content()
+        assert 'glowing' in content
