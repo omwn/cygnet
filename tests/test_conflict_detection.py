@@ -243,8 +243,8 @@ class TestWordnetFiles:
         builder.process_file(_WORDNETS_DIR / 'wn-en.xml')
         builder.process_file(_WORDNETS_DIR / 'wn-bad.xml')
 
-        # wn-en has 2 explicit hypernyms (+ 2 auto-hyponyms) + 1 eq_synonym + 1 similar = 6
+        # wn-en: 2 hypernyms + 2 auto-hyponyms + 1 eq_synonym + 1 auto-eq_synonym + 1 similar + 1 auto-similar = 8
         count = builder.cur.execute(
             'SELECT COUNT(*) FROM synset_relations'
         ).fetchone()[0]
-        assert count == 6
+        assert count == 8

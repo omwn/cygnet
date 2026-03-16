@@ -147,7 +147,8 @@ def build_test_db(db_path: Path, prov_path: Path,
     # Insert known ARASAAC pictogram IDs for UI tests:
     #   dog (i3)    → id 2253  (direct image test)
     #   entity (i1) → id 2254  (hypernym-fallback test: animal has entity as hypernym)
-    for ili, arasaac_id in [('i3', 2253), ('i1', 2254)]:
+    #   bright (i6) → id 2255  (eq_synonym-fallback test: gleaming; similar-fallback: glowing)
+    for ili, arasaac_id in [('i3', 2253), ('i1', 2254), ('i6', 2255)]:
         row = b.cur.execute("SELECT rowid FROM synsets WHERE ili = ?", (ili,)).fetchone()
         if row:
             b.cur.execute(

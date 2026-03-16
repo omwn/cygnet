@@ -1,32 +1,57 @@
 <?xml version='1.0' encoding='UTF-8'?>
+<!--
+  Test English wordnet.  Concepts here serve as the shared ILI layer;
+  other test wordnets (wn-fr.xml etc.) reference ILIs declared here.
+
+  Concepts and relations mirror OEWN structure (simplified):
+
+  Noun hierarchy:
+    entity (i1) ← animal (i2) ← dog (i3)
+    brightness (i4)  — standalone quality noun
+    dogfish (i5)     — standalone noun (enables "dog*" glob test)
+
+  Adjective cluster:
+    bright (i6)   — canonical luminosity adjective; has ARASAAC pictogram
+    gleaming (i7) — eq_synonym of bright; no direct pictogram (fallback test)
+    glowing (i8)  — similar to bright; no direct pictogram (fallback test)
+
+  Sense relations:
+    gleaming antonym glowing   — tests sense-level relation display
+
+  Note: ILI IDs (i1–i8) are test fixtures; i3 is referenced by wn-fr.xml
+  and wn-bad.xml, so those three must not be renumbered.
+-->
 <CygnetResource id="wn-en" label="Test English WordNet" language="en" version="1.0" citation="Bond, F. 2025. `Test WordNet &lt;https://github.com/rowanhm/cygnet&gt;`_. In *Proceedings of a Test Conference*.">
 
   <!-- Concepts (ILI declarations shared by all wordnets) -->
   <Concept id="cili.i1" ontological_category="NOUN" status="1">
-    <Provenance resource="wn-en" version="1.0" original_id="n01"/>
+    <Provenance resource="wn-en" version="1.0" original_id="oewn-entity-n"/>
   </Concept>
   <Concept id="cili.i2" ontological_category="NOUN" status="1">
-    <Provenance resource="wn-en" version="1.0" original_id="n02"/>
+    <Provenance resource="wn-en" version="1.0" original_id="oewn-animal-n"/>
   </Concept>
   <Concept id="cili.i3" ontological_category="NOUN" status="1">
-    <Provenance resource="wn-en" version="1.0" original_id="n03"/>
+    <Provenance resource="wn-en" version="1.0" original_id="oewn-dog-n"/>
   </Concept>
   <Concept id="cili.i4" ontological_category="NOUN" status="1">
-    <Provenance resource="wn-en" version="1.0" original_id="n04"/>
+    <Provenance resource="wn-en" version="1.0" original_id="oewn-brightness-n"/>
   </Concept>
   <Concept id="cili.i5" ontological_category="NOUN" status="1">
-    <Provenance resource="wn-en" version="1.0" original_id="n05"/>
+    <Provenance resource="wn-en" version="1.0" original_id="oewn-dogfish-n"/>
   </Concept>
   <Concept id="cili.i6" ontological_category="ADJ" status="1">
-    <Provenance resource="wn-en" version="1.0" original_id="a06"/>
+    <Provenance resource="wn-en" version="1.0" original_id="oewn-bright-a"/>
   </Concept>
   <Concept id="cili.i7" ontological_category="ADJ" status="1">
-    <Provenance resource="wn-en" version="1.0" original_id="a07"/>
+    <Provenance resource="wn-en" version="1.0" original_id="oewn-gleaming-a"/>
+  </Concept>
+  <Concept id="cili.i8" ontological_category="ADJ" status="1">
+    <Provenance resource="wn-en" version="1.0" original_id="oewn-glowing-a"/>
   </Concept>
 
-  <!-- English definitions -->
+  <!-- English definitions (from OEWN / Princeton WordNet) -->
   <Gloss definiendum="cili.i1" language="en">
-    <AnnotatedSentence>a thing that exists independently</AnnotatedSentence>
+    <AnnotatedSentence>that which is perceived or known or inferred to have its own distinct existence (living or nonliving)</AnnotatedSentence>
     <Provenance resource="wn-en" version="1.0"/>
   </Gloss>
   <Gloss definiendum="cili.i2" language="en">
@@ -34,7 +59,7 @@
     <Provenance resource="wn-en" version="1.0"/>
   </Gloss>
   <Gloss definiendum="cili.i3" language="en">
-    <AnnotatedSentence>a domesticated animal; Canis familiaris</AnnotatedSentence>
+    <AnnotatedSentence>a domesticated carnivorous animal (Canis lupus familiaris), the most widely kept companion animal</AnnotatedSentence>
     <Provenance resource="wn-en" version="1.0"/>
   </Gloss>
   <Gloss definiendum="cili.i4" language="en">
@@ -42,46 +67,54 @@
     <Provenance resource="wn-en" version="1.0"/>
   </Gloss>
   <Gloss definiendum="cili.i5" language="en">
-    <AnnotatedSentence>any of several small sharks</AnnotatedSentence>
+    <AnnotatedSentence>any of several small sharks with a long pointed snout</AnnotatedSentence>
     <Provenance resource="wn-en" version="1.0"/>
   </Gloss>
   <Gloss definiendum="cili.i6" language="en">
-    <AnnotatedSentence>having a brilliant sheen</AnnotatedSentence>
+    <AnnotatedSentence>emitting or reflecting light readily or in large amounts</AnnotatedSentence>
     <Provenance resource="wn-en" version="1.0"/>
   </Gloss>
   <Gloss definiendum="cili.i7" language="en">
-    <AnnotatedSentence>emitting or reflecting light steadily</AnnotatedSentence>
+    <AnnotatedSentence>bright with a steady but subdued sheen</AnnotatedSentence>
+    <Provenance resource="wn-en" version="1.0"/>
+  </Gloss>
+  <Gloss definiendum="cili.i8" language="en">
+    <AnnotatedSentence>emitting or reflecting light steadily and softly</AnnotatedSentence>
     <Provenance resource="wn-en" version="1.0"/>
   </Gloss>
 
   <!-- English lexemes -->
   <Lexeme id="lex.en.entity" language="en" grammatical_category="NOUN">
     <Wordform form="entity"/>
-    <Provenance resource="wn-en" version="1.0" original_id="entity-n"/>
+    <Provenance resource="wn-en" version="1.0" original_id="oewn-entity-n"/>
   </Lexeme>
   <Lexeme id="lex.en.animal" language="en" grammatical_category="NOUN">
     <Wordform form="animal"/>
-    <Provenance resource="wn-en" version="1.0" original_id="animal-n"/>
+    <Provenance resource="wn-en" version="1.0" original_id="oewn-animal-n"/>
   </Lexeme>
   <Lexeme id="lex.en.dog" language="en" grammatical_category="NOUN">
     <Wordform form="dog"/>
-    <Provenance resource="wn-en" version="1.0" original_id="dog-n"/>
+    <Provenance resource="wn-en" version="1.0" original_id="oewn-dog-n"/>
   </Lexeme>
   <Lexeme id="lex.en.brightness" language="en" grammatical_category="NOUN">
     <Wordform form="brightness"/>
-    <Provenance resource="wn-en" version="1.0" original_id="brightness-n"/>
+    <Provenance resource="wn-en" version="1.0" original_id="oewn-brightness-n"/>
   </Lexeme>
   <Lexeme id="lex.en.dogfish" language="en" grammatical_category="NOUN">
     <Wordform form="dogfish"/>
-    <Provenance resource="wn-en" version="1.0" original_id="dogfish-n"/>
+    <Provenance resource="wn-en" version="1.0" original_id="oewn-dogfish-n"/>
+  </Lexeme>
+  <Lexeme id="lex.en.bright" language="en" grammatical_category="ADJ">
+    <Wordform form="bright"/>
+    <Provenance resource="wn-en" version="1.0" original_id="oewn-bright-a"/>
   </Lexeme>
   <Lexeme id="lex.en.gleaming" language="en" grammatical_category="ADJ">
     <Wordform form="gleaming"/>
-    <Provenance resource="wn-en" version="1.0" original_id="gleaming-a"/>
+    <Provenance resource="wn-en" version="1.0" original_id="oewn-gleaming-a"/>
   </Lexeme>
   <Lexeme id="lex.en.glowing" language="en" grammatical_category="ADJ">
     <Wordform form="glowing"/>
-    <Provenance resource="wn-en" version="1.0" original_id="glowing-a"/>
+    <Provenance resource="wn-en" version="1.0" original_id="oewn-glowing-a"/>
   </Lexeme>
 
   <!-- English senses (lexeme → concept) -->
@@ -100,10 +133,13 @@
   <Sense id="sense.dogfish" signifier="lex.en.dogfish" signified="cili.i5">
     <Provenance resource="wn-en" version="1.0"/>
   </Sense>
-  <Sense id="sense.gleaming" signifier="lex.en.gleaming" signified="cili.i6">
+  <Sense id="sense.bright" signifier="lex.en.bright" signified="cili.i6">
     <Provenance resource="wn-en" version="1.0"/>
   </Sense>
-  <Sense id="sense.glowing" signifier="lex.en.glowing" signified="cili.i7">
+  <Sense id="sense.gleaming" signifier="lex.en.gleaming" signified="cili.i7">
+    <Provenance resource="wn-en" version="1.0"/>
+  </Sense>
+  <Sense id="sense.glowing" signifier="lex.en.glowing" signified="cili.i8">
     <Provenance resource="wn-en" version="1.0"/>
   </Sense>
 
@@ -114,13 +150,20 @@
   <ConceptRelation relation_type="hypernym" source="cili.i2" target="cili.i1">
     <Provenance resource="wn-en" version="1.0"/>
   </ConceptRelation>
-  <!-- eq_synonym fallback: gleaming (i6) ↔ dog (i3, has ARASAAC), no hypernym -->
-  <ConceptRelation relation_type="eq_synonym" source="cili.i6" target="cili.i3">
+
+  <!-- Adjective relations: gleaming and glowing are variants of bright -->
+  <!-- eq_synonym fallback: gleaming (i7) ≈ bright (i6, has ARASAAC) — ADJ ↔ ADJ -->
+  <ConceptRelation relation_type="eq_synonym" source="cili.i7" target="cili.i6">
     <Provenance resource="wn-en" version="1.0"/>
   </ConceptRelation>
-  <!-- similar fallback: glowing (i7) ~ dog (i3, has ARASAAC), no hypernym, no eq_synonym -->
-  <ConceptRelation relation_type="similar" source="cili.i7" target="cili.i3">
+  <!-- similar fallback: glowing (i8) ~ bright (i6, has ARASAAC) — ADJ ↔ ADJ -->
+  <ConceptRelation relation_type="similar" source="cili.i8" target="cili.i6">
     <Provenance resource="wn-en" version="1.0"/>
   </ConceptRelation>
+
+  <!-- Sense relation: gleaming antonym glowing (simplified; tests sense-level display) -->
+  <SenseRelation relation_type="antonym" source="sense.gleaming" target="sense.glowing">
+    <Provenance resource="wn-en" version="1.0"/>
+  </SenseRelation>
 
 </CygnetResource>

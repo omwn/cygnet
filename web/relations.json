@@ -30,5 +30,32 @@
   "co_agent_result":       { "short": "car", "color": "#a3e635", "en": "result of agent" },
   "co_agent_patient":      { "short": "cap", "color": "#84cc16", "en": "patient of agent" },
   "co_patient_instrument": { "short": "cpi", "color": "#22c55e", "en": "instrument of patient" },
-  "co_result_instrument":  { "short": "cri", "color": "#16a34a", "en": "instrument of result" }
+  "co_result_instrument":  { "short": "cri", "color": "#16a34a", "en": "instrument of result" },
+
+  "similar":               { "short": "sim",  "color": "#ec4899", "en": "similar to",                "ja": "類似語" },
+  "attribute":             { "short": "atr",  "color": "#f472b6", "en": "attribute",                 "ja": "属性" },
+  "eq_synonym":            { "short": "eqs",  "color": "#10b981", "en": "equivalent synonym",        "ja": "等価同義語" },
+  "ir_synonym":            { "short": "irs",  "color": "#34d399", "en": "irregular synonym" },
+  "also":                  { "short": "als",  "color": "#94a3b8", "en": "see also",                  "ja": "関連語" },
+
+  "domain_topic":          { "short": "dtp",  "color": "#0ea5e9", "en": "domain topic",              "ja": "トピック域" },
+  "has_domain_topic":      { "short": "-dtp", "color": "#7dd3fc", "en": "in domain topic" },
+  "domain_member_topic":   { "short": "mtp",  "color": "#7dd3fc", "en": "topic member" },
+  "domain_region":         { "short": "drg",  "color": "#6366f1", "en": "domain region",             "ja": "地域域" },
+  "has_domain_region":     { "short": "-drg", "color": "#a5b4fc", "en": "in domain region" },
+  "domain_member_region":  { "short": "mrg",  "color": "#a5b4fc", "en": "region member" },
+  "domain":                { "short": "dom",  "color": "#8b5cf6", "en": "domain",                    "ja": "ドメイン" },
+  "has_domain":            { "short": "-dom", "color": "#c4b5fd", "en": "in domain" },
+
+  "exemplifies":           { "short": "exm",  "color": "#f59e0b", "en": "exemplifies",               "ja": "例示" },
+  "is_exemplified_by":     { "short": "-exm", "color": "#fde68a", "en": "is exemplified by" },
+
+  "mero_location":         { "short": "lmer", "color": "#c026d3", "en": "location meronym" },
+  "holo_location":         { "short": "-lmer","color": "#e879f9", "en": "location holonym" },
+  "mero_portion":          { "short": "nmer", "color": "#9333ea", "en": "portion meronym" },
+  "holo_portion":          { "short": "-nmer","color": "#c084fc", "en": "portion holonym" },
+
+  "anto_simple":           { "short": "ants", "color": "#ef4444", "en": "simple antonym" },
+  "anto_gradable":         { "short": "antg", "color": "#f87171", "en": "gradable antonym" },
+  "anto_converse":         { "short": "antc", "color": "#fca5a5", "en": "converse antonym" }
 }
