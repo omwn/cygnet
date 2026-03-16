@@ -54,6 +54,18 @@ WORDNET_NAMES: dict[str, str] = {
     "tufs-ur":     "TUFS Urdu",
     "tufs-vi":     "TUFS Vietnamese",
     "wordnet_lv":  "Latvian Wordnet",
+    "tufs-ar":      "TUFS Arabic",
+    "tufs-de":      "TUFS German",
+    "tufs-en":      "TUFS English",
+    "tufs-es":      "TUFS Spanish",
+    "tufs-fr":      "TUFS French",
+    "tufs-id":      "TUFS Indonesian",
+    "tufs-ja":      "TUFS Japanese",
+    "tufs-ms":      "TUFS Malaysian",
+    "tufs-pt":      "TUFS Portuguese",
+    "tufs-th":      "TUFS Thai",
+    "tufs-zh":      "TUFS Chinese",
+    "odenet":       "Open German WordNet",
 }
 
 # Licence URL substring → short LaTeX label (checked in order; most specific first).

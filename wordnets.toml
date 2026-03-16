@@ -3,10 +3,12 @@
 # To add a language, append an entry here and re-run build.sh.
 
 # English — Open English WordNet
-en = ["https://en-word.net/static/english-wordnet-2025.xml.gz"]
+en = ["https://en-word.net/static/english-wordnet-2025.xml.gz",
+"https://github.com/omwn/tufs/releases/download/2.0/tufs-en-2.0.tar.xz"]
 
 # Arabic — OMW Arabic
-arb = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-arb-2.0.tar.xz"]
+arb = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-arb-2.0.tar.xz",
+"https://github.com/omwn/tufs/releases/download/2.0/tufs-ar-2.0.tar.xz"]
 
 # Bulgarian — OMW Bulgarian
 bg = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-bg-2.0.tar.xz"]
@@ -15,20 +17,23 @@ bg = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-bg-2.0.tar.xz
 ca = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-ca-2.0.tar.xz"]
 
 # Chinese (Mandarin) — OMW Chinese
-cmn = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-cmn-2.0.tar.xz"]
+cmn = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-cmn-2.0.tar.xz",
+"https://github.com/omwn/tufs/releases/download/2.0/tufs-zh-2.0.tar.xz"]
 
 # Danish — DanNet
-#da = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-da-2.0.tar.xz"]
-da = ["https://github.com/kuhumcst/DanNet/releases/download/v2025-07-03/dannet-wn-lmf.xml.gz"]
+da = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-da-2.0.tar.xz"]
+#da = ["https://github.com/kuhumcst/DanNet/releases/download/v2025-07-03/dannet-wn-lmf.xml.gz"]
 
 # German — OdeNet
-de = ["https://github.com/hdaSprachtechnologie/odenet/releases/download/v1.4/odenet-1.4.tar.xz"]
+de = ["https://github.com/hdaSprachtechnologie/odenet/releases/download/v1.4/odenet-1.4.tar.xz",
+"https://github.com/omwn/tufs/releases/download/2.0/tufs-de-2.0.tar.xz"]
 
 # Greek — OMW Greek
 el = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-el-2.0.tar.xz"]
 
 # Spanish — OMW Spanish
-es = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-es-2.0.tar.xz"]
+es = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-es-2.0.tar.xz",
+"https://github.com/omwn/tufs/releases/download/2.0/tufs-es-2.0.tar.xz"]
 
 # Basque — OMW Basque
 eu = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-eu-2.0.tar.xz"]
@@ -37,7 +42,8 @@ eu = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-eu-2.0.tar.xz
 fi = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-fi-2.0.tar.xz"]
 
 # French — OMW French
-fr = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-fr-2.0.tar.xz"]
+fr = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-fr-2.0.tar.xz",
+"https://github.com/omwn/tufs/releases/download/2.0/tufs-fr-2.0.tar.xz"]
 
 # Galician — OMW Galician
 gl = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-gl-2.0.tar.xz"]
@@ -60,15 +66,18 @@ it = [
 
 # Japanese
 # ToDo get better
-ja = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-ja-2.0.tar.xz"]
+ja = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-ja-2.0.tar.xz",
+"https://github.com/omwn/tufs/releases/download/2.0/tufs-ja-2.0.tar.xz"]
 
 # Malay
 # ToDo get better
-zsm = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-zsm-2.0.tar.xz"]
+zsm = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-zsm-2.0.tar.xz",
+"https://github.com/omwn/tufs/releases/download/2.0/tufs-ms-2.0.tar.xz"]
 
 # Indonesian
 # ToDo get better
-id = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-id-2.0.tar.xz"]
+id = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-id-2.0.tar.xz",
+"https://github.com/omwn/tufs/releases/download/2.0/tufs-id-2.0.tar.xz"]
 
 
 
@@ -90,8 +99,9 @@ nn = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-nn-2.0.tar.xz
 # Polish — OMW Polish
 pl = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-pl-2.0.tar.xz"]
 
-# Portuguese — OMW Portuguese + OpenWordNet-PT
-pt = [ "https://github.com/own-pt/openWordnet-PT/releases/download/v1.0.0/own-pt.tar.gz"]
+# Portuguese — OpenWordNet-PT
+pt = [ "https://github.com/own-pt/openWordnet-PT/releases/download/v1.0.0/own-pt.tar.gz",
+"https://github.com/omwn/tufs/releases/download/2.0/tufs-pt-2.0.tar.xz" ]
 
 # Romanian — OMW Romanian
 ro = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-ro-2.0.tar.xz"]
@@ -102,14 +112,15 @@ sk = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-sk-2.0.tar.xz
 # Slovenian — OMW Slovenian
 sl = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-sl-2.0.tar.xz"]
 
-# Albanian — OMW Albanian 
+# Albanian — OMW Albania n
 sq = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-sq-2.0.tar.xz"]
 
 # Swedish — OMW Swedish
 sv = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-sv-2.0.tar.xz"]
 
 # Thai — OMW Thai
-th = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-th-2.0.tar.xz"]
+th = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-th-2.0.tar.xz",
+"https://github.com/omwn/tufs/releases/download/2.0/tufs-th-2.0.tar.xz"]
 
 # Latvian -
 # Note bug in data, the licence is wrong, I have confirmed it is CC BY-SA 4.0
