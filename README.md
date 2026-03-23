@@ -140,6 +140,56 @@ WebAssembly).  No server-side component is needed after the initial file loads.
 
 See [`WEB_UI.md`](WEB_UI.md) for developer documentation.
 
+### Customising the web UI
+
+To deploy `web/index.html` for a different project, create a `web/local.json`
+file alongside it.  All fields are optional — omit any you don't need:
+
+```json
+{
+  "title":       "My Wordnet",
+  "tagline":     "A multilingual lexical resource",
+  "icon":        "📚",
+
+  "db":          "myproject.db.gz",
+  "provenanceDb":"myproject-provenance.db.gz",
+
+  "logo": {
+    "src": "mylogo.svg",
+    "url": "https://myproject.org",
+    "alt": "My Project"
+  },
+
+  "header": "<strong>Preview build</strong> — data updated 2025-01-01.",
+  "footer": "Built by the <a href='https://mylab.org'>My Lab</a> team.",
+
+  "about": {
+    "intro":    "<p>My Wordnet covers X languages…</p>",
+    "citation": "If you use this resource, please cite Doe (2025)."
+  },
+
+  "publications": [
+    "Jane Doe (2025). My Wordnet. In <em>Proceedings of GWC 2025</em>."
+  ]
+}
+```
+
+| Field | Effect |
+|---|---|
+| `title` | Header h1 and browser `<title>` |
+| `tagline` | Appended to `<title>` as `— tagline` |
+| `icon` | Emoji shown in the header and as the favicon |
+| `db` | Main database filename (default: `cygnet.db.gz`) |
+| `provenanceDb` | Provenance database filename |
+| `logo` | Header logo (`{src, url, alt}`); set to `null` to hide it |
+| `header` | HTML banner below the nav bar |
+| `footer` | HTML replacing the footer |
+| `about.intro` | HTML replacing the About tab intro paragraphs |
+| `about.citation` | HTML replacing the citation guidance in About |
+| `publications` | HTML strings prepended to the Publications list |
+
+A template is available at [`notes/local.json.example`](notes/local.json.example).
+
 ---
 
 ## Tests

@@ -1,0 +1,29 @@
+{
+  "_comment": "Copy this file to local.json and edit as needed. Omit any fields you don't want to override.",
+
+  "title": "My Wordnet",
+  "tagline": "A multilingual lexical resource",
+  "icon": "📚",
+
+  "db": "myproject.db.gz",
+  "provenanceDb": "myproject-provenance.db.gz",
+
+  "logo": {
+    "src": "mylogo.svg",
+    "url": "https://myproject.org",
+    "alt": "My Project"
+  },
+
+  "header": "<strong>Preview build</strong> — data updated 2025-01-01.",
+
+  "footer": "Built by the <a href='https://mylab.org' style='text-decoration:underline'>My Lab</a> team.",
+
+  "about": {
+    "intro": "<p>My Wordnet is a multilingual lexical database covering X languages.</p><p>Developed by Jane Doe. Source code on <a href='https://github.com/example/mywordnet' style='text-decoration:underline'>GitHub</a>.</p>",
+    "citation": "If you use My Wordnet, please cite Doe (2025) as well as the individual wordnets whose data you use."
+  },
+
+  "publications": [
+    "Jane Doe (2025). My Wordnet: A new multilingual resource. In <em>Proceedings of GWC 2025</em>."
+  ]
+}

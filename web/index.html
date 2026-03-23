@@ -29,6 +29,15 @@
         let _relConfig = {};
         let _relLang = 'en';
 
+        // ========== SITE CONFIG ==========
+        // Loaded from local.json at startup; falls back silently if absent.
+        // See notes/local.json.example for supported fields.
+        let _siteConfig = {};
+        const _configPromise = fetch('local.json')
+            .then(r => r.ok ? r.json() : {})
+            .catch(() => ({}))
+            .then(cfg => { Object.assign(_siteConfig, cfg); });
+
         // Build lookup tables from _relConfig once loaded.
         let RELATION_TO_SHORT = {};
         let _relColors = {};
@@ -547,6 +556,7 @@
             const [allResources, setAllResources] = useState([]);
             const [dbStats, setDbStats] = useState(null);
             const [wnSort, setWnSort] = useState({ col: null, asc: true });
+            const [siteConfig, setSiteConfig] = useState({});
             const [provenanceReady, setProvenanceReady] = useState(false);
             const [provLoading, setProvLoading] = useState(false);
             const [provError, setProvError] = useState(null);
@@ -636,10 +646,24 @@
                     .catch(e => console.warn('relations.json fetch failed:', e));
             }, []);
 
+            useEffect(() => {
+                _configPromise.then(() => {
+                    setSiteConfig({..._siteConfig});
+                    const { title, tagline, icon } = _siteConfig;
+                    if (title) document.title = title + (tagline ? ` — ${tagline}` : '');
+                    if (icon) {
+                        const link = document.querySelector("link[rel='icon']");
+                        if (link) link.href = `data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>${icon}</text></svg>`;
+                    }
+                });
+            }, []);
+
             // Initialize database
             useEffect(() => {
                 (async () => {
                     try {
+                        await _configPromise;
+                        const dbFile = _siteConfig.db || 'cygnet.db.gz';
                         setDbProgress('Loading sql.js...');
                         const SQL = await initSqlJs({
                             locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/${file}`
@@ -652,7 +676,7 @@
                             if (cached) {
                                 let stale = false;
                                 try {
-                                    const head = await fetch(DB_BASE + 'cygnet.db.gz', { method: 'HEAD' });
+                                    const head = await fetch(DB_BASE + dbFile, { method: 'HEAD' });
                                     const serverMtime = head.headers.get('last-modified') || head.headers.get('etag');
                                     const cachedMtime = await idbGet('db-mtime');
                                     if (serverMtime && serverMtime !== cachedMtime) stale = true;
@@ -672,7 +696,7 @@
                         if (!buf) {
                             // Fetch compressed database
                             setDbProgress('Downloading database...');
-                            const response = await fetch(DB_BASE + 'cygnet.db.gz');
+                            const response = await fetch(DB_BASE + dbFile);
                             if (!response.ok) throw new Error(`Failed to fetch database: ${response.status}`);
                             const serverMtime = response.headers.get('last-modified') || response.headers.get('etag') || '';
                             const compressedTotal = parseInt(response.headers.get('content-length') || '0');
@@ -916,7 +940,7 @@
                     }
 
                     if (!buf) {
-                        const response = await fetch(DB_BASE + 'provenance.db.gz');
+                        const response = await fetch(DB_BASE + (_siteConfig.provenanceDb || 'provenance.db.gz'));
                         if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`);
                         const ds = new DecompressionStream('gzip');
                         const reader = response.body.pipeThrough(ds).getReader();
@@ -1681,13 +1705,19 @@
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                     <button onClick={handleLogoClick} className="text-left hover:opacity-80 flex items-center gap-1.5">
-                                        <h1 className="text-4xl -mt-0.5">🦢</h1>
-                                        <h1 className="text-3xl font-bold text-gray-800"> Cygnet</h1>
+                                        <h1 className="text-4xl -mt-0.5">{siteConfig.icon || '🦢'}</h1>
+                                        <h1 className="text-3xl font-bold text-gray-800"> {siteConfig.title || 'Cygnet'}</h1>
                                     </button>
                                 </div>
-                                <a href="https://omwn.org" target="_blank" rel="noopener noreferrer" className="hover:opacity-80">
-                                    <img src="omw-logo.svg" alt="Open Multilingual Wordnet" className="h-10" />
-                                </a>
+                                {siteConfig.logo !== null && (
+                                    siteConfig.logo
+                                        ? <a href={siteConfig.logo.url || '#'} target="_blank" rel="noopener noreferrer" className="hover:opacity-80">
+                                              <img src={siteConfig.logo.src} alt={siteConfig.logo.alt || ''} className="h-10" />
+                                          </a>
+                                        : <a href="https://omwn.org" target="_blank" rel="noopener noreferrer" className="hover:opacity-80">
+                                              <img src="omw-logo.svg" alt="Open Multilingual Wordnet" className="h-10" />
+                                          </a>
+                                )}
                             </div>
                             <nav className="flex items-end gap-3 mt-3 -mb-3">
                                 {['browser', 'python', 'data', 'about', 'publications', 'wordnets'].map(tab => (
@@ -1819,6 +1849,13 @@
                             </nav>
                         </div>
                     </header>
+
+                    {siteConfig.header && (
+                        <div className="w-full bg-blue-50 border-b border-blue-100">
+                            <div className="max-w-4xl mx-auto px-4 py-3 text-sm text-gray-700"
+                                 dangerouslySetInnerHTML={{ __html: siteConfig.header }} />
+                        </div>
+                    )}
 
                     <main className="w-full max-w-4xl mx-auto px-4 pt-6 pb-4 flex-grow">
                         {activeTab === 'browser' && (
@@ -2488,12 +2525,18 @@
                         {activeTab === 'about' && (
                             <div>
                                 <h2 className="text-xl font-bold mb-4">About</h2>
-                                <p className="text-gray-700 mb-4">
-                                    OMW Cygnet is an experimental reformulation of Wordnet that is designed to eliminate conflicting records, and improve modularity. It extends the idea of the <a href="https://omwn.org/" className="text-blue-600 hover:underline">Open Multilingual Wordnet</a> and puts concepts at the core of the structure.
-                                </p>
-                                <p className="text-gray-700 mb-4">
-                                    Developed by Rowan Hall Maudslay and Francis Bond. Source code is available on <a href="https://github.com/rowanhm/cygnet" className="text-blue-600 hover:underline">GitHub</a>.
-                                </p>
+                                {siteConfig.about?.intro
+                                    ? <div className="text-gray-700 mb-4"
+                                           dangerouslySetInnerHTML={{ __html: siteConfig.about.intro }} />
+                                    : <>
+                                        <p className="text-gray-700 mb-4">
+                                            OMW Cygnet is an experimental reformulation of Wordnet that is designed to eliminate conflicting records, and improve modularity. It extends the idea of the <a href="https://omwn.org/" className="text-blue-600 hover:underline">Open Multilingual Wordnet</a> and puts concepts at the core of the structure.
+                                        </p>
+                                        <p className="text-gray-700 mb-4">
+                                            Developed by Rowan Hall Maudslay and Francis Bond. Source code is available on <a href="https://github.com/rowanhm/cygnet" className="text-blue-600 hover:underline">GitHub</a>.
+                                        </p>
+                                    </>
+                                }
                                 {dbStats && (
                                     <div className="border-t border-gray-200 pt-4 mb-4">
                                         <h3 className="font-medium text-sm text-gray-700 mb-3">Database statistics</h3>
@@ -2515,7 +2558,11 @@
                                 )}
                                 <div className="border-t border-gray-200 pt-4 mb-4">
                                     <h3 className="font-medium text-sm text-gray-700 mb-2">Citation</h3>
-                                    <p className="text-sm text-gray-600">If you use Cygnet, please cite <button onClick={() => setActiveTab('publications')} className="text-blue-600 hover:underline">Maudslay &amp; Bond (2026)</button> for Cygnet and <button onClick={() => setActiveTab('publications')} className="text-blue-600 hover:underline">Bond &amp; Foster (2013)</button> for the underlying Open Multilingual Wordnet, as well as the individual <button onClick={() => setActiveTab('wordnets')} className="text-blue-600 hover:underline">wordnets</button> whose data you use.</p>
+                                    {siteConfig.about?.citation
+                                        ? <div className="text-sm text-gray-600"
+                                               dangerouslySetInnerHTML={{ __html: siteConfig.about.citation }} />
+                                        : <p className="text-sm text-gray-600">If you use Cygnet, please cite <button onClick={() => setActiveTab('publications')} className="text-blue-600 hover:underline">Maudslay &amp; Bond (2026)</button> for Cygnet and <button onClick={() => setActiveTab('publications')} className="text-blue-600 hover:underline">Bond &amp; Foster (2013)</button> for the underlying Open Multilingual Wordnet, as well as the individual <button onClick={() => setActiveTab('wordnets')} className="text-blue-600 hover:underline">wordnets</button> whose data you use.</p>
+                                    }
                                 </div>
                                 <div className="border-t border-gray-200 pt-4 mb-4">
                                     <h3 className="font-medium text-sm text-gray-700 mb-2">Language Data</h3>
@@ -2571,6 +2618,10 @@
                             <div>
                                 <h2 className="text-xl font-bold mb-4">Publications</h2>
                                 <ul className="space-y-4 mb-8">
+                                    {(siteConfig.publications || []).map((pub, i) => (
+                                        <li key={`cfg-pub-${i}`} className="text-sm text-gray-800"
+                                            dangerouslySetInnerHTML={{ __html: pub }} />
+                                    ))}
                                     <li className="text-sm text-gray-800">
                                         Rowan Hall Maudslay &amp; Francis Bond (2026). Cygnet: Refactoring the Open Multilingual Wordnet. In <em>Proceedings of the 15th International Conference on Language Resources and Evaluation (LREC 2026)</em>. (to appear)
                                     </li>
@@ -2684,16 +2735,20 @@
 
                     <footer className="mt-auto py-4">
                         <div className="max-w-4xl mx-auto px-4 border-t border-gray-200 pt-4">
-                            <div className="max-w-4xl mx-auto text-center text-sm text-gray-600">
-                                <div className="mb-2">
-                                    <span>Produced with the support of</span>
-                                </div>
-                                <div>
-                                    <a href="https://www.culturelab.psl.eu/" target="_blank" rel="noopener noreferrer" className="inline-block hover:opacity-80">
-                                        <img src="culturelab.png" alt="CultureLab" className="h-14 inline-block" />
-                                    </a>
-                                </div>
-                            </div>
+                            {siteConfig.footer
+                                ? <div className="max-w-4xl mx-auto text-center text-sm text-gray-600"
+                                       dangerouslySetInnerHTML={{ __html: siteConfig.footer }} />
+                                : <div className="max-w-4xl mx-auto text-center text-sm text-gray-600">
+                                    <div className="mb-2">
+                                        <span>Produced with the support of</span>
+                                    </div>
+                                    <div>
+                                        <a href="https://www.culturelab.psl.eu/" target="_blank" rel="noopener noreferrer" className="inline-block hover:opacity-80">
+                                            <img src="culturelab.png" alt="Culture Lab" className="h-14 inline-block" />
+                                        </a>
+                                    </div>
+                                  </div>
+                            }
                         </div>
                     </footer>
 
