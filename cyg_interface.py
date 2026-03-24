@@ -1,28 +1,53 @@
+from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import List, Tuple
+from typing import List, Tuple, Literal, Optional
+
+POS = Literal["noun", "verb", "adj", "adv", "adp", "unk", "conj", "nref"]
 
 class Cygnet(ABC):
 
     @abstractmethod
-    def concepts(self, word: str = None, langs: List[str] = None) -> List[Concept]:
+    def concepts(self,
+                form: Optional[str] = None,
+                langs: List[str] | str | None = None,
+                pos : Optional[POS] = None
+                ) -> List[Concept]:
         pass
 
     @abstractmethod
-    def concept(self, ili: str) -> Concept:
+    def concept(self,
+                ili: str
+                ) -> Optional[Concept]:
         pass
 
     @abstractmethod
-    def lexemes(self, form: str = None, lang: str = None) -> List[Lexeme]:
+    def senses(self,
+               form: Optional[str] = None,
+               langs: List[str] | str | None = None
+               ) -> List[Sense]:
+        pass
+
+    @abstractmethod
+    def lexemes(self,
+                form: Optional[str] = None,
+                langs: List[str] | str | None = None
+                ) -> List[Lexeme]:
+        pass
+
+    @abstractmethod
+    def langs(self) -> List[str]:
         pass
 
 class Concept(ABC):
 
     @abstractmethod
-    def definition(self, lang: str = "en") -> AnnotatedString:
+    def definition(self,
+                   lang: str = "en"
+                   ) -> Optional[AnnotatedString]:
         pass
 
     @abstractmethod
-    def pos(self) -> str:
+    def pos(self) -> POS:
         pass
 
     @abstractmethod
@@ -30,11 +55,15 @@ class Concept(ABC):
         pass
 
     @abstractmethod
-    def senses(self, lang: str = None) -> List[Sense]:
+    def senses(self,
+               lang: Optional[str] = None
+               ) -> List[Sense]:
         pass
 
     @abstractmethod
-    def lexemes(self, lang: str = None) -> List[Lexeme]:
+    def lexemes(self,
+                lang: Optional[str] = None
+                ) -> List[Lexeme]:
         pass
 
     @abstractmethod
