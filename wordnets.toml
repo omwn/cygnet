@@ -138,7 +138,7 @@ km = ["https://github.com/omwn/tufs/releases/download/2.0/tufs-km-2.0.tar.xz"]
 ko = ["https://github.com/omwn/tufs/releases/download/2.0/tufs-ko-2.0.tar.xz"]
 
 # Lao
-lo = ["https://github.com/omwn/tufs/releases/download/2.0/tufs-ko-2.0.tar.xz"]
+lo = ["https://github.com/omwn/tufs/releases/download/2.0/tufs-lo-2.0.tar.xz"]
 
 # Mongolian
 # ToDO get newer version from https://github.com/myanmaropenwordnet/mow

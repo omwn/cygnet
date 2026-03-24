@@ -1,0 +1,40 @@
+{
+  "title": "Cygnet: A Merged Multilingual Wordnet",
+  "description": "Cygnet is a merged multilingual wordnet covering 40+ languages and ~180,000 concepts. It combines Open English WordNet, OMW Data, TUFS, OdeNet, DanNet, and several other wordnets into a single SQLite database, indexed by the Collaborative Interlingual Index (CILI).",
+  "creators": [
+    {
+      "name": "Hall Maudslay, Rowan",
+      "affiliation": "Paris PSL",
+      "orcid": "0009-0009-1339-0646"
+    },
+    {
+      "name": "Bond, Francis",
+      "affiliation": "Palacký University Olomouc",
+      "orcid": "0000-0003-4973-8068"
+    }
+  ],
+  "license": "MIT",
+  "upload_type": "software",
+  "keywords": [
+    "wordnet",
+    "multilingual",
+    "lexical resource",
+    "natural language processing",
+    "CILI"
+  ],
+  "references": [
+    "Rowan Hall Maudslay & Francis Bond (2026). Cygnet: Refactoring the Open Multilingual Wordnet. In Proceedings of the 15th International Conference on Language Resources and Evaluation (LREC 2026)."
+  ],
+  "related_identifiers": [
+    {
+      "relation": "isSupplementTo",
+      "identifier": "https://github.com/rowanhm/cygnet",
+      "scheme": "url"
+    },
+    {
+      "relation": "references",
+      "identifier": "https://github.com/omwn/omwn.github.io",
+      "scheme": "url"
+    }
+  ]
+}

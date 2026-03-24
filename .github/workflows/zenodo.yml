@@ -1,0 +1,21 @@
+name: Upload to Zenodo
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to upload (e.g. 2026.03.15)'
+        required: true
+        type: string
+
+jobs:
+  zenodo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Upload to Zenodo
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ZENODO_TOKEN: ${{ secrets.ZENODO_TOKEN }}
+        run: python3 scripts/zenodo_upload.py "${{ inputs.tag }}"

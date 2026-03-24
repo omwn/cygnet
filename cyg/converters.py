@@ -29,128 +29,123 @@ NEW_POS_LABELS = {
     'u': 'UNK'
 }
 
-SENSE_RELATION_NAME_MAPPING = {
-    'antonym': 'antonym',
-    'derivation': 'derivation',
-    'pertainym': 'pertainym',
-    'participle': 'participle',
+# Maps each forward relation type to its inverse (or itself if symmetric, None if no inverse).
+# Used to deduplicate, add missing inverses, and identify canonical direction.
+# Aligned with wn.constants.REVERSE_RELATIONS — see https://github.com/goodmami/wn
+
+SENSE_REVERSE_RELATIONS: dict[str, str | None] = {
+    # Symmetric
+    'antonym':           'antonym',
+    'also':              'also',
+    'similar':           'similar',
+    'derivation':        'derivation',
+    'anto_gradable':     'anto_gradable',
+    'anto_simple':       'anto_simple',
+    'anto_converse':     'anto_converse',
+    # Asymmetric
+    'domain_topic':      'has_domain_topic',
+    'domain_region':     'has_domain_region',
+    'exemplifies':       'is_exemplified_by',
+    'feminine':          'has_feminine',
+    'masculine':         'has_masculine',
+    'young':             'has_young',
+    'diminutive':        'has_diminutive',
+    'augmentative':      'has_augmentative',
+    'simple_aspect_ip':  'simple_aspect_pi',
+    'secondary_aspect_ip': 'secondary_aspect_pi',
+    'metaphor':          'has_metaphor',
+    'metonym':           'has_metonym',
+    # No inverse
+    'pertainym':         None,
+    'participle':        None,
+    'agent':             None,
+    'body_part':         None,
+    'by_means_of':       None,
+    'destination':       None,
+    'event':             None,
+    'instrument':        None,
+    'location':          None,
+    'material':          None,
+    'property':          None,
+    'result':            None,
+    'state':             None,
+    'undergoer':         None,
+    'uses':              None,
+    'vehicle':           None,
+    'other':             None,
 }
 
-CONCEPT_RELATION_NAME_MAPPING = {
-    'hypernym':              'hypernym',
-    'instance_hypernym':     'instance_hypernym',
-    'mero_member':           'mero_member',
-    'mero_part':             'mero_part',
-    'mero_substance':        'mero_substance',
-    'causes':                'causes',
-    'entails':               'entails',
-    'antonym':               'antonym',
-    'agent':                 None,
-    'patient':               None,
-    'result':                None,
-    'co_agent_instrument':   None,
-    'instrument':            None,
-    'co_agent_result':       None,
-    'co_agent_patient':      None,
-    'co_patient_instrument': None,
-    'co_result_instrument':  None,
-}
-
-SENSE_RELATION_PAIRS = {
-    'antonym': 'antonym',  # An opposite and inherently incompatible word
-    'also': 'also',  # See also, a reference of weak meaning
-    'similar': 'similar',  # Similar, though not necessarily interchangeable
-    'derivation': 'derivation',  # A word that is derived from some other word
-    'domain_topic': 'domain_member_topic',  # Indicates the category of this word
-    'domain_region': 'domain_member_region',  # Indicates the region of this word
-    'exemplifies': 'is_exemplified_by',  # Indicates the usage of this word
-    'participle': None,  # An adjective that is a participle form a verb
-    'pertainym': None,
-    'agent': None,  # A word which is typically the one/that who/which does the action denoted by a given word
-    'material': None,  # A word which is typically the material of a given word
-    'event': None,  # An noun representing the event of a verb
-    'instrument': None,  # An instrument for doing a task
-    'location': None,  # A verb derived from the action performed at a place
-    'by_means_of': None,  # A word which is typically the means by which something is done
-    'undergoer': None,  # A word which is typically the undergoer of a given word
-    'property': None,  # Cause something to have a particular property
-    'result': None,  # A word which is typically the result of a given word
-    'state': None,  # A state caused by the verb
-    'uses': None,  # A verb that uses a noun
-    'destination': None,  # The noun indicates the destination of a verb
-    'body_part': None,  # A word which is typically a body part of a given word
-    'vehicle': None,  # A verb indicating movement with a particular vehicle
-    'simple_aspect_ip': 'simple_aspect_pi',
-    'secondary_aspect_ip': 'secondary_aspect_pi',  # A word which is linked to another through a change in aspect (ip)
-    'feminine': 'has_feminine',  # A feminine form of a word
-    'masculine': 'has_masculine',  # A masculine form of a word
-    'young': 'has_young',  # A form of a word with a derivation indicating the young of a species
-    'diminutive': 'has_diminutive',  # A diminutive form of a word
-    'augmentative': 'has_augmentative',  # An augmentative form of a word
-    'anto_gradable': 'anto_gradable',  # A word pair whose meanings are opposite and which lie on a continuous spectrum
-    'anto_simple': 'anto_simple',
-    'anto_converse': 'anto_converse',
-    'metaphor': 'has_metaphor',
-    'metonym': 'has_metonym',
-    'other': None
-}
-
-CONCEPT_RELATION_PAIRS = {
-    'hypernym': 'hyponym',  # a concept that is more general than a given concept
-    'instance_hypernym': 'instance_hyponym',  # the type of an instance
-    'mero_member': 'holo_member',  # concept A is a member of concept B
-    'mero_part': 'holo_part',  # concept A is a component of concept B
-    'mero_substance': 'holo_substance',  # concept A is made of concept B
-    'mero_location': 'holo_location',  # A is a place located in B
-    'mero_portion': 'holo_portion',  # A is an amount/piece/portion of B
-    'meronym': 'holonym',  # B makes up a part of A
-    'entails': 'is_entailed_by',  # impose, involve, or imply as a necessary accompaniment or result
-    'causes': 'is_caused_by',  # concept A is an entity that produces an effect or is responsible for events or results of concept B
-    'exemplifies': 'is_exemplified_by',  # a concept which is the example of a given concept
-    'domain_region': 'has_domain_region',  # a concept which is a geographical / cultural domain pointer of a given concept
-    'domain_topic': 'has_domain_topic',  # a concept which is the scientific category pointer of a given concept
-    'domain': 'has_domain',  # a concept which is a Topic, Region or Usage pointer of a given concept
-    'agent': 'involved_agent',  # a concept which is typically the one/that who/which does the action denoted by a given concept
-    'patient': 'involved_patient',  # a concept which is the one/that who/which undergoes a given concept
-    'instrument': 'involved_instrument',  # a concept which is the instrument necessary for the action or event expressed by a given concept
-    'location': 'involved_location',  # a concept which is the place where the event expressed by a given concept happens
-    'direction': 'involved_direction',  # a concept which is the direction of the action or event expressed by a given concept
-    'source_direction': 'involved_source_direction',  # a concept which is the place from where the event expressed by a given concept begins
-    'target_direction': 'involved_target_direction',  # a concept which is the place where the action or event expressed by a given concept leads to
-    'result': 'involved_result',  # a concept which comes into existence as a result of a given concept
-    'role': 'involved',  # a concept which is involved in the action or event expressed by a given concept
-    'co_agent_instrument': 'co_instrument_agent',  # a concept which is the instrument used by a given concept in an action
-    'co_agent_patient': 'co_patient_agent',  # a concept which is the patient undergoing an action carried out by a given concept
-    'co_agent_result': 'co_result_agent',  # a concept which is the result of an action taken by a given concept
-    'co_patient_instrument': 'co_instrument_patient',  # a concept which undergoes an action with the use of a given concept as an instrument
-    'co_result_instrument': 'co_instrument_result',  # a concept which is the result of an action using an instrument of a given concept
-    'state_of': 'be_in_state',  # B is qualified by A
-    'in_manner': 'manner_of',  # B qualifies the manner in which an action or event expressed by A takes place
-    'subevent': 'is_subevent_of',  # B takes place during or as part of A, and whenever B takes place, A takes place
-    'classifies': 'classified_by',  # a concept A used when counting concept B
-    'restricts': 'restricted_by',  # a relation between an adjectival A (quantifier/determiner) and a nominal (pronominal) B
-    'simple_aspect_ip': 'simple_aspect_pi',  # a concept which is linked to another through a change from imperfective to perfective aspect
-    'secondary_aspect_ip': 'secondary_aspect_pi',  # a concept which is linked to another through a change in aspect (ip)
-    'feminine': 'has_feminine',  # a concept used to refer to female members of a class
-    'masculine': 'has_masculine',  # a concept used to refer to male members of a class
-    'young': 'has_young',  # a concept used to refer to young members of a class
-    'augmentative': 'has_augmentative',  # a concept used to refer to generally larger members of a class
-    'diminutive': 'has_diminutive',  # a concept used to refer to generally smaller members of a class
-    'similar': 'similar',  # (of words) expressing closely related meanings
-    'attribute': 'attribute',  # an abstraction belonging to or characteristic of an entity
-    'antonym': 'antonym',  # an opposite and inherently incompatible word
-    'anto_simple': 'anto_simple',  # word pairs whose meanings are opposite but whose meanings do not lie on a continuous spectrum
-    'anto_gradable': 'anto_gradable',  # word pairs whose meanings are opposite and which lie on a continuous spectrum
-    'anto_converse': 'anto_converse',  # word pairs that name or describe a single relationship from opposite perspectives
-    'derivation': 'derivation',  # a concept which is a derivationally related form of a given concept
-    'eq_synonym': 'eq_synonym',  # A and B are equivalent concepts but their nature requires that they remain separate
-    'ir_synonym': 'ir_synonym',  # a concept that means the same except for the style or connotation
-    'also': None,  # a word having a loose semantic relation to another word
-    'participle': None,  # a concept which is a participial adjective derived from a verb expressed by a given concept
-    'pertainym': None,  # a concept which is of or pertaining to a given concept
-    'constitutive': None,  # core semantic relations that define synsets
-    'co_role': None,  # a concept undergoes an action in which a given concept is involved
-    'other': None,  # any relation not otherwise specified
+CONCEPT_REVERSE_RELATIONS: dict[str, str | None] = {
+    # Taxonomic
+    'hypernym':          'hyponym',
+    'instance_hypernym': 'instance_hyponym',
+    # Meronymy
+    'meronym':           'holonym',
+    'mero_member':       'holo_member',
+    'mero_part':         'holo_part',
+    'mero_substance':    'holo_substance',
+    'mero_location':     'holo_location',
+    'mero_portion':      'holo_portion',
+    # Causality / entailment
+    'causes':            'is_caused_by',
+    'entails':           'is_entailed_by',
+    'subevent':          'is_subevent_of',
+    # State / manner
+    'state_of':          'be_in_state',
+    'manner_of':         'in_manner',
+    # Domain
+    'domain_topic':      'has_domain_topic',
+    'domain_region':     'has_domain_region',
+    'domain':            'has_domain',
+    'exemplifies':       'is_exemplified_by',
+    # Classification
+    'classifies':        'classified_by',
+    'restricts':         'restricted_by',
+    # Roles
+    'role':              'involved',
+    'agent':             'involved_agent',
+    'patient':           'involved_patient',
+    'result':            'involved_result',
+    'instrument':        'involved_instrument',
+    'location':          'involved_location',
+    'direction':         'involved_direction',
+    'target_direction':  'involved_target_direction',
+    'source_direction':  'involved_source_direction',
+    # Co-roles
+    'co_agent_patient':      'co_patient_agent',
+    'co_agent_instrument':   'co_instrument_agent',
+    'co_agent_result':       'co_result_agent',
+    'co_patient_instrument': 'co_instrument_patient',
+    'co_result_instrument':  'co_instrument_result',
+    # Morphological / gender
+    'feminine':          'has_feminine',
+    'masculine':         'has_masculine',
+    'young':             'has_young',
+    'diminutive':        'has_diminutive',
+    'augmentative':      'has_augmentative',
+    # Aspect (Slavic wordnets)
+    'simple_aspect_ip':    'simple_aspect_pi',
+    'secondary_aspect_ip': 'secondary_aspect_pi',
+    # Figurative
+    'metaphor':          'has_metaphor',
+    'metonym':           'has_metonym',
+    # Symmetric
+    'antonym':           'antonym',
+    'similar':           'similar',
+    'attribute':         'attribute',
+    'eq_synonym':        'eq_synonym',
+    'ir_synonym':        'ir_synonym',
+    'co_role':           'co_role',
+    'also':              'also',
+    'anto_gradable':     'anto_gradable',
+    'anto_simple':       'anto_simple',
+    'anto_converse':     'anto_converse',
+    'derivation':        'derivation',
+    # No inverse
+    'pertainym':         None,
+    'participle':        None,
+    'constitutive':      None,
+    'other':             None,
 }
 
 CONCEPT_RELATIONS_REQUIRING_SAME_CATEGORY = {
@@ -1205,7 +1200,7 @@ class WordNetToCygnetConverter:
         For asymmetric relations, keep as-is.
         Returns (source, target, relation_type) in canonical form.
         """
-        pairs_dict = CONCEPT_RELATION_PAIRS if is_concept else SENSE_RELATION_PAIRS
+        pairs_dict = CONCEPT_REVERSE_RELATIONS if is_concept else SENSE_REVERSE_RELATIONS
         inverse = pairs_dict.get(rel_type)
 
         # If symmetric (maps to itself), use lexicographic ordering
@@ -1221,7 +1216,7 @@ class WordNetToCygnetConverter:
         E.g., given 'hyponym', return 'hypernym'
         Returns None if not found.
         """
-        pairs_dict = CONCEPT_RELATION_PAIRS if is_concept else SENSE_RELATION_PAIRS
+        pairs_dict = CONCEPT_REVERSE_RELATIONS if is_concept else SENSE_REVERSE_RELATIONS
 
         for forward_type, inv in pairs_dict.items():
             if inv == inverse_type:
@@ -1246,44 +1241,35 @@ class WordNetToCygnetConverter:
         """
         logger.info("\nPass 3: Converting Relations...")
 
-        # Helper function to build bidirectional relation dict
         def build_bidirectional_dict(pairs_dict):
-            """Build a dict that maps both forward and inverse relations."""
+            """Expand a forward-only pairs dict to include both directions."""
             bidirectional = {}
             for forward, inverse in pairs_dict.items():
                 bidirectional[forward] = inverse
                 if inverse is not None and inverse != forward:
-                    # Add reverse mapping (but not for symmetric or None)
                     bidirectional[inverse] = forward
             return bidirectional
 
-        # Build bidirectional dicts for lookups
-        bidirectional_concept_pairs = build_bidirectional_dict(CONCEPT_RELATION_PAIRS)
-        bidirectional_sense_pairs = build_bidirectional_dict(SENSE_RELATION_PAIRS)
+        bidirectional_concept = build_bidirectional_dict(CONCEPT_REVERSE_RELATIONS)
+        bidirectional_sense = build_bidirectional_dict(SENSE_REVERSE_RELATIONS)
 
-        # Helper function to process relations (used for both concept and sense)
-        def process_relations(raw_relations, pairs_dict, name_mapping,
-                              bidirectional_dict, is_concept, existing_relations=None):
+        def process_relations(raw_relations, pairs_dict, bidirectional_dict,
+                              is_concept, existing_relations=None):
             """Process a list of raw relations through all stages."""
+            log_key = 'concept_relations' if is_concept else 'sense_relations'
 
-            # Stage 1: Filter unknown types
-            valid_types = set(bidirectional_dict.keys())
-            filtered = [(s, t, r) for s, t, r in raw_relations if r in valid_types]
-            unknown_count = len(raw_relations) - len(filtered)
-
-            # Log unknown types
-            rel_type = 'concept_relations' if is_concept else 'sense_relations'
-            self.log['relation_processing']['unknown_relation_types'][rel_type]['count'] = unknown_count
+            # Stage 1: Log unknown types (pass all through)
+            unknown_count = sum(1 for _, _, r in raw_relations if r not in bidirectional_dict)
+            self.log['relation_processing']['unknown_relation_types'][log_key]['count'] = unknown_count
 
             # Stage 2: Deduplicate
-            relation_set = set(filtered)
-            dup_count = len(filtered) - len(relation_set)
-            self.log['relation_processing']['duplicates_removed'][rel_type]['count'] = dup_count
+            relation_set = set(raw_relations)
+            dup_count = len(raw_relations) - len(relation_set)
+            self.log['relation_processing']['duplicates_removed'][log_key]['count'] = dup_count
 
-            # Stage 3: Add missing inverses
+            # Stage 3: Add missing inverses for known types
             with_inverses = set(relation_set)
             inverses_added = 0
-
             for source, target, rel_type_val in sorted(relation_set):
                 inverse_type = bidirectional_dict.get(rel_type_val)
                 if inverse_type is not None:
@@ -1291,47 +1277,44 @@ class WordNetToCygnetConverter:
                     if inverse_tuple not in with_inverses:
                         with_inverses.add(inverse_tuple)
                         inverses_added += 1
-                        self.log['relation_processing']['missing_inverses_added'][rel_type]['count'] += 1
+                        self.log['relation_processing']['missing_inverses_added'][log_key]['count'] += 1
 
-            # Stage 4: Keep only forward direction (keys in NAME_MAPPING)
+            # Stage 4: Keep only canonical direction
+            #   - Symmetric: deduplicate to lexicographically ordered pair
+            #   - Known asymmetric forward (key in pairs_dict): keep
+            #   - Unknown type (not in bidirectional_dict): keep as-is
+            #   - Known inverse direction (in bidirectional but not a key in pairs_dict): skip
             forward_only = []
             seen_symmetric = set()
-
             for source, target, rel_type_val in sorted(with_inverses):
-                if name_mapping.get(rel_type_val) is None:
-                    continue
-
                 inverse_type = pairs_dict.get(rel_type_val)
-
-                # Symmetric relation - use canonical ordering
                 if inverse_type == rel_type_val:
+                    # Symmetric: one canonical entry per pair
                     pair_key = (min(source, target), max(source, target), rel_type_val)
                     if pair_key not in seen_symmetric:
                         seen_symmetric.add(pair_key)
-                        # Normalize to lexicographic order
                         if source > target:
                             source, target = target, source
                         forward_only.append((source, target, rel_type_val))
-                else:
-                    # Asymmetric - already filtered to forward direction
+                elif rel_type_val in pairs_dict:
+                    # Known asymmetric forward direction (or no-inverse type)
                     forward_only.append((source, target, rel_type_val))
+                elif rel_type_val not in bidirectional_dict:
+                    # Unknown type — pass through
+                    forward_only.append((source, target, rel_type_val))
+                # else: known inverse direction — skip (MergeBuilder generates it)
 
-            # Stage 5: Remap to new names
-            remapped = [(s, t, name_mapping[r]) for s, t, r in forward_only]
-
-            # Stage 6: Filter out existing relations
+            # Stage 5: Filter out existing relations
             if existing_relations is not None:
-                final_relations = []
-                skipped = 0
-                for s, t, r in remapped:
+                result = []
+                for s, t, r in forward_only:
                     if (s, t, r) in existing_relations:
-                        skipped += 1
-                        self.log['relation_processing']['skipped_existing_relations'][rel_type]['count'] += 1
+                        self.log['relation_processing']['skipped_existing_relations'][log_key]['count'] += 1
                     else:
-                        final_relations.append((s, t, r))
-                remapped = final_relations
+                        result.append((s, t, r))
+                forward_only = result
 
-            return remapped, unknown_count, dup_count, inverses_added
+            return forward_only, unknown_count, dup_count, inverses_added
 
         # Load all relations from XML
         logger.info("  Loading all relations...")
@@ -1378,14 +1361,13 @@ class WordNetToCygnetConverter:
         logger.info("  Processing concept relations...")
         final_concept_relations, c_unknown, c_dup, c_inv = process_relations(
             raw_concept_relations,
-            CONCEPT_RELATION_PAIRS,
-            CONCEPT_RELATION_NAME_MAPPING,
-            bidirectional_concept_pairs,
+            CONCEPT_REVERSE_RELATIONS,
+            bidirectional_concept,
             is_concept=True,
             existing_relations=self.existing_concept_relations
         )
 
-        logger.warning(f"    Filtered {c_unknown} unknown types")
+        logger.warning(f"    Unknown types: {c_unknown}")
         logger.info(f"    Removed {c_dup} duplicates")
         logger.info(f"    Added {c_inv} missing inverses")
         logger.info(f"    Final: {len(final_concept_relations)} concept relations")
@@ -1394,14 +1376,13 @@ class WordNetToCygnetConverter:
         logger.info("  Processing sense relations...")
         final_sense_relations, s_unknown, s_dup, s_inv = process_relations(
             raw_sense_relations,
-            SENSE_RELATION_PAIRS,
-            SENSE_RELATION_NAME_MAPPING,
-            bidirectional_sense_pairs,
+            SENSE_REVERSE_RELATIONS,
+            bidirectional_sense,
             is_concept=False,
             existing_relations=None
         )
 
-        logger.warning(f"    Filtered {s_unknown} unknown types")
+        logger.warning(f"    Unknown types: {s_unknown}")
         logger.info(f"    Removed {s_dup} duplicates")
         logger.info(f"    Added {s_inv} missing inverses")
         logger.info(f"    Final: {len(final_sense_relations)} sense relations")

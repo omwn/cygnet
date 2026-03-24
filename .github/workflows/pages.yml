@@ -28,7 +28,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG=$(gh release view --repo rowanhm/cygnet --json tagName --jq .tagName)
+          TAG=$(gh release view --repo omwn/cygnet --json tagName --jq .tagName)
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Cache release databases
@@ -42,7 +42,7 @@ jobs:
         if: steps.cache-db.outputs.cache-hit != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release download --repo rowanhm/cygnet --pattern "*.db.gz" --dir web/
+        run: gh release download --repo omwn/cygnet --pattern "*.db.gz" --dir web/
 
       - uses: actions/configure-pages@v5
 
