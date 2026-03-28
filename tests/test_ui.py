@@ -82,7 +82,15 @@ class TestPageLoad:
 
     def test_nav_tabs_visible(self, page_ready: Page):
         expect(page_ready.locator('button', has_text='Browser')).to_be_visible()
-        expect(page_ready.locator('button', has_text='Data')).to_be_visible()
+        expect(page_ready.locator('button', has_text='About')).to_be_visible()
+
+    def test_python_tab_absent(self, page_ready: Page):
+        """Python tab was removed — should not appear in the nav."""
+        expect(page_ready.locator('button', has_text='Python')).not_to_be_visible()
+
+    def test_data_tab_absent(self, page_ready: Page):
+        """Data tab was merged into About — should not appear in the nav."""
+        expect(page_ready.locator('button', has_text='Data')).not_to_be_visible()
 
 
 # ---------------------------------------------------------------------------
@@ -526,6 +534,12 @@ class TestPublications:
         expect(page_ready.locator('text=Citation')).to_be_visible(timeout=5_000)
         expect(page_ready.locator('button', has_text='Maudslay')).to_be_visible()
         expect(page_ready.locator('button', has_text='Bond & Foster')).to_be_visible()
+
+    def test_about_tab_download_section(self, page_ready: Page):
+        """About tab has a Download section with database links."""
+        page_ready.locator('button', has_text='About').click()
+        expect(page_ready.get_by_role('heading', name='Download')).to_be_visible(timeout=5_000)
+        expect(page_ready.locator('a', has_text='.db.gz').first).to_be_visible()
 
 
 # ---------------------------------------------------------------------------

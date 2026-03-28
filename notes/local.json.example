@@ -2,11 +2,25 @@
   "_comment": "Copy this file to local.json and edit as needed. Omit any fields you don't want to override.",
 
   "title": "My Wordnet",
+  "name": "MWN",
   "tagline": "A multilingual lexical resource",
   "icon": "📚",
 
   "db": "myproject.db.gz",
   "provenanceDb": "myproject-provenance.db.gz",
+
+  "databases": [
+    {
+      "filename": "myproject.db.gz",
+      "url": "https://github.com/example/mywordnet/releases/latest/download/myproject.db.gz",
+      "description": "The main lexical database, containing synsets, entries, senses, definitions, and examples."
+    },
+    {
+      "filename": "myproject-provenance.db.gz",
+      "url": "https://github.com/example/mywordnet/releases/latest/download/myproject-provenance.db.gz",
+      "description": "Provenance records tracing every data point back to its source and original identifier."
+    }
+  ],
 
   "logo": {
     "src": "mylogo.svg",
@@ -20,7 +34,8 @@
 
   "about": {
     "intro": "<p>My Wordnet is a multilingual lexical database covering X languages.</p><p>Developed by Jane Doe. Source code on <a href='https://github.com/example/mywordnet' style='text-decoration:underline'>GitHub</a>.</p>",
-    "citation": "If you use My Wordnet, please cite Doe (2025) as well as the individual wordnets whose data you use."
+    "citation": "If you use My Wordnet, please cite Doe (2025) as well as the individual wordnets whose data you use.",
+    "languageData": "My Wordnet covers X languages drawn from Y resources — see the Wordnets tab for details."
   },
 
   "publications": [
