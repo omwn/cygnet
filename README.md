@@ -142,6 +142,12 @@ See [`WEB_UI.md`](WEB_UI.md) for developer documentation.
 
 ### Customising the web UI
 
+For a full guide to deploying Cygnet for your own project — including
+`wordnets.toml`, `local.json`, `build.sh`, releases, and GitHub Pages — see
+**[`CUSTOMIZE.md`](CUSTOMIZE.md)**.  The
+[Old Javanese Wordnet](https://github.com/davidmoeljadi/OJW) is a working
+example.
+
 To deploy `web/index.html` for a different project, create a `web/local.json`
 file alongside it.  All fields are optional — omit any you don't need:
 
