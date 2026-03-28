@@ -1,5 +1,6 @@
-#!/bin/bash
-cd "$(dirname "$0")/web"
+#!/usr/bin/env bash
+# Usage: run.sh [dir]  — serves dir (default: web/) in a browser.
+cd "${1:-$(dirname "$0")/web}"
 python3 - <<'EOF'
 import http.server, socket, webbrowser
 

@@ -669,21 +669,30 @@
                             locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/${file}`
                         });
 
-                        // Check IndexedDB cache, validating against server mtime
+                        // Check IndexedDB cache, validating against filename and server mtime
                         let buf;
                         try {
                             const cached = await idbGet('db');
                             if (cached) {
                                 let stale = false;
-                                try {
-                                    const head = await fetch(DB_BASE + dbFile, { method: 'HEAD' });
-                                    const serverMtime = head.headers.get('last-modified') || head.headers.get('etag');
-                                    const cachedMtime = await idbGet('db-mtime');
-                                    if (serverMtime && serverMtime !== cachedMtime) stale = true;
-                                } catch (_) { /* offline — trust cache */ }
+                                const cachedFilename = await idbGet('db-filename');
+                                if (cachedFilename && cachedFilename !== dbFile) {
+                                    stale = true;
+                                } else {
+                                    try {
+                                        const head = await fetch(DB_BASE + dbFile, { method: 'HEAD' });
+                                        const serverMtime = head.headers.get('last-modified') || head.headers.get('etag');
+                                        const cachedMtime = await idbGet('db-mtime');
+                                        if (serverMtime && serverMtime !== cachedMtime) stale = true;
+                                    } catch (_) { /* offline — trust cache */ }
+                                }
                                 if (stale) {
                                     setDbProgress('Database updated, clearing cache...');
-                                    await Promise.all([idbDel('db'), idbDel('provdb'), idbDel('db-mtime')]);
+                                    await Promise.all([
+                                        idbDel('db'), idbDel('provdb'),
+                                        idbDel('db-mtime'), idbDel('db-filename'),
+                                        idbDel('provdb-filename'),
+                                    ]);
                                 } else {
                                     setDbProgress('Loading from cache...');
                                     buf = new Uint8Array(cached);
@@ -736,6 +745,7 @@
                             setDbProgress('Caching for next visit...');
                             try {
                                 await idbPut('db', buf.buffer);
+                                await idbPut('db-filename', dbFile);
                                 if (serverMtime) await idbPut('db-mtime', serverMtime);
                             } catch (e) {
                                 console.warn('IndexedDB cache write failed:', e);
@@ -931,16 +941,24 @@
                 setProvLoading(true);
                 setProvError(null);
                 try {
+                    const provFile = _siteConfig.provenanceDb || 'provenance.db.gz';
                     let buf;
                     try {
                         const cached = await idbGet('provdb');
-                        if (cached) buf = new Uint8Array(cached);
+                        if (cached) {
+                            const cachedFilename = await idbGet('provdb-filename');
+                            if (cachedFilename && cachedFilename !== provFile) {
+                                await Promise.all([idbDel('provdb'), idbDel('provdb-filename')]);
+                            } else {
+                                buf = new Uint8Array(cached);
+                            }
+                        }
                     } catch (e) {
                         console.warn('IndexedDB provenance cache read failed:', e);
                     }
 
                     if (!buf) {
-                        const response = await fetch(DB_BASE + (_siteConfig.provenanceDb || 'provenance.db.gz'));
+                        const response = await fetch(DB_BASE + provFile);
                         if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`);
                         const ds = new DecompressionStream('gzip');
                         const reader = response.body.pipeThrough(ds).getReader();
@@ -955,7 +973,10 @@
                         buf = new Uint8Array(loaded);
                         let offset = 0;
                         for (const chunk of chunks) { buf.set(chunk, offset); offset += chunk.length; }
-                        try { await idbPut('provdb', buf.buffer); } catch (e) {
+                        try {
+                            await idbPut('provdb', buf.buffer);
+                            await idbPut('provdb-filename', provFile);
+                        } catch (e) {
                             console.warn('IndexedDB provenance cache write failed:', e);
                         }
                     }
