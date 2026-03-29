@@ -94,6 +94,7 @@
   </Lexeme>
   <Lexeme id="lex.en.dog" language="en" grammatical_category="NOUN">
     <Wordform form="dog"/>
+    <Wordform form="doggo"/>
     <Provenance resource="wn-en" version="1.0" original_id="oewn-dog-n"/>
   </Lexeme>
   <Lexeme id="lex.en.brightness" language="en" grammatical_category="NOUN">

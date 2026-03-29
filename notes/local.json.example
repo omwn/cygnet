@@ -9,6 +9,9 @@
   "db": "myproject.db.gz",
   "provenanceDb": "myproject-provenance.db.gz",
 
+  "searchLanguage": "kaw",
+  "displayLanguage": "kaw",
+
   "databases": [
     {
       "filename": "myproject.db.gz",

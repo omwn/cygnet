@@ -117,7 +117,7 @@
         }
 
         const _SENSE_COLS = `s.rowid as sense_id, e.language_rowid as lang_rowid, syn.pos as pos,
-                       f.form as lemma, s.sense_index as ind, syn.rowid as synset_id`;
+                       f.form as lemma, f.rank as matched_rank, s.sense_index as ind, syn.rowid as synset_id`;
         const _SENSE_JOINS = `FROM forms f
                 JOIN entries e ON f.entry_rowid = e.rowid
                 JOIN senses s ON s.entry_rowid = e.rowid
@@ -649,11 +649,18 @@
             useEffect(() => {
                 _configPromise.then(() => {
                     setSiteConfig({..._siteConfig});
-                    const { title, tagline, icon } = _siteConfig;
+                    const { title, tagline, icon, searchLanguage, displayLanguage } = _siteConfig;
                     if (title) document.title = title + (tagline ? ` — ${tagline}` : '');
                     if (icon) {
                         const link = document.querySelector("link[rel='icon']");
                         if (link) link.href = `data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>${icon}</text></svg>`;
+                    }
+                    if (displayLanguage && !localStorage.getItem('definitionLanguage')) {
+                        setDefinitionLanguage(displayLanguage);
+                    }
+                    if (searchLanguage) {
+                        const langs = Array.isArray(searchLanguage) ? searchLanguage : [searchLanguage];
+                        setLanguageFilter(new Set(langs));
                     }
                 });
             }, []);
@@ -785,10 +792,13 @@
             };
 
             const toggleSynonyms = (senseId) => {
-                setSynonymsCollapsed(prev => ({
-                    ...prev,
-                    [senseId]: prev[senseId] === false ? true : false
-                }));
+                setSynonymsCollapsed(prev => {
+                    const sense = loadedSenses[senseId];
+                    const autoExpand = sense?.matched_rank > 0;
+                    const cur = prev[senseId];
+                    const isCurrentlyExpanded = cur === false || (autoExpand && cur !== true);
+                    return { ...prev, [senseId]: isCurrentlyExpanded ? true : false };
+                });
             };
 
             const loadConcept = useCallback((conceptId) => {
@@ -1120,12 +1130,14 @@
                         lg: r.lg,
                         c: r.synset_id,
                         ind: r.ind,
-                        ontological_category: r.pos
+                        ontological_category: r.pos,
+                        matched_rank: r.matched_rank,
                     };
                 });
 
                 setLoadedSenses(prev => ({ ...prev, ...senseMap }));
                 setCurrentSearchSenseIds(new Set(Object.keys(senseMap)));
+
                 setLoadingResults(false);
 
                 if (sense) {
@@ -1139,12 +1151,14 @@
                 const loadBatch = () => {
                     if (i >= senseIds.length) return;
                     const batch = senseIds.slice(i, i + BATCH_SIZE);
-                    const updates = {};
-                    batch.forEach(sid => {
-                        const full = querySense(parseInt(sid));
-                        if (full) updates[sid] = full;
+                    setLoadedSenses(prev => {
+                        const updates = {};
+                        batch.forEach(sid => {
+                            const full = querySense(parseInt(sid));
+                            if (full) updates[sid] = { ...full, matched_rank: prev[sid]?.matched_rank };
+                        });
+                        return { ...prev, ...updates };
                     });
-                    setLoadedSenses(prev => ({ ...prev, ...updates }));
                     i += BATCH_SIZE;
                     if (i < senseIds.length) setTimeout(loadBatch, 0);
                 };
@@ -2019,6 +2033,9 @@
                                                                                                 const [definition, defLang] = selectDef(concept?.d, definitionLanguage);
                                                                                                 const defIsFallback = defLang && defLang !== definitionLanguage;
                                                                                                 const hasExtra = !!(sense.v?.length || synonyms.length || sense.ex?.length || sense.sr?.length);
+                                                                                                const autoExpand = sense.matched_rank > 0;
+                                                                                                const isExpanded = synonymsCollapsed[sense.id] === false ||
+                                                                                                                  (autoExpand && synonymsCollapsed[sense.id] !== true);
                                                                                                 return (
                                                                                                     <div key={sense.id}
                                                                                                         className={`bg-gray-50 p-3 rounded border border-gray-200 sense-box ${hasExtra ? 'hover:border-blue-400 cursor-pointer' : ''}`}
@@ -2056,11 +2073,11 @@
                                                                                                             </div>
                                                                                                             {hasExtra && (
                                                                                                                 <div className="text-gray-500 text-sm pt-1 flex-shrink-0">
-                                                                                                                    {synonymsCollapsed[sense.id] === false ? '▼' : '▶'}
+                                                                                                                    {isExpanded ? '▼' : '▶'}
                                                                                                                 </div>
                                                                                                             )}
                                                                                                         </div>
-                                                                                                        {synonymsCollapsed[sense.id] === false && (
+                                                                                                        {isExpanded && (
                                                                                                             <div className="mt-2 space-y-2">
                                                                                                                 {sense.v && sense.v.length > 0 && (
                                                                                                                     <div className="text-sm text-gray-600">

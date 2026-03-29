@@ -6,6 +6,7 @@ contents, so every assertion can be exact.
 Test DB contents (see conftest._UI_TEST_WORDNET):
   Synsets:  entity (i1), animal (i2), dog (i3), brightness (i4), dogfish (i5)
   Senses:   en:entity, en:animal, en:dog, en:brightness, en:dogfish, fr:chien
+  Variants: en:dog has variant form "doggo"
   Relations: dog→animal (hypernym), animal→entity (hypernym)
 
 Expected search results (exact/glob match on normalized_form):
@@ -827,3 +828,26 @@ class TestSenseRelations:
         ).wait_for(timeout=_SEARCH_TIMEOUT)
         content = page_ready.content()
         assert 'glowing' in content
+
+
+class TestVariantFormSearch:
+    """Searching by a variant form (rank > 0) auto-expands the variants section."""
+
+    def test_variant_search_shows_variants_expanded(self, page_ready: Page):
+        """Searching 'doggo' (a variant of 'dog') shows the Variants row without
+        requiring the user to click to expand the sense card."""
+        _search(page_ready, 'doggo')
+        page_ready.wait_for_selector('.sense-box', timeout=_SEARCH_TIMEOUT)
+        expect(
+            page_ready.locator('.sense-box').filter(has_text='Variants')
+        ).to_be_visible()
+
+    def test_lemma_search_does_not_auto_expand(self, page_ready: Page):
+        """Searching the canonical lemma 'dog' does NOT auto-expand the variants
+        section (variants are still accessible via the expand arrow)."""
+        _search(page_ready, 'dog')
+        page_ready.wait_for_selector('.sense-box', timeout=_SEARCH_TIMEOUT)
+        expect(page_ready.locator('.sense-box')).to_be_visible()
+        expect(
+            page_ready.locator('.sense-box').filter(has_text='Variants')
+        ).not_to_be_visible()
