@@ -7,6 +7,10 @@ cygnet_small.xml
 web/*.db
 web/*.db.gz
 
+# Editor backup files
+*~
+\#*\#
+
 # Python / uv
 .venv/
 __pycache__/
