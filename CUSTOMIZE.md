@@ -135,6 +135,9 @@ All fields are optional — omit anything you don't need to override.
     "languageData": "My Wordnet is a standalone resource covering Language X, linked to English via the Princeton WordNet synset hierarchy."
   },
 
+  "searchLanguage": "kaw",
+  "displayLanguage": "kaw",
+
   "publications": [
     "Jane Doe (2025). My Wordnet. In <em>Proceedings of GWC 2025</em>."
   ]
@@ -159,6 +162,8 @@ All fields are optional — omit anything you don't need to override.
 | `about.citation` | — | HTML replacing the citation guidance |
 | `about.languageData` | — | HTML replacing the Language Data paragraph |
 | `publications` | — | HTML strings prepended to the Publications tab list |
+| `searchLanguage` | — | BCP 47 code (or array of codes) to pre-select in the search language filter on load; URL params override this |
+| `displayLanguage` | `"en"` | BCP 47 code for default display language (definitions and synset labels); overridden by `localStorage` if the user has previously changed it manually |
 
 A full template is at [`notes/local.json.example`](notes/local.json.example).
 
