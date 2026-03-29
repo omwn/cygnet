@@ -156,8 +156,6 @@ All fields are optional — omit anything you don't need to override.
 | `databases.provenance.filename` | `"provenance.db.gz"` | Provenance DB filename; same directory as `index.html` |
 | `databases.provenance.url` | — | Download URL for the provenance DB (shown in About tab) |
 | `databases.provenance.description` | — | One-line description shown in About tab |
-| `db` | — | Deprecated: use `databases.main.filename` instead |
-| `provenanceDb` | — | Deprecated: use `databases.provenance.filename` instead |
 | `logo` | OMW logo | Header logo object `{src, url, alt}`; `null` to hide |
 | `header` | — | HTML banner shown below the nav bar |
 | `footer` | Cygnet credit | HTML footer |
@@ -282,10 +280,9 @@ step.
 
 ## Step 8 — Create a GitHub release and attach the databases
 
-The `db` and `provenanceDb` fields in `local.json` tell the UI which files to
-load — they are fetched from the same directory as `index.html`.  The
-`databases` array is only used for the About-tab download links; it does not
-affect which files the browser loads.
+The UI reads `databases.main.filename` and `databases.provenance.filename` to
+decide which database files to load (from the same directory as `index.html`).
+These same entries drive the About-tab download links.
 
 ### Option A — release manually via the CLI
 

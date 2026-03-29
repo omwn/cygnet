@@ -886,3 +886,17 @@ class TestLocalJsonConfig:
         ).wait_for(timeout=_SEARCH_TIMEOUT)
         assert _result_count(page) == 1
         expect(page.locator('.sense-box', has_text='dog')).to_be_visible()
+
+    def test_url_without_search_lang_respects_default(
+        self, page: Page, http_server_with_config
+    ):
+        """A URL without search_lang still uses the local.json searchLanguage default."""
+        page.goto(http_server_with_config + '#/search?q=i3')
+        page.wait_for_selector('input[placeholder*="word"]', timeout=_DB_LOAD_TIMEOUT)
+        page.locator('span.text-sm.text-gray-500').filter(
+            has_text='across'
+        ).or_(
+            page.locator('text=No results found')
+        ).wait_for(timeout=_SEARCH_TIMEOUT)
+        assert _result_count(page) == 1
+        expect(page.locator('.sense-box', has_text='chien')).to_be_visible()

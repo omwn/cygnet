@@ -675,7 +675,7 @@
                 (async () => {
                     try {
                         await _configPromise;
-                        const dbFile = _siteConfig.db || _siteConfig.databases?.main?.filename || 'cygnet.db.gz';
+                        const dbFile = _siteConfig.databases?.main?.filename || 'cygnet.db.gz';
                         setDbProgress('Loading sql.js...');
                         const SQL = await initSqlJs({
                             locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/${file}`
@@ -957,7 +957,7 @@
                 setProvError(null);
                 try {
                     await _configPromise;
-                    const provFile = _siteConfig.provenanceDb || _siteConfig.databases?.provenance?.filename || 'provenance.db.gz';
+                    const provFile = _siteConfig.databases?.provenance?.filename || 'provenance.db.gz';
                     let buf;
                     try {
                         const cached = await idbGet('provdb');
@@ -1064,14 +1064,15 @@
                         setActiveTab('browser');
                         const params = new URLSearchParams(queryString || '');
                         const urlSearch = params.get('q');
-                        const urlSearchLang = params.get('search_lang') ? new Set(params.get('search_lang').split(',')) : new Set();
+                        const rawSearchLang = params.get('search_lang');
+                        const urlSearchLang = rawSearchLang ? new Set(rawSearchLang.split(',')) : null;
                         const urlDisplayLang = params.get('display_lang');
                         const urlPos = params.get('pos') ? new Set(params.get('pos').split(',')) : new Set();
                         const urlSense = params.get('sense');
                         const urlSenseFilter = params.get('s');
                         const urlConcept = params.get('concept');
 
-                        setLanguageFilter(urlSearchLang);
+                        if (urlSearchLang !== null) setLanguageFilter(urlSearchLang);
                         if (urlDisplayLang) setDefinitionLanguage(urlDisplayLang);
                         setPosFilter(urlPos);
                         setSenseFilter(urlSenseFilter);
@@ -1094,7 +1095,14 @@
                             if (urlSearch) {
                                 setSearchTerm(urlSearch);
                                 setCurrentSearch(urlSearch);
-                                performSearch(urlSearch, urlSearchLang, urlPos, urlSenseFilter);
+                                // Use URL param if provided; otherwise fall back to
+                                // the local.json searchLanguage default (read directly
+                                // from _siteConfig to avoid stale closure over state).
+                                const def = _siteConfig.searchLanguage;
+                                const searchLang = urlSearchLang ?? (def
+                                    ? new Set(Array.isArray(def) ? def : [def])
+                                    : new Set());
+                                performSearch(urlSearch, searchLang, urlPos, urlSenseFilter);
                             }
                         }
                     }
@@ -2590,8 +2598,8 @@
                                 <div className="border-t border-gray-200 pt-4 mb-4">
                                     <h3 className="font-medium text-sm text-gray-700 mb-2">Download</h3>
                                     {(() => {
-                                        const dbFile = siteConfig.db || siteConfig.databases?.main?.filename || 'cygnet.db.gz';
-                                        const provFile = siteConfig.provenanceDb || siteConfig.databases?.provenance?.filename || 'provenance.db.gz';
+                                        const dbFile = siteConfig.databases?.main?.filename || 'cygnet.db.gz';
+                                        const provFile = siteConfig.databases?.provenance?.filename || 'provenance.db.gz';
                                         const ghBase = 'https://github.com/rowanhm/cygnet/releases/latest/download/';
                                         const defaultDbs = [
                                             { filename: dbFile, url: ghBase + dbFile, description: 'The main lexical database, containing synsets, entries, senses, definitions, examples, and pronunciations across all languages.' },
@@ -2603,7 +2611,7 @@
                                             : [rawDbs.main, rawDbs.provenance].filter(Boolean);
                                         return (<>
                                             <p className="text-sm text-gray-600 mb-3">
-                                                The {siteName} databases are available for download below. Both are SQLite databases compressed with gzip.
+                                                The {siteName} databases are available for download below. These are SQLite databases compressed with gzip.
                                             </p>
                                             <ul className="space-y-3 mb-3">
                                                 {dbs.map((db, i) => {
