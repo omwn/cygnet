@@ -104,21 +104,18 @@ All fields are optional — omit anything you don't need to override.
   "tagline": "A lexical resource for Language X",
   "icon":    "📚",
 
-  "db":          "mywn.db.gz",
-  "provenanceDb": "mywn-provenance.db.gz",
-
-  "databases": [
-    {
+  "databases": {
+    "main": {
       "filename":    "mywn.db.gz",
       "url":         "https://github.com/yourorg/yourproject/releases/latest/download/mywn.db.gz",
       "description": "Main lexical database — synsets, senses, forms, definitions, examples."
     },
-    {
+    "provenance": {
       "filename":    "mywn-provenance.db.gz",
       "url":         "https://github.com/yourorg/yourproject/releases/latest/download/mywn-provenance.db.gz",
       "description": "Provenance records tracing every data point back to its source."
     }
-  ],
+  },
 
   "logo": {
     "src": "mylogo.svg",
@@ -153,9 +150,14 @@ All fields are optional — omit anything you don't need to override.
 | `name` | value of `title` | Short name used in prose (e.g. "The MWN databases…") |
 | `tagline` | — | Appended to `<title>` as `— tagline` |
 | `icon` | `"🦢"` | Emoji in header and as favicon |
-| `db` | `"cygnet.db.gz"` | Main DB filename; fetched from the same directory as `index.html` |
-| `provenanceDb` | `"provenance.db.gz"` | Provenance DB filename; same directory as `index.html` |
-| `databases` | auto-computed | Download list shown in the About tab; each entry has `filename`, `url`, `description` |
+| `databases.main.filename` | `"cygnet.db.gz"` | Main DB filename; fetched from the same directory as `index.html` |
+| `databases.main.url` | — | Download URL for the main DB (shown in About tab) |
+| `databases.main.description` | — | One-line description shown in About tab |
+| `databases.provenance.filename` | `"provenance.db.gz"` | Provenance DB filename; same directory as `index.html` |
+| `databases.provenance.url` | — | Download URL for the provenance DB (shown in About tab) |
+| `databases.provenance.description` | — | One-line description shown in About tab |
+| `db` | — | Deprecated: use `databases.main.filename` instead |
+| `provenanceDb` | — | Deprecated: use `databases.provenance.filename` instead |
 | `logo` | OMW logo | Header logo object `{src, url, alt}`; `null` to hide |
 | `header` | — | HTML banner shown below the nav bar |
 | `footer` | Cygnet credit | HTML footer |

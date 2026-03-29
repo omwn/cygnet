@@ -671,7 +671,7 @@
                 (async () => {
                     try {
                         await _configPromise;
-                        const dbFile = _siteConfig.db || 'cygnet.db.gz';
+                        const dbFile = _siteConfig.db || _siteConfig.databases?.main?.filename || 'cygnet.db.gz';
                         setDbProgress('Loading sql.js...');
                         const SQL = await initSqlJs({
                             locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/${file}`
@@ -953,7 +953,7 @@
                 setProvError(null);
                 try {
                     await _configPromise;
-                    const provFile = _siteConfig.provenanceDb || 'provenance.db.gz';
+                    const provFile = _siteConfig.provenanceDb || _siteConfig.databases?.provenance?.filename || 'provenance.db.gz';
                     let buf;
                     try {
                         const cached = await idbGet('provdb');
@@ -2586,14 +2586,17 @@
                                 <div className="border-t border-gray-200 pt-4 mb-4">
                                     <h3 className="font-medium text-sm text-gray-700 mb-2">Download</h3>
                                     {(() => {
-                                        const dbFile = siteConfig.db || 'cygnet.db.gz';
-                                        const provFile = siteConfig.provenanceDb || 'provenance.db.gz';
+                                        const dbFile = siteConfig.db || siteConfig.databases?.main?.filename || 'cygnet.db.gz';
+                                        const provFile = siteConfig.provenanceDb || siteConfig.databases?.provenance?.filename || 'provenance.db.gz';
                                         const ghBase = 'https://github.com/rowanhm/cygnet/releases/latest/download/';
                                         const defaultDbs = [
                                             { filename: dbFile, url: ghBase + dbFile, description: 'The main lexical database, containing synsets, entries, senses, definitions, examples, and pronunciations across all languages.' },
                                             { filename: provFile, url: ghBase + provFile, description: 'Provenance records tracing every data point back to its source wordnet and original identifier.' },
                                         ];
-                                        const dbs = siteConfig.databases || defaultDbs;
+                                        const rawDbs = siteConfig.databases;
+                                        const dbs = !rawDbs ? defaultDbs
+                                            : Array.isArray(rawDbs) ? rawDbs
+                                            : [rawDbs.main, rawDbs.provenance].filter(Boolean);
                                         return (<>
                                             <p className="text-sm text-gray-600 mb-3">
                                                 The {siteName} databases are available for download below. Both are SQLite databases compressed with gzip.

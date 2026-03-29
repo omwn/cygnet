@@ -6,24 +6,21 @@
   "tagline": "A multilingual lexical resource",
   "icon": "📚",
 
-  "db": "myproject.db.gz",
-  "provenanceDb": "myproject-provenance.db.gz",
-
   "searchLanguage": "kaw",
   "displayLanguage": "kaw",
 
-  "databases": [
-    {
+  "databases": {
+    "main": {
       "filename": "myproject.db.gz",
       "url": "https://github.com/example/mywordnet/releases/latest/download/myproject.db.gz",
       "description": "The main lexical database, containing synsets, entries, senses, definitions, and examples."
     },
-    {
+    "provenance": {
       "filename": "myproject-provenance.db.gz",
       "url": "https://github.com/example/mywordnet/releases/latest/download/myproject-provenance.db.gz",
       "description": "Provenance records tracing every data point back to its source and original identifier."
     }
-  ],
+  },
 
   "logo": {
     "src": "mylogo.svg",

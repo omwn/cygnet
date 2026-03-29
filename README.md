@@ -157,8 +157,10 @@ file alongside it.  All fields are optional — omit any you don't need:
   "tagline":     "A multilingual lexical resource",
   "icon":        "📚",
 
-  "db":          "myproject.db.gz",
-  "provenanceDb":"myproject-provenance.db.gz",
+  "databases": {
+    "main":       { "filename": "myproject.db.gz",            "url": "https://github.com/myorg/myproject/releases/latest/download/myproject.db.gz" },
+    "provenance": { "filename": "myproject-provenance.db.gz", "url": "https://github.com/myorg/myproject/releases/latest/download/myproject-provenance.db.gz" }
+  },
 
   "logo": {
     "src": "mylogo.svg",
@@ -185,8 +187,8 @@ file alongside it.  All fields are optional — omit any you don't need:
 | `title` | Header h1 and browser `<title>` |
 | `tagline` | Appended to `<title>` as `— tagline` |
 | `icon` | Emoji shown in the header and as the favicon |
-| `db` | Main database filename (default: `cygnet.db.gz`) |
-| `provenanceDb` | Provenance database filename |
+| `databases.main` | Main DB: `filename` (loaded by the UI) and `url` + `description` (shown in About tab) |
+| `databases.provenance` | Provenance DB: same fields |
 | `logo` | Header logo (`{src, url, alt}`); set to `null` to hide it |
 | `header` | HTML banner below the nav bar |
 | `footer` | HTML replacing the footer |
