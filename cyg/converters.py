@@ -557,8 +557,10 @@ class WordNetToCygnetConverter:
             # 1. spaCy lemmatization.  Some models (e.g. Korean) output
             # morpheme-split lemmas like "크+다"; add the collapsed form and
             # the leading stem so that "크+다" and "크+ㄴ" can match via "크".
+            # Some multilingual models return "" as the lemma — skip these.
             lemma = token.lemma_
-            forms.add(lemma)
+            if lemma:
+                forms.add(lemma)
             if '+' in lemma:
                 forms.add(lemma.replace('+', ''))
                 forms.add(lemma.split('+')[0])
@@ -589,10 +591,17 @@ class WordNetToCygnetConverter:
         for token in doc:
             token_lower = token.text.lower()
             token_lemma = token.lemma_.lower()
-            token_candidates = {token_lower, token_lemma}
-            if '+' in token_lemma:  # Korean morpheme-split lemmas
-                token_candidates.add(token_lemma.replace('+', ''))
-                token_candidates.add(token_lemma.split('+')[0])
+            token_candidates = {token_lower}
+            if token_lemma:  # skip empty lemmas from multilingual models
+                token_candidates.add(token_lemma)
+                if '+' in token_lemma:  # Korean morpheme-split lemmas
+                    token_candidates.add(token_lemma.replace('+', ''))
+                    token_candidates.add(token_lemma.split('+')[0])
+            if self.nltk_lemmatizer is not None:
+                for pos in ['n', 'v', 'a', 'r']:
+                    token_candidates.add(
+                        self.nltk_lemmatizer.lemmatize(token_lower, pos=pos)
+                    )
             if token_candidates & wordform_forms:
                 return token_lower
         return None
@@ -628,10 +637,17 @@ class WordNetToCygnetConverter:
 
                 token_lower = token.text.lower()
                 token_lemma = token.lemma_.lower()
-                token_candidates = {token_lower, token_lemma}
-                if '+' in token_lemma:  # Korean morpheme-split lemmas
-                    token_candidates.add(token_lemma.replace('+', ''))
-                    token_candidates.add(token_lemma.split('+')[0])
+                token_candidates = {token_lower}
+                if token_lemma:  # skip empty lemmas from multilingual models
+                    token_candidates.add(token_lemma)
+                    if '+' in token_lemma:  # Korean morpheme-split lemmas
+                        token_candidates.add(token_lemma.replace('+', ''))
+                        token_candidates.add(token_lemma.split('+')[0])
+                if self.nltk_lemmatizer is not None:
+                    for pos in ['n', 'v', 'a', 'r']:
+                        token_candidates.add(
+                            self.nltk_lemmatizer.lemmatize(token_lower, pos=pos)
+                        )
 
                 if target_forms & token_candidates:
                     matched_token_indices.append(j)
