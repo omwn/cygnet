@@ -36,7 +36,11 @@
         const _configPromise = fetch('local.json')
             .then(r => r.ok ? r.json() : {})
             .catch(() => ({}))
-            .then(cfg => { Object.assign(_siteConfig, cfg); });
+            .then(cfg => {
+                if (cfg && typeof cfg === 'object' && !Array.isArray(cfg)) {
+                    Object.assign(_siteConfig, cfg);
+                }
+            });
 
         // Build lookup tables from _relConfig once loaded.
         let RELATION_TO_SHORT = {};
@@ -2602,12 +2606,19 @@
                                                 The {siteName} databases are available for download below. Both are SQLite databases compressed with gzip.
                                             </p>
                                             <ul className="space-y-3 mb-3">
-                                                {dbs.map((db, i) => (
-                                                    <li key={i} className="text-sm text-gray-800">
-                                                        <a href={db.url} className="text-blue-600 hover:underline font-medium">{db.filename}</a>
-                                                        {db.description ? <>{' '}— {db.description}</> : null}
-                                                    </li>
-                                                ))}
+                                                {dbs.map((db, i) => {
+                                                    const href = db.url || db.filename || null;
+                                                    return (
+                                                        <li key={i} className="text-sm text-gray-800">
+                                                            {href ? (
+                                                                <a href={href} className="text-blue-600 hover:underline font-medium">{db.filename}</a>
+                                                            ) : (
+                                                                <span className="font-medium">{db.filename}</span>
+                                                            )}
+                                                            {db.description ? <>{' '}— {db.description}</> : null}
+                                                        </li>
+                                                    );
+                                                })}
                                             </ul>
                                             <p className="text-sm text-gray-600">
                                                 The individual wordnets that make up {siteName} are each available from their respective projects — see the <button onClick={() => setActiveTab('wordnets')} className="text-blue-600 hover:underline">Wordnets</button> tab for the full list with links.

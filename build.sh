@@ -83,6 +83,8 @@ if [[ -n "$WORK_DIR" ]]; then
     if [[ ! -f "$DATA_DIR/wordnets.toml" ]]; then
         cp "$PROJECT_DIR/wordnets.toml" "$DATA_DIR/wordnets.toml"
     fi
+    # 7_validate_and_export.py reads cygnet.xsd from cwd; copy it into DATA_DIR.
+    cp "$PROJECT_DIR/cygnet.xsd" "$DATA_DIR/cygnet.xsd"
 else
     DATA_DIR="$PROJECT_DIR"
 fi
