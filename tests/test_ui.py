@@ -87,11 +87,11 @@ class TestPageLoad:
 
     def test_python_tab_absent(self, page_ready: Page):
         """Python tab was removed — should not appear in the nav."""
-        expect(page_ready.locator('button', has_text='Python')).not_to_be_visible()
+        expect(page_ready.locator('button', has_text='Python')).to_have_count(0)
 
     def test_data_tab_absent(self, page_ready: Page):
         """Data tab was merged into About — should not appear in the nav."""
-        expect(page_ready.locator('button', has_text='Data')).not_to_be_visible()
+        expect(page_ready.locator('button', has_text='Data')).to_have_count(0)
 
 
 # ---------------------------------------------------------------------------

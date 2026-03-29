@@ -20,8 +20,9 @@ The end result is:
   - `myproject.db.gz` — main lexical database
   - `myproject-provenance.db.gz` — per-row source attribution
 
-The web UI fetches the databases from the GitHub release at runtime, so only
-the small static files need to live in `docs/`.
+The databases are large — they are attached to a GitHub release rather than
+committed to the repo.  The Pages deployment step (or a local build) places
+them in `docs/` alongside `index.html`, where the browser loads them.
 
 ---
 
@@ -152,8 +153,8 @@ All fields are optional — omit anything you don't need to override.
 | `name` | value of `title` | Short name used in prose (e.g. "The MWN databases…") |
 | `tagline` | — | Appended to `<title>` as `— tagline` |
 | `icon` | `"🦢"` | Emoji in header and as favicon |
-| `db` | `"cygnet.db.gz"` | Main DB filename (relative path, served alongside `index.html`) |
-| `provenanceDb` | `"provenance.db.gz"` | Provenance DB filename |
+| `db` | `"cygnet.db.gz"` | Main DB filename; fetched from the same directory as `index.html` |
+| `provenanceDb` | `"provenance.db.gz"` | Provenance DB filename; same directory as `index.html` |
 | `databases` | auto-computed | Download list shown in the About tab; each entry has `filename`, `url`, `description` |
 | `logo` | OMW logo | Header logo object `{src, url, alt}`; `null` to hide |
 | `header` | — | HTML banner shown below the nav bar |
@@ -279,8 +280,10 @@ step.
 
 ## Step 8 — Create a GitHub release and attach the databases
 
-The browser fetches the databases from the URLs you listed in `local.json`'s
-`databases` array.  Those URLs should point to GitHub release assets.
+The `db` and `provenanceDb` fields in `local.json` tell the UI which files to
+load — they are fetched from the same directory as `index.html`.  The
+`databases` array is only used for the About-tab download links; it does not
+affect which files the browser loads.
 
 ### Option A — release manually via the CLI
 

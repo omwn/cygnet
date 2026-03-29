@@ -1128,6 +1128,7 @@
                     const sid = r.sense_id.toString();
                     if (sense && sid !== sense) return;
 
+                    const prev = senseMap[sid];
                     senseMap[sid] = {
                         id: sid,
                         l: r.lemma,
@@ -1135,7 +1136,7 @@
                         c: r.synset_id,
                         ind: r.ind,
                         ontological_category: r.pos,
-                        matched_rank: r.matched_rank,
+                        matched_rank: prev ? Math.max(prev.matched_rank, r.matched_rank) : r.matched_rank,
                     };
                 });
 
