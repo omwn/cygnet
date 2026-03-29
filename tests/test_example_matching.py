@@ -27,6 +27,7 @@ def _make_converter(lang: str) -> WordNetToCygnetConverter:
     conv.lexicon_language = lang
     conv.doc_cache = {}
     conv.form_cache = {}
+    conv.nltk_cache = {}
     conv.nltk_lemmatizer = None
     try:
         import nltk

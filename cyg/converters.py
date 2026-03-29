@@ -299,6 +299,7 @@ class WordNetToCygnetConverter:
         # Caching for performance
         self.doc_cache: dict[str, any] = {}  # spaCy document cache
         self.form_cache: dict[str, set[str]] = {}  # morphological forms cache
+        self.nltk_cache: dict[str, frozenset[str]] = {}  # NLTK lemmas per token
 
         # Build reverse mapping: concept_id -> list of sense_ids
         self.concept_to_senses: dict[str, list[str]] = defaultdict(list)
@@ -597,8 +598,12 @@ class WordNetToCygnetConverter:
                 candidates.add(token_lemma.replace('+', ''))
                 candidates.add(token_lemma.split('+')[0])
         if self.nltk_lemmatizer is not None:
-            for pos in ['n', 'v', 'a', 'r']:
-                candidates.add(self.nltk_lemmatizer.lemmatize(token_lower, pos=pos))
+            if token_lower not in self.nltk_cache:
+                self.nltk_cache[token_lower] = frozenset(
+                    self.nltk_lemmatizer.lemmatize(token_lower, pos=p)
+                    for p in ['n', 'v', 'a', 'r']
+                )
+            candidates |= self.nltk_cache[token_lower]
         return candidates
 
     def _match_single_word(self, wordform: str, text: str) -> str | None:
