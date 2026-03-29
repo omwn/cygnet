@@ -1,5 +1,6 @@
 """Shared pytest fixtures and test-data helpers for the Cygnet test suite."""
 
+import json
 import shutil
 import subprocess
 import textwrap
@@ -194,6 +195,7 @@ def valid_ili() -> str:
 # ---------------------------------------------------------------------------
 
 _UI_PORT = 9877
+_UI_PORT_CONFIG = 9878
 
 
 def _make_handler(directory: str):
@@ -222,4 +224,27 @@ def http_server(test_db_dir):
     t = threading.Thread(target=server.serve_forever, daemon=True)
     t.start()
     yield f'http://localhost:{_UI_PORT}'
+    server.shutdown()
+
+
+@pytest.fixture(scope='session')
+def http_server_with_config(test_db_dir, tmp_path_factory):
+    """HTTP server like http_server but also serves a local.json config file.
+
+    The config sets searchLanguage='fr' and displayLanguage='fr' so tests
+    can verify that local.json seeds the correct UI defaults on page load.
+    """
+    config_dir = tmp_path_factory.mktemp('serve_config')
+    for f in test_db_dir.iterdir():
+        shutil.copy(f, config_dir / f.name)
+    (config_dir / 'local.json').write_text(
+        json.dumps({'searchLanguage': 'fr', 'displayLanguage': 'fr'})
+    )
+    server = HTTPServer(
+        ('localhost', _UI_PORT_CONFIG),
+        _make_handler(str(config_dir)),
+    )
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    yield f'http://localhost:{_UI_PORT_CONFIG}'
     server.shutdown()

@@ -603,6 +603,7 @@
             const [pathNotFound, setPathNotFound] = useState(false);
             const isPopStateRef = useRef(false);
             const isInitialLoadRef = useRef(true);
+            const initialUrlHandledRef = useRef(false);
             const hoverTimeoutRef = useRef(null);
             const isLoadingRelationsRef = useRef(false);
             const simulationRef = useRef(null);
@@ -653,7 +654,7 @@
                     if (title) document.title = title + (tagline ? ` — ${tagline}` : '');
                     if (icon) {
                         const link = document.querySelector("link[rel='icon']");
-                        if (link) link.href = `data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>${icon}</text></svg>`;
+                        if (link) link.href = `data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>${encodeURIComponent(icon)}</text></svg>`;
                     }
                     if (displayLanguage && !localStorage.getItem('definitionLanguage')) {
                         setDefinitionLanguage(displayLanguage);
@@ -683,7 +684,7 @@
                             if (cached) {
                                 let stale = false;
                                 const cachedFilename = await idbGet('db-filename');
-                                if (cachedFilename && cachedFilename !== dbFile) {
+                                if (!cachedFilename || cachedFilename !== dbFile) {
                                     stale = true;
                                 } else {
                                     try {
@@ -951,13 +952,14 @@
                 setProvLoading(true);
                 setProvError(null);
                 try {
+                    await _configPromise;
                     const provFile = _siteConfig.provenanceDb || 'provenance.db.gz';
                     let buf;
                     try {
                         const cached = await idbGet('provdb');
                         if (cached) {
                             const cachedFilename = await idbGet('provdb-filename');
-                            if (cachedFilename && cachedFilename !== provFile) {
+                            if (!cachedFilename || cachedFilename !== provFile) {
                                 await Promise.all([idbDel('provdb'), idbDel('provdb-filename')]);
                             } else {
                                 buf = new Uint8Array(cached);
@@ -1088,13 +1090,15 @@
                             if (urlSearch) {
                                 setSearchTerm(urlSearch);
                                 setCurrentSearch(urlSearch);
+                                performSearch(urlSearch, urlSearchLang, urlPos, urlSenseFilter);
                             }
                         }
                     }
                 };
 
-                // Handle initial URL
-                if (dbReady) {
+                // Handle initial URL (only once, even if effect re-runs due to dep changes)
+                if (dbReady && !initialUrlHandledRef.current) {
+                    initialUrlHandledRef.current = true;
                     const hash = window.location.hash;
                     if (hash && hash !== '#/search') handlePopState();
                 }

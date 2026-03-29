@@ -194,7 +194,7 @@ file alongside it.  All fields are optional — omit any you don't need:
 | `about.citation` | HTML replacing the citation guidance in About |
 | `publications` | HTML strings prepended to the Publications list |
 
-A template is available at [`notes/local.json.example`](notes/local.json.example).
+This table lists the most commonly used fields. For the full reference (including `name`, `databases`, `about.languageData`, `searchLanguage`, `displayLanguage`, and more) see [`CUSTOMIZE.md`](CUSTOMIZE.md) or the annotated template at [`notes/local.json.example`](notes/local.json.example).
 
 ---
 

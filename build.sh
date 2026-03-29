@@ -44,6 +44,11 @@ WORK_DIR=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --work-dir)
+            if [[ $# -lt 2 || -z "${2:-}" ]]; then
+                echo "Error: --work-dir requires a directory argument." >&2
+                echo "Run with --help for usage." >&2
+                exit 1
+            fi
             WORK_DIR="$2"
             shift 2
             ;;
@@ -94,13 +99,15 @@ run_pipeline() {
 download_standalone() {
     local name="$1" url="$2"
     echo "  Downloading $name..."
-    local tmpdir
-    tmpdir=$(mktemp -d)
-    trap 'rm -rf "$tmpdir"' RETURN
-    curl -fSL -o "$tmpdir/archive" "$url"
-    tar xf "$tmpdir/archive" -C "$tmpdir/"
-    find "$tmpdir" \( -name '*.xml' -o -name '*.xml.gz' -o -name '*.xml.xz' \) \
-        -exec cp -n {} "$DATA_DIR/bin/raw_wns/" \;
+    (
+        local tmpdir
+        tmpdir=$(mktemp -d)
+        trap 'rm -rf "$tmpdir"' EXIT
+        curl -fSL -o "$tmpdir/archive" "$url"
+        tar xf "$tmpdir/archive" -C "$tmpdir/"
+        find "$tmpdir" \( -name '*.xml' -o -name '*.xml.gz' -o -name '*.xml.xz' \) \
+            -exec cp -n {} "$DATA_DIR/bin/raw_wns/" \;
+    )
 }
 
 # Parse wordnets.toml and emit "stem<TAB>url" lines (no tomllib dependency needed).

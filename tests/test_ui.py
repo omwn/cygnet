@@ -851,3 +851,38 @@ class TestVariantFormSearch:
         expect(
             page_ready.locator('.sense-box').filter(has_text='Variants')
         ).not_to_be_visible()
+
+
+class TestLocalJsonConfig:
+    """local.json searchLanguage/displayLanguage seed the correct UI defaults."""
+
+    @pytest.fixture()
+    def page_with_config(self, page: Page, http_server_with_config):
+        """Open the app served with a local.json setting fr as search/display language."""
+        page.goto(http_server_with_config)
+        page.wait_for_selector('input[placeholder*="word"]', timeout=_DB_LOAD_TIMEOUT)
+        return page
+
+    def test_search_language_filters_to_configured_language(
+        self, page_with_config: Page
+    ):
+        """searchLanguage:'fr' means searching i3 returns only the French sense."""
+        _search(page_with_config, 'i3')
+        # With searchLanguage=fr the filter is pre-set to French, so only chien appears
+        assert _result_count(page_with_config) == 1
+        assert _language_count(page_with_config) == 1
+        expect(page_with_config.locator('.sense-box', has_text='chien')).to_be_visible()
+
+    def test_url_param_overrides_search_language(
+        self, page: Page, http_server_with_config
+    ):
+        """A search_lang URL param overrides the local.json searchLanguage default."""
+        page.goto(http_server_with_config + '#/search?q=i3&search_lang=en')
+        page.wait_for_selector('input[placeholder*="word"]', timeout=_DB_LOAD_TIMEOUT)
+        page.locator('span.text-sm.text-gray-500').filter(
+            has_text='across'
+        ).or_(
+            page.locator('text=No results found')
+        ).wait_for(timeout=_SEARCH_TIMEOUT)
+        assert _result_count(page) == 1
+        expect(page.locator('.sense-box', has_text='dog')).to_be_visible()
