@@ -41,15 +41,19 @@ def page_ready(page: Page, http_server):
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _wait_for_results(page: Page) -> None:
+    """Wait until the results summary or 'No results found' banner appears."""
+    page.locator('span.text-sm.text-gray-500').filter(has_text='across').or_(
+        page.locator('text=No results found')
+    ).wait_for(timeout=_SEARCH_TIMEOUT)
+
+
 def _search(page: Page, term: str) -> None:
     """Type *term* into the search box, submit, and wait for results."""
     box = page.locator('input[placeholder*="word"]')
     box.fill(term)
     box.press('Enter')
-    # "1 result across …" uses singular; match on "across" which appears in both
-    page.locator('span.text-sm.text-gray-500').filter(has_text='across').or_(
-        page.locator('text=No results found')
-    ).wait_for(timeout=_SEARCH_TIMEOUT)
+    _wait_for_results(page)
 
 
 def _result_count(page: Page) -> int:
@@ -211,18 +215,14 @@ class TestDefinitionSearch:
         )
         en_label.click()
 
-        page_ready.locator('span.text-sm.text-gray-500').filter(has_text='across').or_(
-            page_ready.locator('text=No results found')
-        ).wait_for(timeout=_SEARCH_TIMEOUT)
+        _wait_for_results(page_ready)
 
         assert _result_count(page_ready) == 2
         assert _language_count(page_ready) == 1
 
         # Restore state — uncheck English filter
         en_label.click()
-        page_ready.locator('span.text-sm.text-gray-500').filter(has_text='across').or_(
-            page_ready.locator('text=No results found')
-        ).wait_for(timeout=_SEARCH_TIMEOUT)
+        _wait_for_results(page_ready)
 
 
 # ---------------------------------------------------------------------------
@@ -794,9 +794,7 @@ class TestSenseRelations:
         # Click the 'glowing' button in the sense relations section
         page_ready.locator('button', has_text='glowing').first.click()
         # App switches back to search view — wait for results summary
-        page_ready.locator('span.text-sm.text-gray-500').filter(has_text='across').or_(
-            page_ready.locator('text=No results found')
-        ).wait_for(timeout=_SEARCH_TIMEOUT)
+        _wait_for_results(page_ready)
         content = page_ready.content()
         assert 'glowing' in content
 
@@ -823,9 +821,7 @@ class TestSenseRelations:
         # Target sense loads async; locator retries until the '…' resolves to 'glowing'
         page_ready.locator('.sense-box button', has_text='glowing').first.click(timeout=_TEXT_VIEW_TIMEOUT * 2)
         # App switches to search view with glowing results
-        page_ready.locator('span.text-sm.text-gray-500').filter(has_text='across').or_(
-            page_ready.locator('text=No results found')
-        ).wait_for(timeout=_SEARCH_TIMEOUT)
+        _wait_for_results(page_ready)
         content = page_ready.content()
         assert 'glowing' in content
 
@@ -879,11 +875,7 @@ class TestLocalJsonConfig:
         """A search_lang URL param overrides the local.json searchLanguage default."""
         page.goto(http_server_with_config + '#/search?q=i3&search_lang=en')
         page.wait_for_selector('input[placeholder*="word"]', timeout=_DB_LOAD_TIMEOUT)
-        page.locator('span.text-sm.text-gray-500').filter(
-            has_text='across'
-        ).or_(
-            page.locator('text=No results found')
-        ).wait_for(timeout=_SEARCH_TIMEOUT)
+        _wait_for_results(page)
         assert _result_count(page) == 1
         expect(page.locator('.sense-box', has_text='dog')).to_be_visible()
 
@@ -893,10 +885,6 @@ class TestLocalJsonConfig:
         """A URL without search_lang still uses the local.json searchLanguage default."""
         page.goto(http_server_with_config + '#/search?q=i3')
         page.wait_for_selector('input[placeholder*="word"]', timeout=_DB_LOAD_TIMEOUT)
-        page.locator('span.text-sm.text-gray-500').filter(
-            has_text='across'
-        ).or_(
-            page.locator('text=No results found')
-        ).wait_for(timeout=_SEARCH_TIMEOUT)
+        _wait_for_results(page)
         assert _result_count(page) == 1
         expect(page.locator('.sense-box', has_text='chien')).to_be_visible()
