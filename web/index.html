@@ -1189,6 +1189,8 @@
                 setCurrentSearch(term);
                 setSenseFilter(null);
                 setSynonymsCollapsed({});
+                setActiveTab('browser');
+                setView('search');
                 performSearch(term, languageFilter, posFilter, null);
             };
 
@@ -1771,12 +1773,13 @@
                                                   </a>
                                                 : <img src={siteConfig.logo.src} alt={siteConfig.logo.alt || ''} className="h-10" />
                                           )
-                                        : <a href="https://omwn.org" target="_blank" rel="noopener noreferrer" className="hover:opacity-80">
+                                        : <a href="https://omwn.org" target="_blank" rel="noopener noreferrer" className="hover:opacity-80 flex items-center gap-2">
+                                              <span title="Open Multilingual Wordnet" className="text-3xl font-bold text-gray-800">OMW</span>
                                               <img src="omw-logo.svg" alt="Open Multilingual Wordnet" className="h-10" />
                                           </a>
                                 )}
                             </div>
-                            <nav className="flex items-end gap-3 mt-3 -mb-3">
+                            <nav className="flex items-end gap-3 mt-3 -mb-3 flex-wrap">
                                 {['browser', 'about', 'publications', 'wordnets'].map(tab => (
                                     <button key={tab}
                                         onClick={() => setActiveTab(tab)}
@@ -1787,7 +1790,25 @@
                                         }`}
                                     >{tab.charAt(0).toUpperCase() + tab.slice(1)}</button>
                                 ))}
-                                <div className="ml-auto relative pb-0" ref={settingsRef}>
+                                <div className="flex items-center gap-1.5 flex-grow min-w-48 pb-0.5">
+                                    <input type="text" value={searchTerm}
+                                        onChange={(e) => setSearchTerm(e.target.value)}
+                                        onKeyPress={handleKeyPress}
+                                        placeholder={dbReady ? "word, hot*, *ness, i1234, def:bright" : "Loading…"}
+                                        disabled={!dbReady}
+                                        className="flex-grow min-w-0 px-3 py-1.5 text-sm border border-gray-300 rounded disabled:opacity-50"
+                                    />
+                                    <div className="relative group flex-shrink-0">
+                                        <button className="w-6 h-6 rounded-full border border-gray-400 text-gray-500 text-xs font-bold hover:border-blue-500 hover:text-blue-500 flex items-center justify-center">ℹ</button>
+                                        <div className="absolute right-0 top-full mt-1 hidden group-hover:block bg-white border border-gray-200 rounded shadow-lg p-3 text-xs text-gray-700 z-30 w-64 space-y-1.5">
+                                            <div><span className="font-mono font-semibold">word</span> — exact match</div>
+                                            <div><span className="font-mono font-semibold">hot*</span> or <span className="font-mono font-semibold">*ness</span> — glob (<span className="font-mono">*</span> = any characters, <span className="font-mono">?</span> = one)</div>
+                                            <div><span className="font-mono font-semibold">i1234</span> or <span className="font-mono font-semibold">cili.i1234</span> — look up concept by ILI</div>
+                                            <div><span className="font-mono font-semibold">def:word</span> — search inside definitions</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="relative pb-0" ref={settingsRef}>
                                     <button onClick={() => setSettingsOpen(o => !o)}
                                         title="Settings"
                                         className={`px-3 py-2 rounded-t-lg border-b-2 transition-colors relative ${settingsOpen ? 'bg-gray-50 border-blue-500 text-blue-700' : 'border-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-50'}`}>
@@ -1948,27 +1969,6 @@
                                 )}
                                 {view === 'search' && dbReady && (
                                     <div className="mb-8">
-                                        {!senseFilter && (
-                                            <div className="flex items-center gap-2">
-                                                <input type="text" value={searchTerm}
-                                                    onChange={(e) => setSearchTerm(e.target.value)}
-                                                    onKeyPress={handleKeyPress}
-                                                    placeholder="word, hot*, *ness, i1234, def:bright"
-                                                    className="flex-grow px-3 py-2 border border-gray-300 rounded"
-                                                />
-                                                <div className="relative group flex-shrink-0">
-                                                    <button className="w-6 h-6 rounded-full border border-gray-400 text-gray-500 text-xs font-bold hover:border-blue-500 hover:text-blue-500 flex items-center justify-center">ℹ</button>
-                                                    <div className="absolute right-0 top-full mt-1 hidden group-hover:block bg-white border border-gray-200 rounded shadow-lg p-3 text-xs text-gray-700 z-30 w-64 space-y-1.5">
-                                                        <div><span className="font-mono font-semibold">word</span> — exact match</div>
-                                                        <div><span className="font-mono font-semibold">hot*</span> or <span className="font-mono font-semibold">*ness</span> — glob (<span className="font-mono">*</span> = any characters, <span className="font-mono">?</span> = one)</div>
-                                                        <div><span className="font-mono font-semibold">i1234</span> or <span className="font-mono font-semibold">cili.i1234</span> — look up concept by ILI</div>
-                                                        <div><span className="font-mono font-semibold">def:word</span> — search inside definitions</div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        )}
-
-
                                         {senseFilter && (
                                             <div className="mb-4 bg-blue-50 border border-blue-200 rounded p-4">
                                                 <div className="flex items-center justify-between">
