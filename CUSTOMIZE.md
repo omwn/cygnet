@@ -120,7 +120,8 @@ All fields are optional — omit anything you don't need to override.
   "logo": {
     "src": "mylogo.svg",
     "url": "https://github.com/yourorg/yourproject",
-    "alt": "My Wordnet"
+    "alt": "My Wordnet",
+    "name": "MWN"
   },
 
   "header": "<strong>Preview build</strong> — data updated 2025-01-01.",
@@ -142,21 +143,41 @@ All fields are optional — omit anything you don't need to override.
 }
 ```
 
+### Header layout
+
+The header has two sides that are independently customisable:
+
+```
+[ icon  title ]                          [ logo.name  logo.src ]
+  (left side)                               (right side)
+```
+
+- **Left side**: controlled by `icon` and `title`.
+- **Right side**: controlled by the `logo` object.  By default it shows
+  `OMW` followed by the Open Multilingual Wordnet logo.  Set `logo.name`
+  to show your project's short name to the left of your logo image,
+  mirroring the layout of the left side.  Set `logo` to `null` to hide
+  the right side entirely.
+
 ### Field reference
 
 | Field | Default | Effect |
 |---|---|---|
-| `title` | `"Cygnet"` | Page `<title>` and header heading |
+| `title` | `"Cygnet"` | Page `<title>` and header heading (left side) |
 | `name` | value of `title` | Short name used in prose (e.g. "The MWN databases…") |
 | `tagline` | — | Appended to `<title>` as `— tagline` |
-| `icon` | `"🦢"` | Emoji in header and as favicon |
+| `icon` | `"🦢"` | Emoji shown to the left of the title in the header |
 | `databases.main.filename` | `"cygnet.db.gz"` | Main DB filename; fetched from the same directory as `index.html` |
 | `databases.main.url` | — | Download URL for the main DB (shown in About tab) |
 | `databases.main.description` | — | One-line description shown in About tab |
 | `databases.provenance.filename` | `"provenance.db.gz"` | Provenance DB filename; same directory as `index.html` |
 | `databases.provenance.url` | — | Download URL for the provenance DB (shown in About tab) |
 | `databases.provenance.description` | — | One-line description shown in About tab |
-| `logo` | OMW logo | Header logo object `{src, url, alt}`; `null` to hide |
+| `logo` | OMW logo | Header logo object `{src, url, alt, name}`; `null` to hide right side |
+| `logo.src` | — | Image path (relative to `index.html`) or URL |
+| `logo.url` | — | Link URL; omit to render image without a hyperlink |
+| `logo.alt` | `""` | Alt text for the logo image |
+| `logo.name` | — | Short text shown to the left of the logo image (same bold style as `title`) |
 | `header` | — | HTML banner shown below the nav bar |
 | `footer` | Cygnet credit | HTML footer |
 | `about.intro` | — | HTML replacing the About intro paragraphs |

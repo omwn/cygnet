@@ -888,3 +888,27 @@ class TestLocalJsonConfig:
         _wait_for_results(page)
         assert _result_count(page) == 1
         expect(page.locator('.sense-box', has_text='chien')).to_be_visible()
+
+
+# ---------------------------------------------------------------------------
+# Header customisation via local.json
+# ---------------------------------------------------------------------------
+
+class TestHeaderCustomization:
+    @pytest.fixture()
+    def page_branding(self, page: Page, http_server_with_branding):
+        page.goto(http_server_with_branding)
+        page.wait_for_selector('input[placeholder*="word"]', timeout=_DB_LOAD_TIMEOUT)
+        return page
+
+    def test_custom_title_in_header(self, page_branding: Page):
+        """local.json title replaces 'Cygnet' in the header."""
+        expect(page_branding.locator('header h1', has_text='TestWN')).to_be_visible()
+
+    def test_custom_icon_in_header(self, page_branding: Page):
+        """local.json icon replaces the default swan emoji in the header."""
+        expect(page_branding.locator('header h1', has_text='🧪')).to_be_visible()
+
+    def test_custom_logo_name_in_header(self, page_branding: Page):
+        """local.json logo.name appears to the left of the logo image."""
+        expect(page_branding.locator('header span', has_text='TWN').first).to_be_visible()

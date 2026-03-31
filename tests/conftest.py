@@ -242,3 +242,29 @@ def http_server_with_config(test_db_dir, tmp_path_factory):
     server, url = _start_server(str(config_dir))
     yield url
     server.shutdown()
+
+
+@pytest.fixture(scope='session')
+def http_server_with_branding(test_db_dir, tmp_path_factory):
+    """HTTP server serving a local.json with full header branding.
+
+    Sets title='TestWN', icon='🧪', name='TWN', and a custom logo with
+    name='TWN' so tests can verify both header sides are customisable.
+    """
+    branding_dir = tmp_path_factory.mktemp('serve_branding')
+    for f in test_db_dir.iterdir():
+        shutil.copy(f, branding_dir / f.name)
+    (branding_dir / 'local.json').write_text(json.dumps({
+        'title': 'TestWN',
+        'icon': '🧪',
+        'name': 'TWN',
+        'logo': {
+            'src': 'omw-logo.svg',
+            'url': 'https://omwn.org',
+            'alt': 'Test Wordnet',
+            'name': 'TWN',
+        },
+    }))
+    server, url = _start_server(str(branding_dir))
+    yield url
+    server.shutdown()

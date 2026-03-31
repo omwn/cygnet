@@ -25,7 +25,8 @@
   "logo": {
     "src": "mylogo.svg",
     "url": "https://myproject.org",
-    "alt": "My Project"
+    "alt": "My Project",
+    "name": "MWN"
   },
 
   "header": "<strong>Preview build</strong> — data updated 2025-01-01.",

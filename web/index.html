@@ -1768,10 +1768,14 @@
                                     siteConfig.logo
                                         ? (
                                             siteConfig.logo.url
-                                                ? <a href={siteConfig.logo.url} target="_blank" rel="noopener noreferrer" className="hover:opacity-80">
+                                                ? <a href={siteConfig.logo.url} target="_blank" rel="noopener noreferrer" className="hover:opacity-80 flex items-center gap-2">
+                                                      {siteConfig.logo.name && <span className="text-3xl font-bold text-gray-800">{siteConfig.logo.name}</span>}
                                                       <img src={siteConfig.logo.src} alt={siteConfig.logo.alt || ''} className="h-10" />
                                                   </a>
-                                                : <img src={siteConfig.logo.src} alt={siteConfig.logo.alt || ''} className="h-10" />
+                                                : <span className="flex items-center gap-2">
+                                                      {siteConfig.logo.name && <span className="text-3xl font-bold text-gray-800">{siteConfig.logo.name}</span>}
+                                                      <img src={siteConfig.logo.src} alt={siteConfig.logo.alt || ''} className="h-10" />
+                                                  </span>
                                           )
                                         : <a href="https://omwn.org" target="_blank" rel="noopener noreferrer" className="hover:opacity-80 flex items-center gap-2">
                                               <span title="Open Multilingual Wordnet" className="text-3xl font-bold text-gray-800">OMW</span>
