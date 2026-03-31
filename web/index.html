@@ -1764,9 +1764,13 @@
                                 </div>
                                 {siteConfig.logo !== null && (
                                     siteConfig.logo
-                                        ? <a href={siteConfig.logo.url || '#'} target="_blank" rel="noopener noreferrer" className="hover:opacity-80">
-                                              <img src={siteConfig.logo.src} alt={siteConfig.logo.alt || ''} className="h-10" />
-                                          </a>
+                                        ? (
+                                            siteConfig.logo.url
+                                                ? <a href={siteConfig.logo.url} target="_blank" rel="noopener noreferrer" className="hover:opacity-80">
+                                                      <img src={siteConfig.logo.src} alt={siteConfig.logo.alt || ''} className="h-10" />
+                                                  </a>
+                                                : <img src={siteConfig.logo.src} alt={siteConfig.logo.alt || ''} className="h-10" />
+                                          )
                                         : <a href="https://omwn.org" target="_blank" rel="noopener noreferrer" className="hover:opacity-80">
                                               <img src="omw-logo.svg" alt="Open Multilingual Wordnet" className="h-10" />
                                           </a>
@@ -1918,7 +1922,7 @@
                                         <h2 className="font-bold text-xl mb-2">Error Loading Database</h2>
                                         <p className="mb-4 text-gray-700">{dbError}</p>
                                         <p className="text-sm text-gray-500">
-                                            On localhost, make sure <code>cygnet.db.gz</code> is in the same directory as this HTML file.<br/>
+                                            On localhost, make sure <code>{siteConfig.databases?.main?.filename || 'cygnet.db.gz'}</code> is in the same directory as this HTML file.<br/>
                                             In production, the database is fetched from the{' '}
                                             <a href="https://github.com/rowanhm/cygnet/releases/latest" className="text-blue-600 hover:underline">latest GitHub release</a>.
                                             The release may still be building.

@@ -194,10 +194,6 @@ def valid_ili() -> str:
 # HTTP server fixture (used by UI tests)
 # ---------------------------------------------------------------------------
 
-_UI_PORT = 9877
-_UI_PORT_CONFIG = 9878
-
-
 def _make_handler(directory: str):
     class Handler(SimpleHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
@@ -214,16 +210,19 @@ def _make_handler(directory: str):
     return Handler
 
 
+def _start_server(directory: str) -> tuple[HTTPServer, str]:
+    """Bind an HTTPServer to an ephemeral port; return (server, base_url)."""
+    server = HTTPServer(('localhost', 0), _make_handler(directory))
+    port = server.server_address[1]
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, f'http://localhost:{port}'
+
+
 @pytest.fixture(scope='session')
 def http_server(test_db_dir):
     """Session-scoped HTTP server serving the test DB directory."""
-    server = HTTPServer(
-        ('localhost', _UI_PORT),
-        _make_handler(str(test_db_dir)),
-    )
-    t = threading.Thread(target=server.serve_forever, daemon=True)
-    t.start()
-    yield f'http://localhost:{_UI_PORT}'
+    server, url = _start_server(str(test_db_dir))
+    yield url
     server.shutdown()
 
 
@@ -240,11 +239,6 @@ def http_server_with_config(test_db_dir, tmp_path_factory):
     (config_dir / 'local.json').write_text(
         json.dumps({'searchLanguage': 'fr', 'displayLanguage': 'fr'})
     )
-    server = HTTPServer(
-        ('localhost', _UI_PORT_CONFIG),
-        _make_handler(str(config_dir)),
-    )
-    t = threading.Thread(target=server.serve_forever, daemon=True)
-    t.start()
-    yield f'http://localhost:{_UI_PORT_CONFIG}'
+    server, url = _start_server(str(config_dir))
+    yield url
     server.shutdown()
