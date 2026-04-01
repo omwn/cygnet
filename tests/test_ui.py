@@ -910,3 +910,9 @@ class TestHeaderCustomization:
     def test_custom_logo_name_in_header(self, page_branding: Page):
         """local.json logo.name appears to the left of the logo image."""
         expect(page_branding.locator('header span', has_text='TWN').first).to_be_visible()
+
+    def test_custom_title_url_in_header(self, page_branding: Page):
+        """local.json url makes the title an external link."""
+        link = page_branding.locator('header a', has_text='TestWN')
+        expect(link).to_be_visible()
+        assert link.get_attribute('href') == 'https://example.org/testwn'

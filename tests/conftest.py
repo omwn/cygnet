@@ -278,6 +278,7 @@ def http_server_with_branding(test_db_dir, tmp_path_factory):
         'title': 'TestWN',
         'icon': '🧪',
         'name': 'TWN',
+        'url': 'https://example.org/testwn',
         'logo': {
             'src': 'omw-logo.svg',
             'url': 'https://omwn.org',

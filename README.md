@@ -188,6 +188,7 @@ file alongside it.  All fields are optional — omit any you don't need:
 | `title` | Header h1 and browser `<title>` |
 | `tagline` | Appended to `<title>` as `— tagline` |
 | `icon` | Emoji shown in the header and as the favicon |
+| `url` | URL for the title (left side of header); omit to use click-to-home behaviour |
 | `databases.main` | Main DB: `filename` (loaded by the UI) and `url` + `description` (shown in About tab) |
 | `databases.provenance` | Provenance DB: same fields |
 | `logo` | Header logo (`{src, url, alt, name}`); `name` shown left of image; `null` to hide |

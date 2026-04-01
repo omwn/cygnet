@@ -1766,10 +1766,16 @@
                         <div className="max-w-4xl mx-auto px-4 py-3">
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-3">
-                                    <button onClick={handleLogoClick} className="text-left hover:opacity-80 flex items-center gap-1.5">
-                                        {siteConfig.icon && <h1 className="text-4xl -mt-0.5">{siteConfig.icon}</h1>}
-                                        {siteConfig.title && <h1 className="text-3xl font-bold text-gray-800"> {siteConfig.title}</h1>}
-                                    </button>
+                                    {siteConfig.url
+                                        ? <a href={siteConfig.url} target="_blank" rel="noopener noreferrer" className="hover:opacity-80 flex items-center gap-1.5">
+                                              {siteConfig.icon && <h1 className="text-4xl -mt-0.5">{siteConfig.icon}</h1>}
+                                              {siteConfig.title && <h1 className="text-3xl font-bold text-gray-800"> {siteConfig.title}</h1>}
+                                          </a>
+                                        : <button onClick={handleLogoClick} className="text-left hover:opacity-80 flex items-center gap-1.5">
+                                              {siteConfig.icon && <h1 className="text-4xl -mt-0.5">{siteConfig.icon}</h1>}
+                                              {siteConfig.title && <h1 className="text-3xl font-bold text-gray-800"> {siteConfig.title}</h1>}
+                                          </button>
+                                    }
                                 </div>
                                 {siteConfig.logo !== null && (
                                     siteConfig.logo

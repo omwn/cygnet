@@ -152,9 +152,10 @@ The header has two sides that are independently customisable:
   (left side)                               (right side)
 ```
 
-- **Left side**: controlled by `icon` and `title`.
-- **Right side**: controlled by the `logo` object.  By default it shows
-  `OMW` followed by the Open Multilingual Wordnet logo.  Set `logo.name`
+- **Left side**: controlled by `icon`, `title`, and optionally `url`.
+  By default clicking the title resets the search.  Set `url` to link
+  the title to an external page instead (opens in a new tab).
+- **Right side**: controlled by the `logo` object.  Set `logo.name`
   to show your project's short name to the left of your logo image,
   mirroring the layout of the left side.  Set `logo` to `null` to hide
   the right side entirely.
@@ -167,6 +168,7 @@ The header has two sides that are independently customisable:
 | `name` | value of `title` | Short name used in prose (e.g. "The MWN databases…") |
 | `tagline` | — | Appended to `<title>` as `— tagline` |
 | `icon` | `"🦢"` | Emoji shown to the left of the title in the header |
+| `url` | — | URL for the title link (left side); omit to use click-to-reset-search behaviour |
 | `databases.main.filename` | `"cygnet.db.gz"` | Main DB filename; fetched from the same directory as `index.html` |
 | `databases.main.url` | — | Download URL for the main DB (shown in About tab) |
 | `databases.main.description` | — | One-line description shown in About tab |
