@@ -589,6 +589,7 @@
             const [collapsedSections, setCollapsedSections] = useState({});
             const [synonymsCollapsed, setSynonymsCollapsed] = useState({});
             const [settingsOpen, setSettingsOpen] = useState(false);
+            const [helpOpen, setHelpOpen] = useState(false);
             const [relationsView, setRelationsView] = useState(() =>
                 localStorage.getItem('relationsView') || 'graph'
             );
@@ -619,6 +620,7 @@
             const menuRef = useRef(null);
             const menuInteractionRef = useRef(false);
             const settingsRef = useRef(null);
+            const helpRef = useRef(null);
             const hoveredNodeRef = useRef(null);
             const nodeSizeCache = useRef(new Map());
             const MAX_CACHE_SIZE = 200;
@@ -643,6 +645,16 @@
                 document.addEventListener('mousedown', handleClick);
                 return () => document.removeEventListener('mousedown', handleClick);
             }, [settingsOpen]);
+
+            useEffect(() => {
+                if (!helpOpen) return;
+                const handleClick = (e) => {
+                    if (helpRef.current && !helpRef.current.contains(e.target))
+                        setHelpOpen(false);
+                };
+                document.addEventListener('mousedown', handleClick);
+                return () => document.removeEventListener('mousedown', handleClick);
+            }, [helpOpen]);
 
             useEffect(() => {
                 fetch('relations.json')
@@ -1812,6 +1824,29 @@
                                         </div>
                                     </div>
                                 </div>
+                                <div className="relative pb-0" ref={helpRef}>
+                                    <button onClick={() => setHelpOpen(o => !o)}
+                                        title="Help"
+                                        className={`px-3 py-2 rounded-t-lg border-b-2 transition-colors ${helpOpen ? 'bg-gray-50 border-blue-500 text-blue-700' : 'border-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-50'}`}>
+                                        ?
+                                    </button>
+                                    {helpOpen && (
+                                        <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded shadow-lg z-20 w-80 p-4 text-sm text-gray-700 space-y-3">
+                                            <p>Type in the search box and press <kbd className="px-1 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs">Enter</kbd> to search. Results are <strong>senses</strong> — a word in a specific meaning. Click a sense to open its <strong>concept view</strong>, which shows relations (hypernyms, hyponyms, …) and lexicalizations across all languages.</p>
+                                            <div className="space-y-1">
+                                                <p className="font-semibold text-gray-500 text-xs uppercase tracking-wide">Search syntax</p>
+                                                <div><span className="font-mono font-semibold">dog</span> — exact word match</div>
+                                                <div><span className="font-mono font-semibold">dog*</span> or <span className="font-mono font-semibold">*ness</span> — wildcard (<span className="font-mono">*</span> = any characters, <span className="font-mono">?</span> = one)</div>
+                                                <div><span className="font-mono font-semibold">def:bright</span> — search inside definitions</div>
+                                                <div><span className="font-mono font-semibold">i1234</span> — look up concept by ILI</div>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <p className="font-semibold text-gray-500 text-xs uppercase tracking-wide">Filtering &amp; display</p>
+                                                <p>Use <strong>⚙ Settings</strong> to filter results by language or part of speech, and to set the display language for definitions and synset labels.</p>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
                                 <div className="relative pb-0" ref={settingsRef}>
                                     <button onClick={() => setSettingsOpen(o => !o)}
                                         title="Settings"
@@ -1969,6 +2004,19 @@
                                                 </div>
                                             )}
                                         </div>
+                                    </div>
+                                )}
+                                {view === 'search' && dbReady && !currentSearch && !senseFilter && (
+                                    <div className="max-w-lg mx-auto mt-16 text-gray-600 space-y-5">
+                                        <p className="text-base">Search for a word, definition, or concept ILI — results are <strong>senses</strong> (a word in a specific meaning). Click any sense to open its <strong>concept view</strong>, which shows how concepts relate to each other and how they are expressed across languages.</p>
+                                        <div className="bg-gray-50 border border-gray-200 rounded p-4 space-y-1.5 text-sm">
+                                            <p className="font-semibold text-gray-500 text-xs uppercase tracking-wide mb-2">Search syntax</p>
+                                            <div><span className="font-mono font-semibold text-gray-800">dog</span> — exact word match</div>
+                                            <div><span className="font-mono font-semibold text-gray-800">dog*</span> or <span className="font-mono font-semibold text-gray-800">*ness</span> — wildcard (<span className="font-mono">*</span> = any characters, <span className="font-mono">?</span> = one character)</div>
+                                            <div><span className="font-mono font-semibold text-gray-800">def:bright</span> — search inside definitions</div>
+                                            <div><span className="font-mono font-semibold text-gray-800">i1234</span> or <span className="font-mono font-semibold text-gray-800">cili.i1234</span> — look up concept by ILI</div>
+                                        </div>
+                                        <p className="text-sm">Use <strong>⚙ Settings</strong> to filter results by language or part of speech, and to choose the display language for definitions and synset labels. This guide is always available via the <strong>?</strong> button.</p>
                                     </div>
                                 )}
                                 {view === 'search' && dbReady && (
