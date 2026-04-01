@@ -165,7 +165,8 @@ file alongside it.  All fields are optional — omit any you don't need:
   "logo": {
     "src": "mylogo.svg",
     "url": "https://myproject.org",
-    "alt": "My Project"
+    "alt": "My Project",
+    "name": "MWN"
   },
 
   "header": "<strong>Preview build</strong> — data updated 2025-01-01.",
@@ -189,12 +190,14 @@ file alongside it.  All fields are optional — omit any you don't need:
 | `icon` | Emoji shown in the header and as the favicon |
 | `databases.main` | Main DB: `filename` (loaded by the UI) and `url` + `description` (shown in About tab) |
 | `databases.provenance` | Provenance DB: same fields |
-| `logo` | Header logo (`{src, url, alt}`); set to `null` to hide it |
+| `logo` | Header logo (`{src, url, alt, name}`); `name` shown left of image; `null` to hide |
 | `header` | HTML banner below the nav bar |
 | `footer` | HTML replacing the footer |
 | `about.intro` | HTML replacing the About tab intro paragraphs |
 | `about.citation` | HTML replacing the citation guidance in About |
 | `publications` | HTML strings prepended to the Publications list |
+
+Fields marked as "HTML" (`header`, `footer`, `about.*`, `publications`) are injected as raw HTML — treat them as trusted configuration, equivalent to editing the HTML file directly. Do not populate them from untrusted user input.
 
 This table lists the most commonly used fields. For the full reference (including `name`, `databases`, `about.languageData`, `searchLanguage`, `displayLanguage`, and more) see [`CUSTOMIZE.md`](CUSTOMIZE.md) or the annotated template at [`notes/local.json.example`](notes/local.json.example).
 
