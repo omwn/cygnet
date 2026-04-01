@@ -199,7 +199,45 @@ Your `build.sh` should:
 2. Call `cygnet/build.sh --work-dir` to run the pipeline
 3. Copy the UI and databases to `docs/`
 
-Minimal example (adapt to your own XML build):
+### Starting from a `.tab` file (OMW TSV format)
+
+Many Open Multilingual Wordnet resources are distributed as `.tab` files rather
+than WN-LMF XML.  To convert, use the `tsv2lmf.py` script from the
+[omw-data](https://github.com/omwn/omw-data) repository and the ILI map from
+[cili](https://github.com/globalwordnet/cili):
+
+```bash
+git clone https://github.com/omwn/omw-data.git external/omw-data
+git clone https://github.com/globalwordnet/cili.git external/cili
+
+pushd external/omw-data/scripts
+python3 tsv2lmf.py \
+    "$OLDPWD/my-wordnet.tab" \
+    "$OLDPWD/build/mywn-VERSION/mywn-VERSION.xml" \
+    --id='mywn' \
+    --label='My Wordnet' \
+    --language='xyz' \
+    --version="$VERSION" \
+    --email='contact@example.org' \
+    --license='https://creativecommons.org/licenses/by/4.0/' \
+    --url='https://github.com/yourorg/yourproject' \
+    --citation="$(cat etc/citation.rst)" \
+    --requires=omw-en:2.0 \
+    --ili-map="$OLDPWD/external/cili/ili-map-pwn30.tab"
+popd
+```
+
+The `.tab` header line must have **four** tab-separated fields (after `##`):
+`label`, `language`, `url`, `license`.  If your file only has three (no URL),
+prepend a fixed header before passing it to `tsv2lmf.py`:
+
+```bash
+{ printf '## My Wordnet\txyz\thttps://github.com/yourorg/yourproject\tCC BY 4.0\n'
+  tail -n +2 my-wordnet.tab
+} > build/my-wordnet-fixed.tab
+```
+
+### Minimal `build.sh` example (adapt to your own XML build):
 
 ```bash
 #!/usr/bin/env bash
@@ -364,6 +402,37 @@ If the old Cygnet databases appear instead of yours, the browser has cached an
 older version.  The cache is invalidated automatically when the DB filename or
 server modification time changes.  You can also force a reset via
 **About → Cache → Clear cached database**.
+
+---
+
+## ARASAAC pictogram images
+
+Cygnet displays [ARASAAC](https://arasaac.org) pictograms alongside synsets
+when a matching image exists.  The mapping from synset ILIs to pictogram IDs
+is pre-built and committed to the cygnet repo at `data/araasac-ili.json`.
+
+When you build with `--work-dir`, cygnet automatically copies this file into
+your work directory so the ARASAAC step works without any extra configuration.
+
+**To regenerate the mapping** (e.g. after ARASAAC releases new pictograms):
+
+```bash
+cd /path/to/cygnet
+uv run conversion_scripts/11_add_arasaac.py --rebuild
+git add data/araasac-ili.json
+git commit -m "Refresh ARASAAC ILI mapping"
+```
+
+**To patch an existing external database** without a full rebuild:
+
+```bash
+cp /path/to/cygnet/data/araasac-ili.json myproject/build/cygnet-work/data/
+cd myproject/build/cygnet-work
+uv run --project /path/to/cygnet \
+    python3 /path/to/cygnet/conversion_scripts/11_add_arasaac.py
+gzip -k -9 -f web/cygnet.db
+cp web/cygnet.db.gz myproject/docs/mywn.db.gz
+```
 
 ---
 
