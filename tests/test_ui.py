@@ -497,11 +497,10 @@ class TestArasaac:
 
 
 class TestPublications:
-    def test_publications_tab_shows_main_papers(self, page_ready: Page):
-        """Publications tab lists the Cygnet and OMW papers."""
+    def test_publications_tab_shows_configured_paper(self, page_ready: Page):
+        """Publications tab lists papers from local.json publications array."""
         page_ready.locator('button', has_text='Publications').click()
-        expect(page_ready.locator('text=Maudslay')).to_be_visible(timeout=5_000)
-        expect(page_ready.locator('text=Bond').first).to_be_visible()
+        expect(page_ready.locator('text=Test Author')).to_be_visible(timeout=5_000)
 
     def test_publications_tab_shows_wordnet_citations_header(self, page_ready: Page):
         """Publications tab has a Wordnet Citations section."""
@@ -530,11 +529,10 @@ class TestPublications:
         ).to_be_visible()
 
     def test_about_tab_citation_section(self, page_ready: Page):
-        """About tab has a Citation section with links to key papers."""
+        """About tab has a Citation section with content from local.json."""
         page_ready.locator('button', has_text='About').click()
         expect(page_ready.locator('text=Citation')).to_be_visible(timeout=5_000)
-        expect(page_ready.locator('button', has_text='Maudslay')).to_be_visible()
-        expect(page_ready.locator('button', has_text='Bond & Foster')).to_be_visible()
+        expect(page_ready.locator('text=Test Author')).to_be_visible()
 
     def test_about_tab_download_section(self, page_ready: Page):
         """About tab has a Download section with database links."""

@@ -14,6 +14,11 @@ from cyg.merge import MergeBuilder
 
 _WORDNETS_DIR = Path(__file__).parent / 'wordnets'
 
+_DEFAULT_DATABASES = {
+    'main':       {'filename': 'cygnet.db.gz'},
+    'provenance': {'filename': 'provenance.db.gz'},
+}
+
 
 # ---------------------------------------------------------------------------
 # Shared XML helpers
@@ -181,6 +186,17 @@ def test_db_dir(tmp_path_factory):
     shutil.copy(web_dir / 'relations.json', serve_dir / 'relations.json')
     shutil.copy(db_path.with_suffix('.db.gz'), serve_dir / 'cygnet.db.gz')
     shutil.copy(prov_path.with_suffix('.db.gz'), serve_dir / 'provenance.db.gz')
+    (serve_dir / 'local.json').write_text(json.dumps({
+        'title': 'Cygnet',
+        'icon': '🦢',
+        'databases': _DEFAULT_DATABASES,
+        'about': {
+            'citation': 'Please cite <a href="#">Test Author (2025)</a> when using this resource.',
+        },
+        'publications': [
+            'Test Author (2025). A test paper. In <em>Test Proceedings</em>.',
+        ],
+    }))
     return serve_dir
 
 
@@ -235,10 +251,13 @@ def http_server_with_config(test_db_dir, tmp_path_factory):
     """
     config_dir = tmp_path_factory.mktemp('serve_config')
     for f in test_db_dir.iterdir():
-        shutil.copy(f, config_dir / f.name)
-    (config_dir / 'local.json').write_text(
-        json.dumps({'searchLanguage': 'fr', 'displayLanguage': 'fr'})
-    )
+        if f.name != 'local.json':
+            shutil.copy(f, config_dir / f.name)
+    (config_dir / 'local.json').write_text(json.dumps({
+        'searchLanguage': 'fr',
+        'displayLanguage': 'fr',
+        'databases': _DEFAULT_DATABASES,
+    }))
     server, url = _start_server(str(config_dir))
     yield url
     server.shutdown()
@@ -253,7 +272,8 @@ def http_server_with_branding(test_db_dir, tmp_path_factory):
     """
     branding_dir = tmp_path_factory.mktemp('serve_branding')
     for f in test_db_dir.iterdir():
-        shutil.copy(f, branding_dir / f.name)
+        if f.name != 'local.json':
+            shutil.copy(f, branding_dir / f.name)
     (branding_dir / 'local.json').write_text(json.dumps({
         'title': 'TestWN',
         'icon': '🧪',
@@ -264,6 +284,7 @@ def http_server_with_branding(test_db_dir, tmp_path_factory):
             'alt': 'Test Wordnet',
             'name': 'TWN',
         },
+        'databases': _DEFAULT_DATABASES,
     }))
     server, url = _start_server(str(branding_dir))
     yield url

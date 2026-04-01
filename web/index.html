@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cygnet — A Network of Signs</title>
+    <title></title>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.js"></script>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🦢</text></svg>">
+
     <style>
         .sense-box:hover { border-color: #60a5fa !important; }
         .sense-box:has(.concept-inner:hover) { border-color: #e5e7eb !important; }
@@ -86,8 +86,6 @@
         let _SQL = null;
         let _provDb = null;
 
-        // Prepared statement cache
-        const _stmtCache = {};
         function cachedExec(sql, params = []) {
             if (!_db) return [];
             try {
@@ -549,6 +547,17 @@
             });
         }
 
+        function useClickOutside(ref, open, onClose) {
+            useEffect(() => {
+                if (!open) return;
+                const handleClick = (e) => {
+                    if (ref.current && !ref.current.contains(e.target)) onClose();
+                };
+                document.addEventListener('mousedown', handleClick);
+                return () => document.removeEventListener('mousedown', handleClick);
+            }, [open]);
+        }
+
         // ========== MAIN COMPONENT ==========
         function DictionaryBrowser() {
             const [dbReady, setDbReady] = useState(false);
@@ -636,25 +645,8 @@
 
             useEffect(() => { hoveredNodeRef.current = hoveredNode; }, [hoveredNode]);
 
-            useEffect(() => {
-                if (!settingsOpen) return;
-                const handleClick = (e) => {
-                    if (settingsRef.current && !settingsRef.current.contains(e.target))
-                        setSettingsOpen(false);
-                };
-                document.addEventListener('mousedown', handleClick);
-                return () => document.removeEventListener('mousedown', handleClick);
-            }, [settingsOpen]);
-
-            useEffect(() => {
-                if (!helpOpen) return;
-                const handleClick = (e) => {
-                    if (helpRef.current && !helpRef.current.contains(e.target))
-                        setHelpOpen(false);
-                };
-                document.addEventListener('mousedown', handleClick);
-                return () => document.removeEventListener('mousedown', handleClick);
-            }, [helpOpen]);
+            useClickOutside(settingsRef, settingsOpen, () => setSettingsOpen(false));
+            useClickOutside(helpRef, helpOpen, () => setHelpOpen(false));
 
             useEffect(() => {
                 fetch('relations.json')
@@ -669,8 +661,9 @@
                     const { title, tagline, icon, searchLanguage, displayLanguage } = _siteConfig;
                     if (title) document.title = title + (tagline ? ` — ${tagline}` : '');
                     if (icon) {
-                        const link = document.querySelector("link[rel='icon']");
-                        if (link) link.href = `data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>${encodeURIComponent(icon)}</text></svg>`;
+                        let link = document.querySelector("link[rel='icon']");
+                        if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
+                        link.href = `data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>${encodeURIComponent(icon)}</text></svg>`;
                     }
                     if (displayLanguage && !localStorage.getItem('definitionLanguage')) {
                         setDefinitionLanguage(displayLanguage);
@@ -687,7 +680,8 @@
                 (async () => {
                     try {
                         await _configPromise;
-                        const dbFile = _siteConfig.databases?.main?.filename || 'cygnet.db.gz';
+                        const dbFile = _siteConfig.databases?.main?.filename;
+                        if (!dbFile) { setDbReady(true); return; }
                         setDbProgress('Loading sql.js...');
                         const SQL = await initSqlJs({
                             locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/${file}`
@@ -969,7 +963,8 @@
                 setProvError(null);
                 try {
                     await _configPromise;
-                    const provFile = _siteConfig.databases?.provenance?.filename || 'provenance.db.gz';
+                    const provFile = _siteConfig.databases?.provenance?.filename;
+                    if (!provFile) { setProvLoading(false); return; }
                     let buf;
                     try {
                         const cached = await idbGet('provdb');
@@ -1746,7 +1741,7 @@
             }, []);
 
             const allPosValues = ['NOUN', 'VERB', 'ADJ', 'ADV', 'CONJ', 'ADP', 'NREF', 'UNK'];
-            const siteName = siteConfig.name || siteConfig.title || 'Cygnet';
+            const siteName = siteConfig.name || siteConfig.title || '';
 
             useEffect(() => { if (dbError) setActiveTab('about'); }, [dbError]);
 
@@ -1772,8 +1767,8 @@
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                     <button onClick={handleLogoClick} className="text-left hover:opacity-80 flex items-center gap-1.5">
-                                        <h1 className="text-4xl -mt-0.5">{siteConfig.icon || '🦢'}</h1>
-                                        <h1 className="text-3xl font-bold text-gray-800"> {siteConfig.title || 'Cygnet'}</h1>
+                                        {siteConfig.icon && <h1 className="text-4xl -mt-0.5">{siteConfig.icon}</h1>}
+                                        {siteConfig.title && <h1 className="text-3xl font-bold text-gray-800"> {siteConfig.title}</h1>}
                                     </button>
                                 </div>
                                 {siteConfig.logo !== null && (
@@ -1789,10 +1784,7 @@
                                                       <img src={siteConfig.logo.src} alt={siteConfig.logo.alt || ''} className="h-10" />
                                                   </span>
                                           )
-                                        : <a href="https://omwn.org" target="_blank" rel="noopener noreferrer" className="hover:opacity-80 flex items-center gap-2">
-                                              <span title="Open Multilingual Wordnet" className="text-3xl font-bold text-gray-800">OMW</span>
-                                              <img src="omw-logo.svg" alt="Open Multilingual Wordnet" className="h-10" />
-                                          </a>
+                                        : null
                                 )}
                             </div>
                             <nav className="flex items-end gap-3 mt-3 -mb-3 flex-wrap">
@@ -1982,9 +1974,8 @@
                                         <h2 className="font-bold text-xl mb-2">Error Loading Database</h2>
                                         <p className="mb-4 text-gray-700">{dbError}</p>
                                         <p className="text-sm text-gray-500">
-                                            On localhost, make sure <code>{siteConfig.databases?.main?.filename || 'cygnet.db.gz'}</code> is in the same directory as this HTML file.<br/>
-                                            In production, the database is fetched from the{' '}
-                                            <a href="https://github.com/rowanhm/cygnet/releases/latest" className="text-blue-600 hover:underline">latest GitHub release</a>.
+                                            {siteConfig.databases?.main?.filename && <>On localhost, make sure <code>{siteConfig.databases.main.filename}</code> is in the same directory as this HTML file.<br/></>}
+                                            In production, the database is fetched from the release URL configured in <code>local.json</code>.
                                             The release may still be building.
                                         </p>
                                     </div>
@@ -1992,7 +1983,7 @@
                                 {!dbReady && !dbError && (
                                     <div className="flex justify-center mt-16">
                                         <div className="text-center w-72">
-                                            <h1 className="text-4xl mb-4">🦢</h1>
+                                            {siteConfig.icon && <h1 className="text-4xl mb-4">{siteConfig.icon}</h1>}
                                             <p className="text-gray-600 mb-3">{dbProgress || 'Initializing...'}</p>
                                             {downloadProgress && (
                                                 <div>
@@ -2612,17 +2603,9 @@
                         {activeTab === 'about' && (
                             <div>
                                 <h2 className="text-xl font-bold mb-4">About</h2>
-                                {siteConfig.about?.intro
-                                    ? <div className="text-gray-700 mb-4"
-                                           dangerouslySetInnerHTML={{ __html: siteConfig.about.intro }} />
-                                    : <>
-                                        <p className="text-gray-700 mb-4">
-                                            OMW {siteName} is an experimental reformulation of Wordnet that is designed to eliminate conflicting records, and improve modularity. It extends the idea of the <a href="https://omwn.org/" className="text-blue-600 hover:underline">Open Multilingual Wordnet</a> and puts concepts at the core of the structure.
-                                        </p>
-                                        <p className="text-gray-700 mb-4">
-                                            Developed by Rowan Hall Maudslay and Francis Bond. Source code is available on <a href="https://github.com/rowanhm/cygnet" className="text-blue-600 hover:underline">GitHub</a>.
-                                        </p>
-                                    </>
+                                {siteConfig.about?.intro &&
+                                    <div className="text-gray-700 mb-4"
+                                         dangerouslySetInnerHTML={{ __html: siteConfig.about.intro }} />
                                 }
                                 {dbStats && (
                                     <div className="border-t border-gray-200 pt-4 mb-4">
@@ -2645,29 +2628,21 @@
                                 )}
                                 <div className="border-t border-gray-200 pt-4 mb-4">
                                     <h3 className="font-medium text-sm text-gray-700 mb-2">Citation</h3>
-                                    {siteConfig.about?.citation
-                                        ? <div className="text-sm text-gray-600"
-                                               dangerouslySetInnerHTML={{ __html: siteConfig.about.citation }} />
-                                        : <p className="text-sm text-gray-600">If you use {siteName}, please cite <button onClick={() => setActiveTab('publications')} className="text-blue-600 hover:underline">Maudslay &amp; Bond (2026)</button> for {siteName} and <button onClick={() => setActiveTab('publications')} className="text-blue-600 hover:underline">Bond &amp; Foster (2013)</button> for the underlying Open Multilingual Wordnet, as well as the individual <button onClick={() => setActiveTab('wordnets')} className="text-blue-600 hover:underline">wordnets</button> whose data you use.</p>
+                                    {siteConfig.about?.citation &&
+                                        <div className="text-sm text-gray-600"
+                                             dangerouslySetInnerHTML={{ __html: siteConfig.about.citation }} />
                                     }
                                 </div>
                                 <div className="border-t border-gray-200 pt-4 mb-4">
                                     <h3 className="font-medium text-sm text-gray-700 mb-2">Download</h3>
                                     {(() => {
-                                        const dbFile = siteConfig.databases?.main?.filename || 'cygnet.db.gz';
-                                        const provFile = siteConfig.databases?.provenance?.filename || 'provenance.db.gz';
-                                        const ghBase = 'https://github.com/rowanhm/cygnet/releases/latest/download/';
-                                        const defaultDbs = [
-                                            { filename: dbFile, url: ghBase + dbFile, description: 'The main lexical database, containing synsets, entries, senses, definitions, examples, and pronunciations across all languages.' },
-                                            { filename: provFile, url: ghBase + provFile, description: 'Provenance records tracing every data point back to its source wordnet and original identifier.' },
-                                        ];
                                         const rawDbs = siteConfig.databases;
-                                        const dbs = !rawDbs ? defaultDbs
+                                        const dbs = !rawDbs ? []
                                             : Array.isArray(rawDbs) ? rawDbs
                                             : [rawDbs.main, rawDbs.provenance].filter(Boolean);
                                         return (<>
                                             <p className="text-sm text-gray-600 mb-3">
-                                                The {siteName} databases are available for download below. These are SQLite databases compressed with gzip.
+                                                The{siteName ? ` ${siteName}` : ''} databases are available for download below. These are SQLite databases compressed with gzip.
                                             </p>
                                             <ul className="space-y-3 mb-3">
                                                 {dbs.map((db, i) => {
@@ -2685,19 +2660,16 @@
                                                 })}
                                             </ul>
                                             <p className="text-sm text-gray-600">
-                                                The individual wordnets that make up {siteName} are each available from their respective projects — see the <button onClick={() => setActiveTab('wordnets')} className="text-blue-600 hover:underline">Wordnets</button> tab for the full list with links.
+                                                The individual wordnets that make up{siteName ? ` ${siteName}` : ' this resource'} are each available from their respective projects — see the <button onClick={() => setActiveTab('wordnets')} className="text-blue-600 hover:underline">Wordnets</button> tab for the full list with links.
                                             </p>
                                         </>);
                                     })()}
                                 </div>
                                 <div className="border-t border-gray-200 pt-4 mb-4">
                                     <h3 className="font-medium text-sm text-gray-700 mb-2">Language Data</h3>
-                                    {siteConfig.about?.languageData
-                                        ? <div className="text-sm text-gray-600"
-                                               dangerouslySetInnerHTML={{ __html: siteConfig.about.languageData }} />
-                                        : <p className="text-sm text-gray-600">
-                                              The lexical data in {siteName} is drawn from a collection of open wordnets covering many languages — see the <button onClick={() => setActiveTab('wordnets')} className="text-blue-600 hover:underline">Wordnets tab</button> for the full list of contributing projects and their licences. We are deeply grateful to every team that has worked to build and freely share these resources. Thanks to all the projects that have released their data openly!
-                                          </p>
+                                    {siteConfig.about?.languageData &&
+                                        <div className="text-sm text-gray-600"
+                                             dangerouslySetInnerHTML={{ __html: siteConfig.about.languageData }} />
                                     }
                                 </div>
                                 <div className="border-t border-gray-200 pt-4 mb-4">
@@ -2752,15 +2724,6 @@
                                         <li key={`cfg-pub-${i}`} className="text-sm text-gray-800"
                                             dangerouslySetInnerHTML={{ __html: pub }} />
                                     ))}
-                                    <li className="text-sm text-gray-800">
-                                        Rowan Hall Maudslay &amp; Francis Bond (2026). Cygnet: Refactoring the Open Multilingual Wordnet. In <em>Proceedings of the 15th International Conference on Language Resources and Evaluation (LREC 2026)</em>. (to appear)
-                                    </li>
-                                    <li className="text-sm text-gray-800">
-                                        Francis Bond &amp; Ryan Foster (2013). Linking and extending an open multilingual wordnet. In <em>Proceedings of the 51st Annual Meeting of the Association for Computational Linguistics (ACL 2013)</em>. Sofia. pp. 1352–1362.
-                                    </li>
-                                    <li className="text-sm text-gray-800">
-                                        Francis Bond &amp; Kyonghee Paik (2012). A survey of wordnets and their licenses. In <em>Proceedings of the 6th Global WordNet Conference (GWC 2012)</em>. Matsue. pp. 64–71.
-                                    </li>
                                 </ul>
                                 <h2 className="text-xl font-bold mb-2">Wordnet Citations</h2>
                                 <p className="text-sm text-gray-500 italic mb-4">Citation data taken from each wordnet's source XML.</p>
