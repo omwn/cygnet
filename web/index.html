@@ -744,6 +744,7 @@
             const [pathTargetRowid, setPathTargetRowid] = useState(null);
             const [pathResult, setPathResult] = useState(null);
             const [pathNotFound, setPathNotFound] = useState(false);
+            const [pathWordSuggestions, setPathWordSuggestions] = useState([]);
             const isPopStateRef = useRef(false);
             const isInitialLoadRef = useRef(true);
             const initialUrlHandledRef = useRef(false);
@@ -840,11 +841,31 @@
                                     await Promise.all([
                                         idbDel('db'), idbDel('provdb'),
                                         idbDel('db-mtime'), idbDel('db-filename'),
-                                        idbDel('provdb-filename'),
+                                        idbDel('provdb-filename'), idbDel('db-compressed'),
                                     ]);
                                 } else {
                                     setDbProgress('Loading from cache...');
-                                    buf = new Uint8Array(cached);
+                                    const isCompressed = await idbGet('db-compressed');
+                                    if (isCompressed) {
+                                        setDbProgress('Decompressing...');
+                                        const ds = new DecompressionStream('gzip');
+                                        const writer = ds.writable.getWriter();
+                                        const reader = ds.readable.getReader();
+                                        writer.write(new Uint8Array(cached));
+                                        writer.close();
+                                        const chunks = [];
+                                        while (true) {
+                                            const { done, value } = await reader.read();
+                                            if (done) break;
+                                            chunks.push(value);
+                                        }
+                                        const total = chunks.reduce((s, c) => s + c.length, 0);
+                                        buf = new Uint8Array(total);
+                                        let off = 0;
+                                        for (const ch of chunks) { buf.set(ch, off); off += ch.length; }
+                                    } else {
+                                        buf = new Uint8Array(cached);
+                                    }
                                 }
                             }
                         } catch (e) {
@@ -852,52 +873,75 @@
                         }
 
                         if (!buf) {
-                            // Fetch compressed database
                             setDbProgress('Downloading database...');
                             const response = await fetch(DB_BASE + dbFile, { cache: 'reload' });
                             if (!response.ok) throw new Error(`Failed to fetch database: ${response.status}`);
                             const serverMtime = response.headers.get('last-modified') || response.headers.get('etag') || '';
                             const compressedTotal = parseInt(response.headers.get('content-length') || '0');
 
-                            // Stream through DecompressionStream
-                            const ds = new DecompressionStream('gzip');
-                            const decompressedStream = response.body.pipeThrough(ds);
-                            const reader = decompressedStream.getReader();
+                            // Detect mobile/limited devices: use coarse pointer (touch-primary)
+                            const isMobile = window.matchMedia('(hover: none) and (pointer: coarse)').matches;
 
-                            // We track compressed bytes via a wrapper on the original body
-                            // But DecompressionStream consumes the body, so we track decompressed bytes
-                            let loaded = 0;
-                            const chunks = [];
-                            while (true) {
-                                const { done, value } = await reader.read();
-                                if (done) break;
-                                chunks.push(value);
-                                loaded += value.length;
-                                if (compressedTotal > 0) {
-                                    // Estimate: show decompressed MB (compressed size known for reference)
-                                    setDbProgress('Downloading & decompressing...');
-                                    setDownloadProgress({ loaded, total: null, compressedTotal });
-                                } else {
-                                    setDbProgress(`Decompressing... ${(loaded/1048576).toFixed(0)} MB`);
+                            if (isMobile) {
+                                // Mobile: download raw compressed bytes, decompress for this session,
+                                // cache compressed (~130 MB) to save device storage.
+                                setDbProgress('Downloading...');
+                                const compressedBuf = await response.arrayBuffer();
+                                setDbProgress('Decompressing...');
+                                const ds = new DecompressionStream('gzip');
+                                const writer = ds.writable.getWriter();
+                                const reader = ds.readable.getReader();
+                                writer.write(new Uint8Array(compressedBuf));
+                                writer.close();
+                                const chunks = [];
+                                let loaded = 0;
+                                while (true) {
+                                    const { done, value } = await reader.read();
+                                    if (done) break;
+                                    chunks.push(value);
+                                    loaded += value.length;
                                 }
-                            }
-
-                            buf = new Uint8Array(loaded);
-                            let offset = 0;
-                            for (const chunk of chunks) {
-                                buf.set(chunk, offset);
-                                offset += chunk.length;
-                            }
-                            setDownloadProgress(null);
-
-                            // Cache in IndexedDB
-                            setDbProgress('Caching for next visit...');
-                            try {
-                                await idbPut('db', buf.buffer);
-                                await idbPut('db-filename', dbFile);
-                                if (serverMtime) await idbPut('db-mtime', serverMtime);
-                            } catch (e) {
-                                console.warn('IndexedDB cache write failed:', e);
+                                buf = new Uint8Array(loaded);
+                                let offset = 0;
+                                for (const chunk of chunks) { buf.set(chunk, offset); offset += chunk.length; }
+                                setDbProgress('Caching for next visit...');
+                                try {
+                                    await idbPut('db', compressedBuf);
+                                    await idbPut('db-compressed', true);
+                                    await idbPut('db-filename', dbFile);
+                                    if (serverMtime) await idbPut('db-mtime', serverMtime);
+                                } catch (e) { console.warn('IndexedDB cache write failed:', e); }
+                            } else {
+                                // Desktop: stream-decompress and cache uncompressed (~340 MB)
+                                // so new tabs load instantly from local storage.
+                                const ds = new DecompressionStream('gzip');
+                                const decompressedStream = response.body.pipeThrough(ds);
+                                const reader = decompressedStream.getReader();
+                                let loaded = 0;
+                                const chunks = [];
+                                while (true) {
+                                    const { done, value } = await reader.read();
+                                    if (done) break;
+                                    chunks.push(value);
+                                    loaded += value.length;
+                                    if (compressedTotal > 0) {
+                                        setDbProgress('Downloading & decompressing...');
+                                        setDownloadProgress({ loaded, total: null, compressedTotal });
+                                    } else {
+                                        setDbProgress(`Decompressing... ${(loaded/1048576).toFixed(0)} MB`);
+                                    }
+                                }
+                                buf = new Uint8Array(loaded);
+                                let offset = 0;
+                                for (const chunk of chunks) { buf.set(chunk, offset); offset += chunk.length; }
+                                setDownloadProgress(null);
+                                setDbProgress('Caching for next visit...');
+                                try {
+                                    await idbPut('db', buf.buffer);
+                                    await idbDel('db-compressed');
+                                    await idbPut('db-filename', dbFile);
+                                    if (serverMtime) await idbPut('db-mtime', serverMtime);
+                                } catch (e) { console.warn('IndexedDB cache write failed:', e); }
                             }
                         }
 
@@ -1382,6 +1426,7 @@
 
             const handleConceptClick = (conceptId) => {
                 nodeSizeCache.current.clear();
+                hideTooltip();
                 setSelectedConcept(conceptId.toString());
                 setSelectedSense(null);
                 setView('concept');
@@ -1395,6 +1440,7 @@
             };
 
             const handleSenseClick = (senseId) => {
+                hideTooltip();
                 setSelectedSense(senseId.toString());
                 setSelectedConcept(null);
                 setView('sense');
@@ -1947,7 +1993,7 @@
                                 )}
                             </div>
                             <nav className="flex items-end gap-3 mt-3 -mb-3 flex-wrap">
-                                {['browser', 'about', 'publications', 'wordnets'].map(tab => (
+                                {[['browser','Browse'],['about','About'],['publications','Publications'],['wordnets','Wordnets']].map(([tab, label]) => (
                                     <button key={tab}
                                         onClick={() => { setActiveTab(tab); if (tab === 'wordnets') setSelectedWordnet(null); }}
                                         className={`px-4 py-2 rounded-t-lg border-b-2 transition-colors ${
@@ -1955,7 +2001,7 @@
                                                 ? 'bg-gray-50 border-blue-500 text-blue-700 font-medium'
                                                 : 'border-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-50'
                                         }`}
-                                    >{tab.charAt(0).toUpperCase() + tab.slice(1)}</button>
+                                    >{label}</button>
                                 ))}
                                 <div className="flex items-center gap-1.5 flex-grow min-w-48 pb-0.5">
                                     <input type="text" value={searchTerm}
@@ -2050,7 +2096,7 @@
                                                                     if (e.target.checked && !_provDb && !provLoading) loadProvenanceDb();
                                                                 }}
                                                                 className="cursor-pointer" />
-                                                            <span className="text-sm text-gray-600">Show provenance</span>
+                                                            <span className="text-sm text-gray-600">Show sources</span>
                                                             {showProvenance && provLoading && <span className="text-xs text-gray-400 ml-1">Loading...</span>}
                                                             {showProvenance && provError && <span className="text-xs text-red-500 ml-1">{provError}</span>}
                                                         </label>
@@ -2479,7 +2525,19 @@
                                                     </div>
                                                     {relationsView === 'graph' && <div style={{ position: 'relative', overflow: 'hidden' }}>
                                                         <div id="concept-graph" style={{ width: '100%', height: '500px' }} />
-                                                        <div className="text-sm text-gray-600 italic mt-2">Hover over a node to expand its relations.</div>
+                                                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs mt-2">
+                                                            <span className="text-gray-500 italic flex-shrink-0">Hover a node to expand its relations.</span>
+                                                            {concept.cr && [...new Set(concept.cr.map(r => r.t))].map(type => {
+                                                                const short = RELATION_TO_SHORT[type];
+                                                                const color = _relColors[short] || _relColors[type] || '#999';
+                                                                return (
+                                                                    <span key={type} className="flex items-center gap-1 whitespace-nowrap">
+                                                                        <svg width="10" height="10" className="flex-shrink-0"><circle cx="5" cy="5" r="4" fill={color} /></svg>
+                                                                        <span className="text-gray-600">{getRelLabel(type)}</span>
+                                                                    </span>
+                                                                );
+                                                            })}
+                                                        </div>
                                                         {hoveredNode && hoverMenuPosition && (
                                                             <div style={{
                                                                 position: 'absolute', left: hoverMenuPosition.x, top: hoverMenuPosition.y,
@@ -2612,29 +2670,67 @@
                                                 return (
                                                 <div className="mb-4">
                                                     <h3 className="font-bold mb-2 text-base">Path to concept</h3>
-                                                    <div className="flex gap-2 mb-2 items-center">
-                                                        <input
-                                                            type="text"
-                                                            value={pathTargetIli}
-                                                            onChange={e => {
-                                                                const q = e.target.value.trim();
-                                                                setPathTargetIli(e.target.value);
-                                                                setPathResult(null);
-                                                                setPathNotFound(false);
-                                                                const norm = q.replace(/^cili\./, '');
-                                                                if (/^i\d+$/.test(norm)) {
-                                                                    const rows = cachedExec('SELECT rowid FROM synsets WHERE ili = ?', [norm]);
-                                                                    setPathTargetRowid(rows[0]?.rowid || null);
-                                                                } else {
-                                                                    setPathTargetRowid(null);
-                                                                }
-                                                            }}
-                                                            onKeyDown={e => { if (e.key === 'Enter' && pathTargetRowid) runPath(pathTargetRowid); }}
-                                                            placeholder={`e.g. i${fromIli?.replace(/^i/,'') || '46360'}`}
-                                                            className="w-40 border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:border-blue-400 font-mono"
-                                                        />
+                                                    <div className="flex gap-2 mb-2 items-center flex-wrap">
+                                                        <div className="relative">
+                                                            <input
+                                                                type="text"
+                                                                value={pathTargetIli}
+                                                                onChange={e => {
+                                                                    const raw = e.target.value;
+                                                                    const q = raw.trim();
+                                                                    setPathTargetIli(raw);
+                                                                    setPathResult(null);
+                                                                    setPathNotFound(false);
+                                                                    setPathWordSuggestions([]);
+                                                                    const norm = q.replace(/^cili\./, '');
+                                                                    if (/^i\d+$/.test(norm)) {
+                                                                        const rows = cachedExec('SELECT rowid FROM synsets WHERE ili = ?', [norm]);
+                                                                        setPathTargetRowid(rows[0]?.rowid || null);
+                                                                    } else if (q.length >= 2) {
+                                                                        setPathTargetRowid(null);
+                                                                        const lang = definitionLanguage || 'en';
+                                                                        const rows = cachedExec(
+                                                                            `SELECT DISTINCT syn.rowid, f.form, syn.pos,
+                                                                                    (SELECT d.definition FROM definitions d
+                                                                                     JOIN languages l ON l.rowid = d.language_rowid
+                                                                                     WHERE d.synset_rowid = syn.rowid AND l.code = ?
+                                                                                     LIMIT 1) AS def
+                                                                             FROM forms f
+                                                                             JOIN entries e ON e.rowid = f.entry_rowid
+                                                                             JOIN senses s ON s.entry_rowid = e.rowid
+                                                                             JOIN synsets syn ON syn.rowid = s.synset_rowid
+                                                                             WHERE f.normalized_form = lower(?)
+                                                                             ORDER BY syn.pos, syn.rowid LIMIT 8`,
+                                                                            [lang, q]
+                                                                        );
+                                                                        setPathWordSuggestions(rows);
+                                                                    } else {
+                                                                        setPathTargetRowid(null);
+                                                                    }
+                                                                }}
+                                                                onKeyDown={e => { if (e.key === 'Enter' && pathTargetRowid) runPath(pathTargetRowid); if (e.key === 'Escape') setPathWordSuggestions([]); }}
+                                                                placeholder="word or ILI (e.g. dog, i46360)"
+                                                                className="w-52 border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:border-blue-400"
+                                                            />
+                                                            {pathWordSuggestions.length > 0 && (
+                                                                <div className="absolute z-50 top-full left-0 mt-1 w-80 bg-white border border-gray-300 rounded shadow-lg text-sm max-h-48 overflow-y-auto">
+                                                                    {pathWordSuggestions.map((s, i) => (
+                                                                        <button key={i} className="w-full text-left px-3 py-1.5 hover:bg-blue-50 flex gap-2 items-baseline"
+                                                                            onMouseDown={e => { e.preventDefault();
+                                                                                setPathTargetRowid(s.rowid);
+                                                                                setPathTargetIli(s.form);
+                                                                                setPathWordSuggestions([]);
+                                                                            }}>
+                                                                            <span className="font-medium text-gray-800">{s.form}</span>
+                                                                            <span className="text-gray-400 italic text-xs">{getPosName(s.pos)}</span>
+                                                                            {s.def && <span className="text-gray-500 truncate text-xs">{s.def.length > 60 ? s.def.slice(0,60)+'…' : s.def}</span>}
+                                                                        </button>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                        </div>
                                                         {targetLabel && <span className="text-sm text-gray-600">{targetLabel.form}{<LangBadge lang={targetLabel.lang} currentLang={definitionLanguage} />}</span>}
-                                                        {pathTargetIli && !pathTargetRowid && <span className="text-xs text-gray-400 italic">not found</span>}
+                                                        {pathTargetIli && !pathTargetRowid && pathWordSuggestions.length === 0 && <span className="text-xs text-gray-400 italic">not found</span>}
                                                         <button
                                                             onClick={() => pathTargetRowid && runPath(pathTargetRowid)}
                                                             disabled={!pathTargetRowid}
