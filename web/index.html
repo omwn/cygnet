@@ -762,6 +762,8 @@
             const hoveredNodeRef = useRef(null);
             const nodeSizeCache = useRef(new Map());
             const MAX_CACHE_SIZE = 200;
+            const tooltipTimerRef = useRef(null);
+            const [conceptTooltip, setConceptTooltip] = useState(null); // { id, x, y }
 
             const addToCache = (key, value) => {
                 const cache = nodeSizeCache.current;
@@ -1357,6 +1359,27 @@
             };
 
             // Navigation handlers
+            const conceptHref = (id) => `#/search?concept=${id}`;
+            const senseHref = (id) => `#/search?sense=${id}`;
+            const onConceptLinkClick = (e, id) => {
+                if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+                e.preventDefault();
+                handleConceptClick(id);
+            };
+
+            const showTooltip = (id, e) => {
+                if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+                const x = e.clientX, y = e.clientY;
+                tooltipTimerRef.current = setTimeout(() => {
+                    if (!loadedConcepts[id.toString()]) loadConcept(id.toString());
+                    setConceptTooltip({ id: parseInt(id), x, y });
+                }, 300);
+            };
+            const hideTooltip = () => {
+                if (tooltipTimerRef.current) { clearTimeout(tooltipTimerRef.current); tooltipTimerRef.current = null; }
+                setConceptTooltip(null);
+            };
+
             const handleConceptClick = (conceptId) => {
                 nodeSizeCache.current.clear();
                 setSelectedConcept(conceptId.toString());
@@ -1977,7 +2000,7 @@
                                 </div>
                                 <div className="relative pb-0" ref={settingsRef}>
                                     <button onClick={() => setSettingsOpen(o => !o)}
-                                        title="Settings"
+                                        title="Settings" aria-label="Settings"
                                         className={`px-3 py-2 rounded-t-lg border-b-2 transition-colors relative ${settingsOpen ? 'bg-gray-50 border-blue-500 text-blue-700' : 'border-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-50'}`}>
                                         ⚙
                                         {hasActiveSettings && <span className="absolute top-1.5 right-1 w-1.5 h-1.5 bg-blue-500 rounded-full" />}
@@ -2246,7 +2269,11 @@
                                                                                                                     <strong className="text-base">{sense.l}<sub>{sense.ind}</sub></strong>
                                                                                                                     {renderPronunciations(sense.p)}
                                                                                                                 </div>
-                                                                                                                <div onClick={(e) => { e.stopPropagation(); handleConceptClick(group.conceptId); }}
+                                                                                                                <a href={conceptHref(group.conceptId)}
+                                                                                                                    onClick={(e) => { e.stopPropagation(); onConceptLinkClick(e, group.conceptId); }}
+                                                                                                                    onMouseEnter={e => showTooltip(group.conceptId, e)}
+                                                                                                                    onMouseLeave={hideTooltip}
+                                                                                                                    style={{textDecoration:'none',color:'inherit'}}
                                                                                                                     className="bg-white px-2 py-1 rounded border border-gray-300 hover:border-blue-400 hover:shadow-sm transition-all text-left cursor-pointer flex-shrink concept-inner flex items-start gap-2">
                                                                                                                     <span className="text-base flex-1">
                                                                                                                         {(() => { const li = getConceptLabel(parseInt(group.conceptId), definitionLanguage); return li ? <><span className="font-semibold text-gray-800">{li.form}</span>{<LangBadge lang={li.lang} currentLang={definitionLanguage} ml="ml-0.5" />}{' · '}</> : null; })()}
@@ -2269,7 +2296,7 @@
                                                                                                                             </a>
                                                                                                                         );
                                                                                                                     })()}
-                                                                                                                </div>
+                                                                                                                </a>
                                                                                                             </div>
                                                                                                             {hasExtra && (
                                                                                                                 <div className="text-gray-500 text-sm pt-1 flex-shrink-0">
@@ -2379,7 +2406,7 @@
                                             <div className="mb-4 flex gap-4 items-start">
                                                 <div className="flex-1">
                                                     <p className="text-base">
-                                                        {conceptLabel && <><span className="font-medium">{conceptLabel}</span>{' · '}</>}<span className="text-gray-600 italic">{getPosName(concept.oc)}</span>{isCoreConcept && <span title="one of the 4960 core concepts" className="ml-1 cursor-help">✪</span>}{' · '}
+                                                        {conceptLabel && <><span className="font-medium">{conceptLabel}</span>{' · '}</>}<span className="text-gray-600 italic">{getPosName(concept.oc)}</span>{isCoreConcept && <span title="widely-known concept (one of 4960 OMWN core concepts)" className="ml-1 cursor-help">✪</span>}{' · '}
                                                         {concept.da ? renderDefinitionWithLinks(mainDef, concept.da) : mainDef}
                                                         {<LangBadge lang={shownLang} currentLang={definitionLanguage} />}
                                                         {concept.dr?.[shownLang] && renderProvenance('definitions', concept.dr[shownLang])}
@@ -2502,11 +2529,14 @@
                                                                         const li = getConceptLabel(parseInt(rel.to), definitionLanguage);
                                                                         return (
                                                                             <span key={rel.to} className="inline-flex items-baseline gap-0.5">
-                                                                                <button onClick={() => handleConceptClick(rel.to)}
+                                                                                <a href={conceptHref(rel.to)}
+                                                                                    onClick={e => onConceptLinkClick(e, rel.to)}
+                                                                                    onMouseEnter={e => showTooltip(rel.to, e)}
+                                                                                    onMouseLeave={hideTooltip}
                                                                                     className="text-blue-600 hover:underline">
                                                                                     {li?.form || `#${rel.to}`}
                                                                                     {<LangBadge lang={li?.lang} currentLang={definitionLanguage} ml="ml-0.5" />}
-                                                                                </button>
+                                                                                </a>
                                                                                 {renderCompactProvenance('synsets', rel.to)}
                                                                             </span>
                                                                         );
@@ -2622,12 +2652,14 @@
                                                                         {i > 0 && step.rel && (
                                                                             <span className="text-gray-400 text-xs italic whitespace-nowrap">—{getRelLabel(step.rel)}→</span>
                                                                         )}
-                                                                        <button
-                                                                            onClick={() => handleConceptClick(step.node)}
+                                                                        <a href={conceptHref(step.node)}
+                                                                            onClick={e => onConceptLinkClick(e, step.node)}
+                                                                            onMouseEnter={e => showTooltip(step.node, e)}
+                                                                            onMouseLeave={hideTooltip}
                                                                             className={`px-1.5 py-0.5 rounded text-xs border ${step.node === parseInt(selectedConcept) ? 'bg-blue-100 border-blue-400 text-blue-800 font-semibold' : 'bg-white border-gray-300 text-blue-600 hover:border-blue-400'}`}>
                                                                             {li?.form || `#${step.node}`}
                                                                             {<LangBadge lang={li?.lang} currentLang={definitionLanguage} ml="ml-0.5" />}
-                                                                        </button>
+                                                                        </a>
                                                                     </React.Fragment>
                                                                 );
                                                             })}
@@ -2711,7 +2743,22 @@
                                             )}
                                             <div className="mb-4">
                                                 <h3 className="font-bold mb-2">Concept:</h3>
-                                                <button onClick={() => handleConceptClick(sense.c)} className="text-blue-600 hover:underline">{sense.c}</button>
+                                                {(() => {
+                                                    const cid = sense.c?.toString();
+                                                    const li = cid ? getConceptLabel(parseInt(cid), definitionLanguage) : null;
+                                                    const cd = cid ? (getConceptData(cid) || loadConcept(cid)) : null;
+                                                    const [def] = cd ? selectDef(cd.d, definitionLanguage, '') : [''];
+                                                    return (
+                                                        <a href={conceptHref(sense.c)}
+                                                            onClick={e => onConceptLinkClick(e, sense.c)}
+                                                            onMouseEnter={e => showTooltip(sense.c, e)}
+                                                            onMouseLeave={hideTooltip}
+                                                            className="text-blue-600 hover:underline">
+                                                            {li?.form || sense.c}
+                                                            {li && <span className="text-gray-500 font-normal"> · <span className="italic">{getPosName(cd?.oc)}</span>{def ? ' · ' + (def.length > 100 ? def.slice(0,100)+'…' : def) : ''}</span>}
+                                                        </a>
+                                                    );
+                                                })()}
                                             </div>
                                             {sense.ex && sense.ex.length > 0 && (
                                                 <div className="mb-4">
@@ -2727,12 +2774,19 @@
                                                 <div className="mb-4">
                                                     <h3 className="font-bold mb-2">Sense Relations:</h3>
                                                     <div className="ml-2 space-y-1 text-sm">
-                                                        {sense.sr.map((rel, i) => (
-                                                            <div key={i}>
-                                                                <span className="text-gray-600">{getRelLabel(rel.t)}:</span>{' '}
-                                                                <button onClick={() => handleSenseClick(rel.to)} className="text-blue-600 hover:underline">{rel.to}</button>
-                                                            </div>
-                                                        ))}
+                                                        {sense.sr.map((rel, i) => {
+                                                            const toSense = loadedSenses[rel.to.toString()] ?? querySense(parseInt(rel.to));
+                                                            return (
+                                                                <div key={i}>
+                                                                    <span className="text-gray-600">{getRelLabel(rel.t)}:</span>{' '}
+                                                                    <a href={senseHref(rel.to)}
+                                                                        onClick={e => { if (!e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) { e.preventDefault(); handleSenseClick(rel.to); } }}
+                                                                        className="text-blue-600 hover:underline">
+                                                                        {toSense?.l || rel.to}
+                                                                    </a>
+                                                                </div>
+                                                            );
+                                                        })}
                                                     </div>
                                                 </div>
                                             )}
@@ -2979,11 +3033,14 @@
                                                             <td className="px-3 py-2 border border-gray-200">
                                                                 <div className="flex flex-wrap gap-x-3 gap-y-0.5">
                                                                     {(byPos[row.pos] || []).map((item, j) => (
-                                                                        <button key={j}
-                                                                            onClick={() => { handleConceptClick(item.synset_rowid.toString()); setActiveTab('browser'); }}
+                                                                        <a key={j}
+                                                                            href={conceptHref(item.synset_rowid)}
+                                                                            onClick={e => { onConceptLinkClick(e, item.synset_rowid); setActiveTab('browser'); }}
+                                                                            onMouseEnter={e => showTooltip(item.synset_rowid, e)}
+                                                                            onMouseLeave={hideTooltip}
                                                                             className="text-blue-600 hover:underline">
                                                                             {item.form}
-                                                                        </button>
+                                                                        </a>
                                                                     ))}
                                                                 </div>
                                                             </td>
@@ -3017,9 +3074,9 @@
                                                             <td className="px-3 py-2 border border-gray-200 text-xs">
                                                                 {srcLabel && tgtLabel ? (
                                                                     <>
-                                                                        <button onClick={() => { handleConceptClick(row.ex_src_rowid.toString()); setActiveTab('browser'); }} className="text-blue-600 hover:underline">{srcLabel}</button>
+                                                                        <a href={conceptHref(row.ex_src_rowid)} onClick={e => { onConceptLinkClick(e, row.ex_src_rowid); setActiveTab('browser'); }} onMouseEnter={e => showTooltip(row.ex_src_rowid, e)} onMouseLeave={hideTooltip} className="text-blue-600 hover:underline">{srcLabel}</a>
                                                                         {' → '}
-                                                                        <button onClick={() => { handleConceptClick(row.ex_tgt_rowid.toString()); setActiveTab('browser'); }} className="text-blue-600 hover:underline">{tgtLabel}</button>
+                                                                        <a href={conceptHref(row.ex_tgt_rowid)} onClick={e => { onConceptLinkClick(e, row.ex_tgt_rowid); setActiveTab('browser'); }} onMouseEnter={e => showTooltip(row.ex_tgt_rowid, e)} onMouseLeave={hideTooltip} className="text-blue-600 hover:underline">{tgtLabel}</a>
                                                                     </>
                                                                 ) : <span className="text-gray-400">—</span>}
                                                             </td>
@@ -3125,6 +3182,26 @@
                         </div>
                     </footer>
 
+                {conceptTooltip && (() => {
+                    const ct = conceptTooltip;
+                    const concept = getConceptData(ct.id.toString());
+                    if (!concept) return null;
+                    const [def] = selectDef(concept.d, definitionLanguage, '');
+                    const li = getConceptLabel(ct.id, definitionLanguage);
+                    const allSenseIds = concept.s ? Object.values(concept.s).flat().map(s => s.toString()) : [];
+                    const firstEx = allSenseIds.map(sid => loadedSenses[sid]?.ex?.[0]).find(Boolean);
+                    const left = Math.min(ct.x + 14, window.innerWidth - 300);
+                    const top = ct.y + 16;
+                    return (
+                        <div style={{ position: 'fixed', left, top, zIndex: 9999, maxWidth: 280, pointerEvents: 'none' }}
+                             className="bg-white border border-gray-300 rounded shadow-lg px-3 py-2 text-sm">
+                            {li && <div className="font-semibold text-gray-800">{li.form}</div>}
+                            <div className="text-gray-500 italic text-xs">{getPosName(concept.oc)}</div>
+                            {def && <div className="text-gray-700 mt-1">{def.length > 160 ? def.slice(0, 160) + '…' : def}</div>}
+                            {firstEx && <div className="text-gray-500 italic mt-0.5 text-xs">"{firstEx}"</div>}
+                        </div>
+                    );
+                })()}
                 </div>
             );
         }

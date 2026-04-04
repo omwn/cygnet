@@ -302,7 +302,7 @@ class TestPathFinder:
         ).to_be_enabled(timeout=5_000)
         page_ready.locator('button', has_text='Find path').click()
         expect(
-            page_ready.locator('button', has_text='animal')
+            page_ready.locator('a, button').filter(has_text='animal')
         ).to_be_visible(timeout=5_000)
 
     def test_path_includes_start_and_end(self, page_ready: Page):
@@ -313,7 +313,7 @@ class TestPathFinder:
             page_ready.locator('button', has_text='Find path')
         ).to_be_enabled(timeout=5_000)
         page_ready.locator('button', has_text='Find path').click()
-        page_ready.locator('button', has_text='animal').wait_for(timeout=5_000)
+        page_ready.locator('a, button').filter(has_text='animal').wait_for(timeout=5_000)
         content = page_ready.content()
         assert 'entity' in content
 
