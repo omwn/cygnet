@@ -916,3 +916,132 @@ class TestHeaderCustomization:
         link = page_branding.locator('header a', has_text='TestWN')
         expect(link).to_be_visible()
         assert link.get_attribute('href') == 'https://example.org/testwn'
+
+
+# ---------------------------------------------------------------------------
+# Wordnet summary page (issue 17)
+# ---------------------------------------------------------------------------
+
+def _open_wordnet_summary(page: Page, label: str = 'Test English WordNet') -> None:
+    """Navigate to the Wordnets tab and open the summary for *label*."""
+    page.locator('button', has_text='Wordnets').click()
+    page.wait_for_selector('text=Contributing Wordnets', timeout=_DB_LOAD_TIMEOUT)
+    row = page.locator('tr', has_text=label)
+    row.locator('button[title="Show wordnet summary"]').click()
+    page.wait_for_selector('[data-testid="wordnet-summary"]', timeout=5_000)
+
+
+class TestWordnetSummary:
+    """Wordnet summary page — basic behaviour (no provenance DB required)."""
+
+    def test_iii_button_opens_summary(self, page_ready: Page):
+        """Clicking ⓘ in the Wordnets table shows the summary page."""
+        _open_wordnet_summary(page_ready)
+        expect(page_ready.locator('[data-testid="wordnet-summary"]')).to_be_visible()
+
+    def test_summary_shows_wordnet_name(self, page_ready: Page):
+        """Summary page heading contains the wordnet label."""
+        _open_wordnet_summary(page_ready)
+        expect(
+            page_ready.locator('[data-testid="wordnet-summary"] h2')
+        ).to_have_text('Test English WordNet')
+
+    def test_summary_shows_version(self, page_ready: Page):
+        """Summary metadata section shows the version field."""
+        _open_wordnet_summary(page_ready)
+        content = page_ready.locator('[data-testid="wordnet-summary"]').text_content()
+        assert '1.0' in content
+
+    def test_summary_shows_concept_count(self, page_ready: Page):
+        """Summary coverage section shows a non-zero Concepts count."""
+        _open_wordnet_summary(page_ready)
+        summary = page_ready.locator('[data-testid="wordnet-summary"]')
+        expect(summary.locator('div', has_text='Concepts').first).to_be_visible()
+
+    def test_summary_shows_sense_count(self, page_ready: Page):
+        """Summary coverage section shows a non-zero Senses count."""
+        _open_wordnet_summary(page_ready)
+        summary = page_ready.locator('[data-testid="wordnet-summary"]')
+        expect(summary.locator('div', has_text='Senses').first).to_be_visible()
+
+    def test_back_button_returns_to_table(self, page_ready: Page):
+        """Clicking '← Back to Wordnets' dismisses the summary and shows the table."""
+        _open_wordnet_summary(page_ready)
+        page_ready.locator('button', has_text='Back to Wordnets').click()
+        expect(
+            page_ready.locator('text=Contributing Wordnets')
+        ).to_be_visible(timeout=5_000)
+        expect(
+            page_ready.locator('[data-testid="wordnet-summary"]')
+        ).not_to_be_visible()
+
+    def test_summary_url_contains_wordnet_code(self, page_ready: Page):
+        """Navigating to a summary updates the URL hash to #/wordnet/<code>."""
+        _open_wordnet_summary(page_ready)
+        page_ready.wait_for_timeout(300)
+        assert '/wordnet/' in page_ready.url
+
+    def test_direct_url_loads_summary(self, page: Page, http_server):
+        """Loading #/wordnet/wn-en directly opens the summary page."""
+        page.goto(http_server + '#/wordnet/wn-en')
+        page.wait_for_selector('input[placeholder*="word"]', timeout=_DB_LOAD_TIMEOUT)
+        expect(
+            page_ready := page.locator('[data-testid="wordnet-summary"]')
+        ).to_be_visible(timeout=5_000)
+
+
+class TestWordnetSummaryWithProvenance:
+    """Wordnet summary page — detailed stats that require the provenance DB."""
+
+    @pytest.fixture()
+    def page_prov(self, page: Page, http_server):
+        """Page with provenance auto-load enabled via localStorage."""
+        page.add_init_script("localStorage.setItem('showProvenance', 'true')")
+        page.goto(http_server)
+        page.wait_for_selector('input[placeholder*="word"]', timeout=_DB_LOAD_TIMEOUT)
+        return page
+
+    def _open_summary(self, page: Page) -> None:
+        _open_wordnet_summary(page)
+        # Wait for provenance-based stats to appear (ILI % card)
+        page.wait_for_selector(
+            '[data-testid="wordnet-summary"] div:has-text("ILI %")',
+            timeout=30_000,
+        )
+
+    def test_pos_table_shown(self, page_prov: Page):
+        """With provenance DB, the summary shows a POS breakdown table."""
+        self._open_summary(page_prov)
+        summary = page_prov.locator('[data-testid="wordnet-summary"]')
+        expect(summary.locator('th', has_text='Part of speech')).to_be_visible()
+
+    def test_pos_table_contains_noun_row(self, page_prov: Page):
+        """POS table includes a Noun row (wn-en has NOUN synsets)."""
+        self._open_summary(page_prov)
+        summary = page_prov.locator('[data-testid="wordnet-summary"]')
+        expect(summary.locator('td', has_text='Noun').first).to_be_visible()
+
+    def test_examples_column_shown(self, page_prov: Page):
+        """With provenance DB, the POS table includes an Examples column."""
+        self._open_summary(page_prov)
+        summary = page_prov.locator('[data-testid="wordnet-summary"]')
+        expect(summary.locator('th', has_text='Examples')).to_be_visible()
+
+    def test_examples_contain_known_lemma(self, page_prov: Page):
+        """At least one known English noun lemma (e.g. 'entity') appears in examples."""
+        self._open_summary(page_prov)
+        summary = page_prov.locator('[data-testid="wordnet-summary"]')
+        content = summary.text_content()
+        assert any(w in content for w in ('entity', 'animal', 'dog', 'brightness', 'dogfish'))
+
+    def test_relations_section_shown(self, page_prov: Page):
+        """With provenance DB, the summary shows a Semantic relations table."""
+        self._open_summary(page_prov)
+        summary = page_prov.locator('[data-testid="wordnet-summary"]')
+        expect(summary.locator('text=Semantic relations')).to_be_visible()
+
+    def test_ili_pct_shown(self, page_prov: Page):
+        """With provenance DB, ILI % card is shown in the coverage section."""
+        self._open_summary(page_prov)
+        summary = page_prov.locator('[data-testid="wordnet-summary"]')
+        expect(summary.locator('div', has_text='ILI %').first).to_be_visible()
