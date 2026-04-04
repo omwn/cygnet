@@ -399,6 +399,23 @@
 
         const _labelCache = {};
         const _summaryCache = {};
+        let _hasCoreTable = null;
+
+        async function readChunksToUint8Array(reader, onProgress) {
+            const chunks = [];
+            let total = 0;
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                chunks.push(value);
+                total += value.length;
+                onProgress?.(total);
+            }
+            const out = new Uint8Array(total);
+            let off = 0;
+            for (const c of chunks) { out.set(c, off); off += c.length; }
+            return out;
+        }
 
         function getConceptLabel(synsetRowid, lang = 'en') {
             const key = `${synsetRowid}-${lang}`;
@@ -497,12 +514,13 @@
         }
 
         function queryWordnetSummary(code, langCode) {
-            if (_summaryCache[code]) return _summaryCache[code];
+            const _cacheKey = `${code}:${langCode}`;
+            if (_summaryCache[_cacheKey]) return _summaryCache[_cacheKey];
             const result = { posStats: null, iliPct: null, defCount: null, exCount: null, examples: [], relDist: [] };
-            if (!_provDb || !_db) { _summaryCache[code] = result; return result; }
+            if (!_provDb || !_db) return result;
             try {
                 const sensesTableRow = cachedExecProv(`SELECT rowid FROM prov_tables WHERE name = 'senses'`)[0];
-                if (!sensesTableRow) { _summaryCache[code] = result; return result; }
+                if (!sensesTableRow) { _summaryCache[_cacheKey] = result; return result; }
                 const sensesTable = sensesTableRow.rowid;
                 const senseRows = cachedExecProv(
                     `SELECT p.item_rowid FROM provenance p
@@ -510,7 +528,7 @@
                      WHERE p.table_rowid = ? AND pr.code = ?`,
                     [sensesTable, code]
                 );
-                if (!senseRows.length) { _summaryCache[code] = result; return result; }
+                if (!senseRows.length) { _summaryCache[_cacheKey] = result; return result; }
 
                 _db.exec(`CREATE TEMP TABLE IF NOT EXISTS _wnsum_senses (id INTEGER PRIMARY KEY)`);
                 _db.exec(`DELETE FROM _wnsum_senses`);
@@ -550,9 +568,7 @@
                 `)[0];
                 if (countRow) { result.defCount = countRow.def_count; result.exCount = countRow.ex_count; }
 
-                const hasCore = cachedExec(
-                    `SELECT 1 FROM sqlite_master WHERE type='table' AND name='core_synsets'`
-                ).length > 0;
+                const hasCore = !!_hasCoreTable;
                 const coreExJoin = hasCore ? 'LEFT JOIN core_synsets cs ON cs.synset_rowid = syn.rowid' : '';
                 const coreExOrder = hasCore ? '(cs.synset_rowid IS NULL),' : '';
                 const coreRelJoin = hasCore ? 'LEFT JOIN core_synsets cs ON cs.synset_rowid = sr.source_rowid' : '';
@@ -621,7 +637,7 @@
             } catch (e) {
                 console.error('queryWordnetSummary error:', e);
             }
-            _summaryCache[code] = result;
+            _summaryCache[_cacheKey] = result;
             return result;
         }
 
@@ -879,12 +895,12 @@
                             const serverMtime = response.headers.get('last-modified') || response.headers.get('etag') || '';
                             const compressedTotal = parseInt(response.headers.get('content-length') || '0');
 
-                            // Detect mobile/limited devices: use coarse pointer (touch-primary)
+                            // Touch-primary devices store compressed (~130 MB); desktops store
+                            // uncompressed (~340 MB) so new tabs can load without re-decompressing.
                             const isMobile = window.matchMedia('(hover: none) and (pointer: coarse)').matches;
 
                             if (isMobile) {
-                                // Mobile: download raw compressed bytes, decompress for this session,
-                                // cache compressed (~130 MB) to save device storage.
+                                // Mobile: cache compressed to save device storage.
                                 setDbProgress('Downloading...');
                                 const compressedBuf = await response.arrayBuffer();
                                 setDbProgress('Decompressing...');
@@ -893,17 +909,7 @@
                                 const reader = ds.readable.getReader();
                                 writer.write(new Uint8Array(compressedBuf));
                                 writer.close();
-                                const chunks = [];
-                                let loaded = 0;
-                                while (true) {
-                                    const { done, value } = await reader.read();
-                                    if (done) break;
-                                    chunks.push(value);
-                                    loaded += value.length;
-                                }
-                                buf = new Uint8Array(loaded);
-                                let offset = 0;
-                                for (const chunk of chunks) { buf.set(chunk, offset); offset += chunk.length; }
+                                buf = await readChunksToUint8Array(reader);
                                 setDbProgress('Caching for next visit...');
                                 try {
                                     await idbPut('db', compressedBuf);
@@ -912,28 +918,17 @@
                                     if (serverMtime) await idbPut('db-mtime', serverMtime);
                                 } catch (e) { console.warn('IndexedDB cache write failed:', e); }
                             } else {
-                                // Desktop: stream-decompress and cache uncompressed (~340 MB)
-                                // so new tabs load instantly from local storage.
+                                // Desktop: stream-decompress and cache uncompressed.
                                 const ds = new DecompressionStream('gzip');
-                                const decompressedStream = response.body.pipeThrough(ds);
-                                const reader = decompressedStream.getReader();
-                                let loaded = 0;
-                                const chunks = [];
-                                while (true) {
-                                    const { done, value } = await reader.read();
-                                    if (done) break;
-                                    chunks.push(value);
-                                    loaded += value.length;
+                                const reader = response.body.pipeThrough(ds).getReader();
+                                buf = await readChunksToUint8Array(reader, (loaded) => {
                                     if (compressedTotal > 0) {
                                         setDbProgress('Downloading & decompressing...');
                                         setDownloadProgress({ loaded, total: null, compressedTotal });
                                     } else {
                                         setDbProgress(`Decompressing... ${(loaded/1048576).toFixed(0)} MB`);
                                     }
-                                }
-                                buf = new Uint8Array(loaded);
-                                let offset = 0;
-                                for (const chunk of chunks) { buf.set(chunk, offset); offset += chunk.length; }
+                                });
                                 setDownloadProgress(null);
                                 setDbProgress('Caching for next visit...');
                                 try {
@@ -948,6 +943,7 @@
                         setDbProgress('Opening database...');
                         _SQL = SQL;
                         _db = new SQL.Database(buf);
+                        _hasCoreTable = cachedExec(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='core_synsets'`).length > 0;
                         buildLangNames();
                         setAllLanguages(getAllLanguages());
                         setAllResources(queryResources());
@@ -1409,6 +1405,11 @@
                 if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
                 e.preventDefault();
                 handleConceptClick(id);
+            };
+            const onSenseLinkClick = (e, id) => {
+                if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+                e.preventDefault();
+                handleSenseClick(id);
             };
 
             const showTooltip = (id, e) => {
@@ -2439,9 +2440,7 @@
 
                                     const conceptLabelInfo = getConceptLabel(parseInt(selectedConcept), definitionLanguage);
                                     const conceptLabel = conceptLabelInfo?.form || '';
-                                    const isCoreConcept = _db && cachedExec(
-                                        `SELECT 1 FROM sqlite_master WHERE type='table' AND name='core_synsets'`
-                                    ).length > 0 && cachedExec(
+                                    const isCoreConcept = _hasCoreTable && cachedExec(
                                         'SELECT 1 FROM core_synsets WHERE synset_rowid = ?',
                                         [parseInt(selectedConcept)]
                                     ).length > 0;
@@ -2876,7 +2875,7 @@
                                                                 <div key={i}>
                                                                     <span className="text-gray-600">{getRelLabel(rel.t)}:</span>{' '}
                                                                     <a href={senseHref(rel.to)}
-                                                                        onClick={e => { if (!e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) { e.preventDefault(); handleSenseClick(rel.to); } }}
+                                                                        onClick={e => onSenseLinkClick(e, rel.to)}
                                                                         className="text-blue-600 hover:underline">
                                                                         {toSense?.l || rel.to}
                                                                     </a>
