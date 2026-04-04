@@ -101,6 +101,10 @@ def main() -> None:
     print('\nPhase 6: Inserting resource metadata...')
     builder.insert_resources()
 
+    print('\nPhase 7: Loading core synsets...')
+    n_core = builder.load_core_synsets()
+    print(f'  {n_core:,} core synsets loaded')
+
     print('\nFinalising...')
     builder.finalize(db_path, prov_db_path)
     print('\nDone.')

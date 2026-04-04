@@ -33,6 +33,7 @@ All code lives in the single `<script type="text/babel">` block.
 | `querySense(rowid)` | Runs SQL; returns sense data object |
 | `queryConcept(rowid)` | Runs SQL; returns synset data including `cr` (concept relations) |
 | `queryResources()` | Returns all wordnet resources for the Wordnets tab |
+| `queryWordnetSummary(code, langCode)` | Returns per-wordnet statistics (POS breakdown, ILI coverage, example lemmas, relation distribution) for the summary page; results are session-cached in `_summaryCache` |
 | `queryStats()` | Returns aggregate counts for the About tab |
 | `queryProvenance(table, rowid)` | Returns provenance rows for a given item |
 | `detectSearchMode(term)` | Classifies a search string as `exact`, `glob`, `ili`, or `def` |
@@ -97,7 +98,27 @@ Each entry maps a **DB relation name** to its display metadata:
 | `browser` | Browser | Search + concept/sense view |
 | `about` | About | Download links, citation guidance, language data, ARASAAC info |
 | `publications` | Publications | Key papers + wordnet citations from DB |
-| `wordnets` | Wordnets | Per-resource table with concept/sense counts, licences, citations |
+| `wordnets` | Wordnets | Per-resource table; clicking ⓘ opens a per-wordnet summary page |
+
+### Wordnet summary page
+
+Clicking the ⓘ button on any row of the Wordnets table sets `selectedWordnet` to that resource's code and renders a summary page in place of the table.  The URL updates to `#/wordnet/<code>`.
+
+The summary page shows:
+- **Metadata** — version, URL, licence, citation, and any extra fields from the resource's `extra` JSON column
+- **Coverage** — concept/sense counts (from `resources` table) plus, when the provenance DB is loaded, ILI %, definition count, example count, and a POS breakdown table with up to 5 example lemmas per part of speech (ordered: core synsets first, then lower-cased/non-ASCII forms, then by sense index)
+- **Semantic relations** — canonical relations only (inverse short codes starting with `-` are excluded), with count and a clickable example pair (`src → tgt`); example selection prefers core synsets and pairs where the target has a lemma in the wordnet's language
+
+Data is computed by `queryWordnetSummary(code, langCode)` and cached for the session in `_summaryCache`.  The function queries the provenance DB for sense rowids belonging to the resource, bulk-inserts them into a temp table `_wnsum_senses` in the main DB, then runs the aggregate queries cross-DB.
+
+### Core synsets (`core_synsets` table)
+
+The DB schema includes a `core_synsets` table populated from `cyg/data/wn-core-ili.tab` (4 960 ILI codes from the OMWN core set).  It is used in two places:
+
+1. **Summary page** — core synsets are preferred when selecting example lemmas and relation pairs
+2. **Concept view** — if the open concept is a core synset, a ✪ symbol is shown after the POS label with the tooltip "one of the 4960 core concepts"
+
+Both usages fall back gracefully if the table is absent (older DBs built before this table was added).
 
 ---
 

@@ -149,6 +149,7 @@ def build_test_db(db_path: Path, prov_path: Path,
     b.remove_orphans()
     b.compute_sense_indices()
     b.insert_resources()
+    b.load_core_synsets()
 
     # Insert known ARASAAC pictogram IDs for UI tests:
     #   dog (i3)    → id 2253  (direct image test)

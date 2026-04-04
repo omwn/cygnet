@@ -306,6 +306,24 @@ The `extra` column holds any LMF attributes not covered by the named
 columns (e.g. `dc:publisher`, `dc:description` from OdeNet), serialised
 as a JSON object.
 
+### core_synsets
+
+Marks the 4 960 synsets belonging to the OMWN core concept set (those with
+an ILI listed in `cyg/data/wn-core-ili.tab`).  Used by the web UI to prefer
+well-known concepts when selecting example lemmas and relation pairs on the
+per-wordnet summary page, and to display a ✪ badge in the concept view.
+
+```sql
+CREATE TABLE core_synsets (
+    synset_rowid INTEGER NOT NULL REFERENCES synsets(rowid)
+);
+CREATE INDEX idx_core_synsets ON core_synsets(synset_rowid);
+```
+
+Populated by `MergeBuilder.load_core_synsets()` during the build pipeline
+(phase 7, after `insert_resources()`).  The table is absent in DBs built
+before this feature was added; the UI handles this gracefully.
+
 ## Example queries
 
 ### Look up a word

@@ -398,6 +398,8 @@
         }
 
         const _labelCache = {};
+        const _summaryCache = {};
+
         function getConceptLabel(synsetRowid, lang = 'en') {
             const key = `${synsetRowid}-${lang}`;
             if (_labelCache[key] !== undefined) return _labelCache[key];
@@ -494,6 +496,135 @@
             );
         }
 
+        function queryWordnetSummary(code, langCode) {
+            if (_summaryCache[code]) return _summaryCache[code];
+            const result = { posStats: null, iliPct: null, defCount: null, exCount: null, examples: [], relDist: [] };
+            if (!_provDb || !_db) { _summaryCache[code] = result; return result; }
+            try {
+                const sensesTableRow = cachedExecProv(`SELECT rowid FROM prov_tables WHERE name = 'senses'`)[0];
+                if (!sensesTableRow) { _summaryCache[code] = result; return result; }
+                const sensesTable = sensesTableRow.rowid;
+                const senseRows = cachedExecProv(
+                    `SELECT p.item_rowid FROM provenance p
+                     JOIN prov_resources pr ON p.resource_rowid = pr.rowid
+                     WHERE p.table_rowid = ? AND pr.code = ?`,
+                    [sensesTable, code]
+                );
+                if (!senseRows.length) { _summaryCache[code] = result; return result; }
+
+                _db.exec(`CREATE TEMP TABLE IF NOT EXISTS _wnsum_senses (id INTEGER PRIMARY KEY)`);
+                _db.exec(`DELETE FROM _wnsum_senses`);
+                const rowids = senseRows.map(r => r.item_rowid);
+                for (let i = 0; i < rowids.length; i += 500) {
+                    const vals = rowids.slice(i, i + 500).map(r => `(${r})`).join(',');
+                    _db.exec(`INSERT OR IGNORE INTO _wnsum_senses VALUES ${vals}`);
+                }
+
+                const posRows = cachedExec(`
+                    WITH src AS (
+                        SELECT DISTINCT s.synset_rowid
+                        FROM senses s WHERE s.rowid IN (SELECT id FROM _wnsum_senses)
+                    )
+                    SELECT syn.pos, COUNT(*) AS cnt,
+                           SUM(CASE WHEN syn.ili IS NOT NULL THEN 1 ELSE 0 END) AS with_ili
+                    FROM src JOIN synsets syn ON syn.rowid = src.synset_rowid
+                    GROUP BY syn.pos ORDER BY cnt DESC
+                `);
+                if (posRows.length) {
+                    result.posStats = posRows.map(r => ({ pos: r.pos, cnt: r.cnt, withIli: r.with_ili }));
+                    const total = posRows.reduce((s, r) => s + r.cnt, 0);
+                    const withIli = posRows.reduce((s, r) => s + r.with_ili, 0);
+                    result.iliPct = total > 0 ? Math.round(100 * withIli / total) : 0;
+                }
+
+                const countRow = cachedExec(`
+                    WITH src AS (
+                        SELECT DISTINCT s.synset_rowid
+                        FROM senses s WHERE s.rowid IN (SELECT id FROM _wnsum_senses)
+                    )
+                    SELECT
+                        (SELECT COUNT(*) FROM definitions d
+                         WHERE d.synset_rowid IN (SELECT synset_rowid FROM src)) AS def_count,
+                        (SELECT COUNT(*) FROM sense_examples se
+                         WHERE se.sense_rowid IN (SELECT id FROM _wnsum_senses)) AS ex_count
+                `)[0];
+                if (countRow) { result.defCount = countRow.def_count; result.exCount = countRow.ex_count; }
+
+                const hasCore = cachedExec(
+                    `SELECT 1 FROM sqlite_master WHERE type='table' AND name='core_synsets'`
+                ).length > 0;
+                const coreExJoin = hasCore ? 'LEFT JOIN core_synsets cs ON cs.synset_rowid = syn.rowid' : '';
+                const coreExOrder = hasCore ? '(cs.synset_rowid IS NULL),' : '';
+                const coreRelJoin = hasCore ? 'LEFT JOIN core_synsets cs ON cs.synset_rowid = sr.source_rowid' : '';
+                const coreRelOrder = hasCore ? '(cs.synset_rowid IS NULL),' : '';
+
+                const lang = langCode || 'en';
+                result.examples = cachedExec(`
+                    WITH src_senses AS (
+                        SELECT s.rowid, s.synset_rowid, s.sense_index, s.entry_rowid
+                        FROM senses s WHERE s.rowid IN (SELECT id FROM _wnsum_senses)
+                    ),
+                    ranked AS (
+                        SELECT syn.pos, f.form, syn.rowid AS synset_rowid,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY syn.pos
+                                   ORDER BY ${coreExOrder}
+                                            (CASE WHEN UNICODE(SUBSTR(f.form,1,1)) BETWEEN 97 AND 122
+                                                       OR UNICODE(SUBSTR(f.form,1,1)) >= 128 THEN 0 ELSE 1 END),
+                                            ss.sense_index, f.form
+                               ) AS rn
+                        FROM src_senses ss
+                        JOIN synsets syn ON syn.rowid = ss.synset_rowid
+                        JOIN entries e ON e.rowid = ss.entry_rowid
+                        JOIN forms f ON f.entry_rowid = e.rowid AND f.rank = 0
+                        JOIN languages l ON l.rowid = e.language_rowid
+                        ${coreExJoin}
+                        WHERE l.code = ?
+                    )
+                    SELECT pos, form, synset_rowid FROM ranked WHERE rn <= 5 ORDER BY pos, rn
+                `, [lang]);
+
+                const inverseTypes = new Set(
+                    Object.entries(_relConfig)
+                        .filter(([, e]) => e.short?.startsWith('-'))
+                        .map(([name]) => name)
+                );
+                const relRows = cachedExec(`
+                    WITH src AS (
+                        SELECT DISTINCT s.synset_rowid
+                        FROM senses s WHERE s.rowid IN (SELECT id FROM _wnsum_senses)
+                    ),
+                    rels AS (
+                        SELECT rt.type, sr.source_rowid, sr.target_rowid,
+                               COUNT(*) OVER (PARTITION BY rt.type) AS cnt,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY rt.type
+                                   ORDER BY ${coreRelOrder}
+                                            (CASE WHEN NOT EXISTS(
+                                                SELECT 1 FROM senses s2
+                                                JOIN entries e2 ON e2.rowid = s2.entry_rowid
+                                                JOIN languages l2 ON l2.rowid = e2.language_rowid
+                                                WHERE s2.synset_rowid = sr.target_rowid AND l2.code = ?
+                                            ) THEN 1 ELSE 0 END),
+                                            sr.rowid
+                               ) AS rn
+                        FROM synset_relations sr
+                        JOIN src ON src.synset_rowid = sr.source_rowid
+                        JOIN relation_types rt ON rt.rowid = sr.type_rowid
+                        ${coreRelJoin}
+                    )
+                    SELECT type, cnt, source_rowid AS ex_src_rowid, target_rowid AS ex_tgt_rowid
+                    FROM rels WHERE rn = 1
+                    ORDER BY cnt DESC
+                `, [lang]);
+                result.relDist = relRows.filter(row => !inverseTypes.has(row.type));
+            } catch (e) {
+                console.error('queryWordnetSummary error:', e);
+            }
+            _summaryCache[code] = result;
+            return result;
+        }
+
         // ========== INDEXEDDB CACHE ==========
         const IDB_NAME = 'cygnet-cache';
         const IDB_STORE = 'blobs';
@@ -579,9 +710,7 @@
             const [showPronunciation, setShowPronunciation] = useState(() =>
                 localStorage.getItem('showPronunciation') !== 'false'
             );
-            const [highlightedResource, setHighlightedResource] = useState(null);
-            const highlightedRowRef = useRef(null);
-            const [infoPopup, setInfoPopup] = useState(null);
+            const [selectedWordnet, setSelectedWordnet] = useState(null);
             const [searchTerm, setSearchTerm] = useState('');
             const [currentSearch, setCurrentSearch] = useState('');
             const [currentSearchSenseIds, setCurrentSearchSenseIds] = useState(new Set());
@@ -698,7 +827,7 @@
                                     stale = true;
                                 } else {
                                     try {
-                                        const head = await fetch(DB_BASE + dbFile, { method: 'HEAD' });
+                                        const head = await fetch(DB_BASE + dbFile, { method: 'HEAD', cache: 'no-cache' });
                                         const serverMtime = head.headers.get('last-modified') || head.headers.get('etag');
                                         const cachedMtime = await idbGet('db-mtime');
                                         if (serverMtime && serverMtime !== cachedMtime) stale = true;
@@ -723,7 +852,7 @@
                         if (!buf) {
                             // Fetch compressed database
                             setDbProgress('Downloading database...');
-                            const response = await fetch(DB_BASE + dbFile);
+                            const response = await fetch(DB_BASE + dbFile, { cache: 'reload' });
                             if (!response.ok) throw new Error(`Failed to fetch database: ${response.status}`);
                             const serverMtime = response.headers.get('last-modified') || response.headers.get('etag') || '';
                             const compressedTotal = parseInt(response.headers.get('content-length') || '0');
@@ -981,7 +1110,7 @@
                     }
 
                     if (!buf) {
-                        const response = await fetch(DB_BASE + provFile);
+                        const response = await fetch(DB_BASE + provFile, { cache: 'reload' });
                         if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`);
                         const ds = new DecompressionStream('gzip');
                         const reader = response.body.pipeThrough(ds).getReader();
@@ -1021,12 +1150,6 @@
             }, [definitionLanguage]);
 
             useEffect(() => {
-                if (activeTab === 'wordnets' && highlightedResource && highlightedRowRef.current) {
-                    highlightedRowRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                }
-            }, [activeTab, highlightedResource]);
-
-            useEffect(() => {
                 if (view === 'concept') window.scrollTo(0, 0);
             }, [view, selectedConcept]);
 
@@ -1037,7 +1160,9 @@
                 if (isPopStateRef.current) { isPopStateRef.current = false; return; }
 
                 let newUrl;
-                if (activeTab !== 'browser') {
+                if (activeTab === 'wordnets' && selectedWordnet) {
+                    newUrl = `#/wordnet/${selectedWordnet}`;
+                } else if (activeTab !== 'browser') {
                     newUrl = `#/${activeTab}`;
                 } else if (view === 'search') {
                     const params = new URLSearchParams();
@@ -1056,7 +1181,7 @@
                 if (newUrl && newUrl !== window.location.hash) {
                     window.history.pushState({}, '', newUrl);
                 }
-            }, [view, currentSearch, languageFilter, posFilter, senseFilter, selectedConcept, selectedSense, dbReady, activeTab, definitionLanguage]);
+            }, [view, currentSearch, languageFilter, posFilter, senseFilter, selectedConcept, selectedSense, dbReady, activeTab, definitionLanguage, selectedWordnet]);
 
             // Handle popstate
             useEffect(() => {
@@ -1065,8 +1190,13 @@
                     const hash = window.location.hash.slice(1);
                     const [path, queryString] = hash.split('?');
 
-                    if (['about', 'publications', 'wordnets'].includes(path?.replace('/', ''))) {
-                        setActiveTab(path.replace('/', ''));
+                    const tabPath = path?.replace('/', '');
+                    if (['about', 'publications', 'wordnets'].includes(tabPath)) {
+                        setActiveTab(tabPath);
+                        setSelectedWordnet(null);
+                    } else if (tabPath?.startsWith('wordnet/')) {
+                        setActiveTab('wordnets');
+                        setSelectedWordnet(tabPath.slice('wordnet/'.length));
                     } else {
                         setActiveTab('browser');
                         const params = new URLSearchParams(queryString || '');
@@ -1341,7 +1471,7 @@
                             <span key={s.code + (s.version || '')}>
                                 {i > 0 && ', '}
                                 <button
-                                    onClick={() => { setHighlightedResource(s.code); setActiveTab('wordnets'); }}
+                                    onClick={() => { setSelectedWordnet(s.code); setActiveTab('wordnets'); }}
                                     className="hover:text-blue-500 hover:underline"
                                 >{s.code}{s.version ? `:${s.version}` : ''}</button>
                             </span>
@@ -1358,14 +1488,14 @@
                 const rest = rows.slice(1);
                 return (
                     <span className="relative inline-block group text-xs text-gray-400 ml-1 cursor-default">
-                        (<button onClick={() => { setHighlightedResource(first.code); setActiveTab('wordnets'); }}
+                        (<button onClick={() => { setSelectedWordnet(first.code); setActiveTab('wordnets'); }}
                             className="hover:text-blue-500 hover:underline">
                             {first.code}{first.version ? `:${first.version}` : ''}
                         </button>{rest.length > 0 && <span> +{rest.length}</span>})
                         {rest.length > 0 && (
                             <span className="absolute bottom-full left-0 hidden group-hover:flex flex-col bg-white border border-gray-200 rounded shadow-lg text-xs p-1.5 z-10 whitespace-nowrap gap-0.5">
                                 {rows.map((s, i) => (
-                                    <button key={i} onClick={() => { setHighlightedResource(s.code); setActiveTab('wordnets'); }}
+                                    <button key={i} onClick={() => { setSelectedWordnet(s.code); setActiveTab('wordnets'); }}
                                         className="text-left hover:text-blue-500 hover:underline">
                                         {s.code}{s.version ? `:${s.version}` : ''}
                                     </button>
@@ -1796,7 +1926,7 @@
                             <nav className="flex items-end gap-3 mt-3 -mb-3 flex-wrap">
                                 {['browser', 'about', 'publications', 'wordnets'].map(tab => (
                                     <button key={tab}
-                                        onClick={() => setActiveTab(tab)}
+                                        onClick={() => { setActiveTab(tab); if (tab === 'wordnets') setSelectedWordnet(null); }}
                                         className={`px-4 py-2 rounded-t-lg border-b-2 transition-colors ${
                                             activeTab === tab
                                                 ? 'bg-gray-50 border-blue-500 text-blue-700 font-medium'
@@ -2236,6 +2366,12 @@
 
                                     const conceptLabelInfo = getConceptLabel(parseInt(selectedConcept), definitionLanguage);
                                     const conceptLabel = conceptLabelInfo?.form || '';
+                                    const isCoreConcept = _db && cachedExec(
+                                        `SELECT 1 FROM sqlite_master WHERE type='table' AND name='core_synsets'`
+                                    ).length > 0 && cachedExec(
+                                        'SELECT 1 FROM core_synsets WHERE synset_rowid = ?',
+                                        [parseInt(selectedConcept)]
+                                    ).length > 0;
 
                                     return (
                                         <div>
@@ -2243,7 +2379,7 @@
                                             <div className="mb-4 flex gap-4 items-start">
                                                 <div className="flex-1">
                                                     <p className="text-base">
-                                                        {conceptLabel && <><span className="font-medium">{conceptLabel}</span>{' · '}</>}<span className="text-gray-600 italic">{getPosName(concept.oc)}</span>{' · '}
+                                                        {conceptLabel && <><span className="font-medium">{conceptLabel}</span>{' · '}</>}<span className="text-gray-600 italic">{getPosName(concept.oc)}</span>{isCoreConcept && <span title="one of the 4960 core concepts" className="ml-1 cursor-help">✪</span>}{' · '}
                                                         {concept.da ? renderDefinitionWithLinks(mainDef, concept.da) : mainDef}
                                                         {<LangBadge lang={shownLang} currentLang={definitionLanguage} />}
                                                         {concept.dr?.[shownLang] && renderProvenance('definitions', concept.dr[shownLang])}
@@ -2697,7 +2833,7 @@
                                             if (confirm('Clear cached database? It will be re-downloaded on next page load.')) {
                                                 await idbClear();
                                                 _provDb = null;
-                                                location.reload();
+                                                location.href = location.pathname;
                                             }
                                         }}
                                         className="text-sm text-red-600 hover:text-red-800 underline"
@@ -2759,6 +2895,145 @@
                                 if (url === 'wordnet') return 'WordNet';
                                 return url;
                             };
+
+                            if (selectedWordnet) {
+                                const r = allResources.find(res => res.code === selectedWordnet);
+                                if (!r) return <p className="text-gray-600">Wordnet not found.</p>;
+                                const summary = provenanceReady ? queryWordnetSummary(r.code, r.language) : null;
+                                const extra = (() => { try { return r.extra ? JSON.parse(r.extra) : null; } catch(e) { return null; } })();
+                                const metaRows = [
+                                    ['ID',         r.code],
+                                    ['Version',    r.version],
+                                    ['URL',        r.url],
+                                    ['Licence',    r.licence],
+                                    ['Email',      r.email],
+                                    ['Status',     r.status],
+                                    ['Confidence', r.confidence_score != null ? r.confidence_score : null],
+                                    ['Citation',   r.citation],
+                                    ...(extra ? Object.entries(extra).map(([k, v]) => [k.replace(/^.*[/:}]/, ''), v]) : []),
+                                ].filter(([, v]) => v != null && v !== '');
+                                const byPos = {};
+                                (summary?.examples || []).forEach(e => {
+                                    if (!byPos[e.pos]) byPos[e.pos] = [];
+                                    byPos[e.pos].push(e);
+                                });
+                                return (
+                                <div data-testid="wordnet-summary">
+                                    <button onClick={() => setSelectedWordnet(null)}
+                                            className="text-sm text-blue-600 hover:underline mb-4 block">
+                                        ← Back to Wordnets
+                                    </button>
+                                    <h2 className="text-xl font-bold mb-1">{r.label || r.code}</h2>
+                                    {r.language && <p className="text-sm text-gray-500 mb-4">{getLangFullName(r.language)} ({r.language})</p>}
+
+                                    <div className="border-t border-gray-200 pt-4 mb-4">
+                                        <h3 className="font-medium text-sm text-gray-700 mb-2">Metadata</h3>
+                                        <dl className="grid grid-cols-[8rem_1fr] gap-x-2 gap-y-1 text-sm">
+                                            {metaRows.map(([label, value]) => (
+                                                <React.Fragment key={label}>
+                                                    <dt className="font-medium text-gray-500">{label}</dt>
+                                                    <dd className="text-gray-800 break-words">
+                                                        {/^https?:\/\//.test(value)
+                                                            ? <a href={value} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{value}</a>
+                                                            : String(value)}
+                                                    </dd>
+                                                </React.Fragment>
+                                            ))}
+                                        </dl>
+                                    </div>
+
+                                    <div className="border-t border-gray-200 pt-4 mb-4">
+                                        <h3 className="font-medium text-sm text-gray-700 mb-3">Coverage</h3>
+                                        <div className={`grid gap-3 mb-4 ${summary ? 'grid-cols-2 sm:grid-cols-5' : 'grid-cols-2'}`}>
+                                            {[
+                                                ['Concepts',    r.synset_count],
+                                                ['Senses',      r.sense_count],
+                                                ...(summary ? [
+                                                    ['ILI %',       summary.iliPct != null ? `${summary.iliPct}%` : null],
+                                                    ['Definitions', summary.defCount],
+                                                    ['Examples',    summary.exCount],
+                                                ] : []),
+                                            ].filter(([, n]) => n != null).map(([label, n]) => (
+                                                <div key={label} className="bg-gray-50 rounded p-3 text-center">
+                                                    <div className="text-lg font-semibold text-gray-800">{typeof n === 'number' ? n.toLocaleString() : n}</div>
+                                                    <div className="text-xs text-gray-500 mt-0.5">{label}</div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        {summary?.posStats && (
+                                            <table className="w-full text-sm border-collapse">
+                                                <thead>
+                                                    <tr className="bg-gray-100 text-left">
+                                                        <th className="px-3 py-2 border border-gray-200">Part of speech</th>
+                                                        <th className="px-3 py-2 border border-gray-200 text-right">Concepts</th>
+                                                        <th className="px-3 py-2 border border-gray-200 text-right">With ILI</th>
+                                                        <th className="px-3 py-2 border border-gray-200">Examples</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {summary.posStats.map((row, i) => (
+                                                        <tr key={row.pos} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                                                            <td className="px-3 py-2 border border-gray-200">{posToHumanReadable[row.pos] || row.pos}</td>
+                                                            <td className="px-3 py-2 border border-gray-200 text-right tabular-nums">{row.cnt.toLocaleString()}</td>
+                                                            <td className="px-3 py-2 border border-gray-200 text-right tabular-nums">{row.withIli.toLocaleString()}</td>
+                                                            <td className="px-3 py-2 border border-gray-200">
+                                                                <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                                                                    {(byPos[row.pos] || []).map((item, j) => (
+                                                                        <button key={j}
+                                                                            onClick={() => { handleConceptClick(item.synset_rowid.toString()); setActiveTab('browser'); }}
+                                                                            className="text-blue-600 hover:underline">
+                                                                            {item.form}
+                                                                        </button>
+                                                                    ))}
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        )}
+                                        {!provenanceReady && <p className="text-xs text-gray-400 mt-2">Load the provenance database for detailed statistics.</p>}
+                                    </div>
+
+                                    {summary && summary.relDist.length > 0 && (
+                                        <div className="border-t border-gray-200 pt-4 mb-4">
+                                            <h3 className="font-medium text-sm text-gray-700 mb-3">Semantic relations</h3>
+                                            <table className="w-full text-sm border-collapse">
+                                                <thead>
+                                                    <tr className="bg-gray-100 text-left">
+                                                        <th className="px-3 py-2 border border-gray-200">Relation</th>
+                                                        <th className="px-3 py-2 border border-gray-200 text-right">Count</th>
+                                                        <th className="px-3 py-2 border border-gray-200">Example</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {summary.relDist.map((row, i) => {
+                                                        const srcLabel = row.ex_src_rowid ? getConceptLabel(row.ex_src_rowid, r.language)?.form : null;
+                                                        const tgtLabel = row.ex_tgt_rowid ? getConceptLabel(row.ex_tgt_rowid, r.language)?.form : null;
+                                                        return (
+                                                        <tr key={row.type} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                                                            <td className="px-3 py-2 border border-gray-200">{getRelLabel(row.type)}</td>
+                                                            <td className="px-3 py-2 border border-gray-200 text-right tabular-nums">{row.cnt.toLocaleString()}</td>
+                                                            <td className="px-3 py-2 border border-gray-200 text-xs">
+                                                                {srcLabel && tgtLabel ? (
+                                                                    <>
+                                                                        <button onClick={() => { handleConceptClick(row.ex_src_rowid.toString()); setActiveTab('browser'); }} className="text-blue-600 hover:underline">{srcLabel}</button>
+                                                                        {' → '}
+                                                                        <button onClick={() => { handleConceptClick(row.ex_tgt_rowid.toString()); setActiveTab('browser'); }} className="text-blue-600 hover:underline">{tgtLabel}</button>
+                                                                    </>
+                                                                ) : <span className="text-gray-400">—</span>}
+                                                            </td>
+                                                        </tr>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+                                </div>
+                                );
+                            }
+
                             const sortResources = (col) => setWnSort(s => ({ col, asc: s.col === col ? !s.asc : true }));
                             const sortedResources = (() => {
                                 if (!wnSort.col) return allResources;
@@ -2794,8 +3069,7 @@
                                         <tbody>
                                             {sortedResources.map((r, i) => (
                                                 <tr key={r.code + '|' + i}
-                                                    ref={r.code === highlightedResource ? highlightedRowRef : null}
-                                                    className={r.code === highlightedResource ? 'bg-yellow-100' : (i % 2 === 0 ? 'bg-white' : 'bg-gray-50')}>
+                                                    className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                                                     <td className="px-3 py-2 border border-gray-200 whitespace-nowrap">
                                                         {r.language
                                                             ? <span title={r.language} className="cursor-help">{getLangFullName(r.language)}</span>
@@ -2805,9 +3079,9 @@
                                                         {r.url
                                                             ? <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{r.label || r.code}</a>
                                                             : (r.label || r.code)}
-                                                        <button onClick={() => setInfoPopup(r)}
+                                                        <button onClick={() => setSelectedWordnet(r.code)}
                                                                 className="float-right text-blue-600 hover:text-blue-800"
-                                                                title="Show full metadata">ⓘ</button>
+                                                                title="Show wordnet summary">ⓘ</button>
                                                     </td>
                                                     <td className="px-3 py-2 border border-gray-200 text-right tabular-nums">{r.synset_count != null ? r.synset_count.toLocaleString() : '—'}</td>
                                                     <td className="px-3 py-2 border border-gray-200 text-right tabular-nums">{r.sense_count != null ? r.sense_count.toLocaleString() : '—'}</td>
@@ -2851,48 +3125,6 @@
                         </div>
                     </footer>
 
-                    {infoPopup && (() => {
-                        const r = infoPopup;
-                        const extra = (() => { try { return r.extra ? JSON.parse(r.extra) : null; } catch(e) { return null; } })();
-                        const rows = [
-                            ['ID',          r.code],
-                            ['Language',    r.language ? `${getLangFullName(r.language)} (${r.language})` : null],
-                            ['Version',     r.version],
-                            ['URL',         r.url],
-                            ['Licence',     r.licence],
-                            ['Email',       r.email],
-                            ['Status',      r.status],
-                            ['Confidence',  r.confidence_score != null ? r.confidence_score : null],
-                            ['Citation',    r.citation],
-                            ...(extra ? Object.entries(extra).map(([k, v]) => [k.replace(/^.*[/:}]/, ''), v]) : []),
-                        ].filter(([, v]) => v != null && v !== '');
-                        return (
-                            <div className="fixed inset-0 z-50 flex items-center justify-center"
-                                 onClick={() => setInfoPopup(null)}>
-                                <div className="absolute inset-0 bg-black opacity-40" />
-                                <div className="relative bg-white rounded-lg shadow-xl w-full max-w-lg mx-4 p-6 max-h-[80vh] overflow-y-auto"
-                                     onClick={e => e.stopPropagation()}>
-                                    <div className="flex items-start justify-between mb-4">
-                                        <h3 className="text-lg font-bold text-gray-900">{r.label || r.code}</h3>
-                                        <button onClick={() => setInfoPopup(null)}
-                                                className="text-gray-400 hover:text-gray-600 text-xl leading-none ml-4">✕</button>
-                                    </div>
-                                    <dl className="space-y-2 text-sm">
-                                        {rows.map(([label, value]) => (
-                                            <div key={label} className="grid grid-cols-[7rem_1fr] gap-2">
-                                                <dt className="font-medium text-gray-500">{label}</dt>
-                                                <dd className="text-gray-800 break-words">
-                                                    {/^https?:\/\//.test(value)
-                                                        ? <a href={value} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{value}</a>
-                                                        : value}
-                                                </dd>
-                                            </div>
-                                        ))}
-                                    </dl>
-                                </div>
-                            </div>
-                        );
-                    })()}
                 </div>
             );
         }

@@ -120,6 +120,9 @@ CREATE TABLE arasaac (
     synset_rowid INTEGER NOT NULL REFERENCES synsets(rowid),
     arasaac_id   INTEGER NOT NULL
 );
+CREATE TABLE core_synsets (
+    synset_rowid INTEGER NOT NULL REFERENCES synsets(rowid)
+);
 """
 
 PROV_SCHEMA = """
@@ -152,6 +155,7 @@ CREATE INDEX idx_sense_relations_source    ON sense_relations(source_rowid);
 CREATE INDEX idx_sense_examples_sense      ON sense_examples(sense_rowid);
 CREATE INDEX idx_example_annotations_example ON example_annotations(example_rowid);
 CREATE INDEX idx_arasaac_synset ON arasaac(synset_rowid);
+CREATE INDEX idx_core_synsets ON core_synsets(synset_rowid);
 """
 
 IMPLICIT_RESOURCES = {
@@ -178,7 +182,8 @@ CILI_RESOURCE = {
         'Francis Bond, Piek Vossen, John McCrae, and Christiane Fellbaum. 2016. '
         'CILI: the Collaborative Interlingual Index. '
         'In *Proceedings of the 8th Global WordNet Conference (GWC)*, '
-        'pages 50\u201357, Bucharest, Romania. Global Wordnet Association.'
+        'pages 50\u201357, Bucharest, Romania. Global Wordnet Association. '
+        'DOI: 10.18653/v1/2016.gwc-1.9'	
     ),
 }
 
@@ -1481,6 +1486,34 @@ class MergeBuilder:
              CILI_RESOURCE['url'], CILI_RESOURCE['licence'], CILI_RESOURCE['citation'],
              cili_synset_count),
         )
+
+    def load_core_synsets(self, tab_path: Path | None = None) -> int:
+        """Populate core_synsets from a tab file of ILI codes (one per line).
+
+        Args:
+            tab_path: Path to the ILI tab file. Defaults to
+                      ``cyg/data/wn-core-ili.tab`` relative to this file.
+
+        Returns:
+            Number of core synsets inserted.
+        """
+        if tab_path is None:
+            tab_path = Path(__file__).parent / 'data' / 'wn-core-ili.tab'
+        if not tab_path.exists():
+            logger.warning('Core ILI file not found: %s', tab_path)
+            return 0
+        ilis = {
+            line.strip() for line in tab_path.read_text().splitlines() if line.strip()
+        }
+        rows = self.cur.execute(
+            'SELECT rowid FROM synsets WHERE ili IN (%s)' % ','.join('?' * len(ilis)),
+            list(ilis),
+        ).fetchall()
+        self.cur.executemany(
+            'INSERT INTO core_synsets (synset_rowid) VALUES (?)',
+            rows,
+        )
+        return len(rows)
 
     def create_indexes(self) -> None:
         """Create indexes before post-processing queries (critical for performance)."""
