@@ -86,7 +86,7 @@ class TestPageLoad:
         expect(page_ready.locator('h1', has_text='Cygnet')).to_be_visible()
 
     def test_nav_tabs_visible(self, page_ready: Page):
-        expect(page_ready.locator('button', has_text='Browser')).to_be_visible()
+        expect(page_ready.locator('button', has_text='Browse')).to_be_visible()
         expect(page_ready.locator('button', has_text='About')).to_be_visible()
 
     def test_python_tab_absent(self, page_ready: Page):
@@ -295,7 +295,7 @@ class TestPathFinder:
     def test_path_found_shows_intermediate_step(self, page_ready: Page):
         """dog (i3) → entity (i1) path passes through animal (i2)."""
         self._open_concept(page_ready, 'dog')
-        page_ready.locator('input[placeholder*="e.g. i"]').fill('i1')
+        page_ready.locator('input[placeholder*="ILI"]').fill('i1')
         # Wait for the ILI to resolve (Find path button becomes enabled)
         expect(
             page_ready.locator('button', has_text='Find path')
@@ -308,7 +308,7 @@ class TestPathFinder:
     def test_path_includes_start_and_end(self, page_ready: Page):
         """The rendered path must contain both the source and target concepts."""
         self._open_concept(page_ready, 'dog')
-        page_ready.locator('input[placeholder*="e.g. i"]').fill('i1')
+        page_ready.locator('input[placeholder*="ILI"]').fill('i1')
         expect(
             page_ready.locator('button', has_text='Find path')
         ).to_be_enabled(timeout=5_000)
@@ -320,7 +320,7 @@ class TestPathFinder:
     def test_path_not_found_shows_message(self, page_ready: Page):
         """brightness (i4) has no hypernym — no path to entity (i1)."""
         self._open_concept(page_ready, 'brightness')
-        page_ready.locator('input[placeholder*="e.g. i"]').fill('i1')
+        page_ready.locator('input[placeholder*="ILI"]').fill('i1')
         expect(
             page_ready.locator('button', has_text='Find path')
         ).to_be_enabled(timeout=5_000)
