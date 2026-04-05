@@ -18,7 +18,7 @@
   },
 
   "logo": {
-    "src":  "omw-logo.svg",
+    "src":  "img/omw-logo.svg",
     "url":  "https://omwn.org",
     "alt":  "Open Multilingual Wordnet",
     "name": "OMW"
@@ -35,7 +35,8 @@
   "footer": {
     "text": "Produced with the support of",
     "logos": [
-      { "src": "culturelab.png", "alt": "Culture Lab", "url": "https://www.culturelab.psl.eu/" }
+	{ "src": "img/culturelab.png", "alt": "Culture Lab", "url": "https://www.culturelab.psl.eu/" },
+	{ "src": "img/UP_logo_FF_horizont_en.png", "alt": "Palacký University Olomouc", "url": "https://www.ff.upol.cz/en/" }
     ]
   },
 
