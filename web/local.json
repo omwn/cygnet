@@ -32,6 +32,13 @@
     "languageData": "The lexical data in Cygnet is drawn from a collection of open wordnets covering many languages — see the Wordnets tab for the full list of contributing projects and their licences. We are deeply grateful to every team that has worked to build and freely share these resources."
   },
 
+  "footer": {
+    "text": "Produced with the support of",
+    "logos": [
+      { "src": "culturelab.png", "alt": "Culture Lab", "url": "https://www.culturelab.psl.eu/" }
+    ]
+  },
+
   "publications": [
     "Rowan Hall Maudslay &amp; Francis Bond (2026). Cygnet: Refactoring the Open Multilingual Wordnet. In <em>Proceedings of the 15th International Conference on Language Resources and Evaluation (LREC 2026)</em>. (to appear)",
     "Francis Bond &amp; Ryan Foster (2013). <a href='https://aclanthology.org/P13-1133/' style='text-decoration:underline'>Linking and extending an open multilingual wordnet</a>. In <em>Proceedings of the 51st Annual Meeting of the Association for Computational Linguistics (ACL 2013)</em>. Sofia. pp. 1352–1362.",
