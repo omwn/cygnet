@@ -33,7 +33,7 @@
         // Loaded from local.json at startup; falls back silently if absent.
         // See notes/local.json.example for supported fields.
         let _siteConfig = {};
-        const _configPromise = fetch('local.json')
+        const _configPromise = fetch('local.json', { cache: 'no-cache' })
             .then(r => r.ok ? r.json() : {})
             .catch(() => ({}))
             .then(cfg => {
