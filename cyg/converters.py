@@ -1102,6 +1102,9 @@ class WordNetToCygnetConverter:
                         variety = pronunciation.get('variety')
                         if variety:
                             pron_elem.set('variety', variety)
+                        audio = pronunciation.get('audio')
+                        if audio:
+                            pron_elem.set('audio', audio)
 
                     # Add Wordforms for additional forms
                     for i, form in enumerate(forms):
@@ -1121,6 +1124,9 @@ class WordNetToCygnetConverter:
                                 variety = pronunciation.get('variety')
                                 if variety:
                                     pron_elem.set('variety', variety)
+                                audio = pronunciation.get('audio')
+                                if audio:
+                                    pron_elem.set('audio', audio)
 
                     # Add Provenance element
                     from_elem = etree.SubElement(lexeme, 'Provenance',
