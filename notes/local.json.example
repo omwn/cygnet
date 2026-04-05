@@ -31,7 +31,12 @@
 
   "header": "<strong>Preview build</strong> — data updated 2025-01-01.",
 
-  "footer": "Built by the <a href='https://mylab.org' style='text-decoration:underline'>My Lab</a> team.",
+  "footer": {
+    "text": "Produced with the support of",
+    "logos": [
+      { "src": "funder.png", "alt": "Funder Name", "url": "https://funder.org/" }
+    ]
+  },
 
   "about": {
     "intro": "<p>My Wordnet is a multilingual lexical database covering X languages.</p><p>Developed by Jane Doe. Source code on <a href='https://github.com/example/mywordnet' style='text-decoration:underline'>GitHub</a>.</p>",

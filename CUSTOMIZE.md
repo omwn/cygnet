@@ -126,7 +126,13 @@ All fields are optional — omit anything you don't need to override.
 
   "header": "<strong>Preview build</strong> — data updated 2025-01-01.",
 
-  "footer": "Built by the <a href='https://yourlab.org' style='text-decoration:underline'>Your Lab</a> team.",
+  "footer": {
+    "text": "Produced with the support of",
+    "logos": [
+      { "src": "logo1.png", "alt": "Funder A", "url": "https://fundera.org/" },
+      { "src": "logo2.png", "alt": "Funder B", "url": "https://funderb.org/", "height": "4rem" }
+    ]
+  },
 
   "about": {
     "intro": "<p>My Wordnet covers Language X.</p><p>Developed by Jane Doe. Source code on <a href='https://github.com/yourorg/yourproject' style='text-decoration:underline'>GitHub</a>.</p>",
@@ -181,7 +187,7 @@ The header has two sides that are independently customisable:
 | `logo.alt` | `""` | Alt text for the logo image |
 | `logo.name` | — | Short text shown to the left of the logo image (same bold style as `title`) |
 | `header` | — | HTML banner shown below the nav bar |
-| `footer` | Cygnet credit | HTML footer |
+| `footer` | — | Footer content. Object form: `{text?, logos?: [{src, alt, url?, height?}]}`. Also accepts a raw HTML string for backwards compatibility. Omit to hide the footer entirely. |
 | `about.intro` | — | HTML replacing the About intro paragraphs |
 | `about.citation` | — | HTML replacing the citation guidance |
 | `about.languageData` | — | HTML replacing the Language Data paragraph |

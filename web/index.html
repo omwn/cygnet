@@ -3329,24 +3329,29 @@
                         })()}
                     </main>
 
+                    {siteConfig.footer && (
                     <footer className="mt-auto py-4">
-                        <div className="max-w-4xl mx-auto px-4 border-t border-gray-200 pt-4">
-                            {siteConfig.footer
-                                ? <div className="max-w-4xl mx-auto text-center text-sm text-gray-600"
-                                       dangerouslySetInnerHTML={{ __html: siteConfig.footer }} />
-                                : <div className="max-w-4xl mx-auto text-center text-sm text-gray-600">
-                                    <div className="mb-2">
-                                        <span>Produced with the support of</span>
-                                    </div>
-                                    <div>
-                                        <a href="https://www.culturelab.psl.eu/" target="_blank" rel="noopener noreferrer" className="inline-block hover:opacity-80">
-                                            <img src="culturelab.png" alt="Culture Lab" className="h-14 inline-block" />
-                                        </a>
-                                    </div>
-                                  </div>
+                        <div className="max-w-4xl mx-auto px-4 border-t border-gray-200 pt-4 text-center text-sm text-gray-600">
+                            {typeof siteConfig.footer === 'string'
+                                ? <div dangerouslySetInnerHTML={{ __html: siteConfig.footer }} />
+                                : <>
+                                    {siteConfig.footer.text && <div className="mb-2">{siteConfig.footer.text}</div>}
+                                    {siteConfig.footer.logos?.length > 0 && (
+                                        <div className="flex items-center justify-center gap-6 flex-wrap">
+                                            {siteConfig.footer.logos.map((logo, i) => (
+                                                logo.url
+                                                    ? <a key={i} href={logo.url} target="_blank" rel="noopener noreferrer" className="inline-block hover:opacity-80">
+                                                          <img src={logo.src} alt={logo.alt || ''} style={{height: logo.height || '3.5rem'}} className="inline-block" />
+                                                      </a>
+                                                    : <img key={i} src={logo.src} alt={logo.alt || ''} style={{height: logo.height || '3.5rem'}} className="inline-block" />
+                                            ))}
+                                        </div>
+                                    )}
+                                  </>
                             }
                         </div>
                     </footer>
+                    )}
 
                 {conceptTooltip && (() => {
                     const ct = conceptTooltip;
