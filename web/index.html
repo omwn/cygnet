@@ -838,7 +838,11 @@
                     if (icon) {
                         let link = document.querySelector("link[rel='icon']");
                         if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
-                        link.href = `data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>${encodeURIComponent(icon)}</text></svg>`;
+                        if (icon.includes('.')) {
+                            link.href = icon;
+                        } else {
+                            link.href = `data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>${encodeURIComponent(icon)}</text></svg>`;
+                        }
                     }
                     if (displayLanguage && !localStorage.getItem('definitionLanguage')) {
                         setDefinitionLanguage(displayLanguage);
@@ -1996,11 +2000,11 @@
                                 <div className="flex items-center gap-3">
                                     {siteConfig.url
                                         ? <a href={siteConfig.url} target="_blank" rel="noopener noreferrer" className="hover:opacity-80 flex items-center gap-1.5">
-                                              {siteConfig.icon && <h1 className="text-4xl -mt-0.5">{siteConfig.icon}</h1>}
+                                              {siteConfig.icon && (siteConfig.icon.includes('.') ? <img src={siteConfig.icon} alt="" className="h-10" /> : <h1 className="text-4xl -mt-0.5">{siteConfig.icon}</h1>)}
                                               {siteConfig.title && <h1 className="text-3xl font-bold text-gray-800"> {siteConfig.title}</h1>}
                                           </a>
                                         : <button onClick={handleLogoClick} className="text-left hover:opacity-80 flex items-center gap-1.5">
-                                              {siteConfig.icon && <h1 className="text-4xl -mt-0.5">{siteConfig.icon}</h1>}
+                                              {siteConfig.icon && (siteConfig.icon.includes('.') ? <img src={siteConfig.icon} alt="" className="h-10" /> : <h1 className="text-4xl -mt-0.5">{siteConfig.icon}</h1>)}
                                               {siteConfig.title && <h1 className="text-3xl font-bold text-gray-800"> {siteConfig.title}</h1>}
                                           </button>
                                     }
@@ -2217,7 +2221,7 @@
                                 {!dbReady && !dbError && (
                                     <div className="flex justify-center mt-16">
                                         <div className="text-center w-72">
-                                            {siteConfig.icon && <h1 className="text-4xl mb-4">{siteConfig.icon}</h1>}
+                                            {siteConfig.icon && (siteConfig.icon.includes('.') ? <img src={siteConfig.icon} alt="" className="h-16 mx-auto mb-2" /> : <h1 className="text-4xl mb-4">{siteConfig.icon}</h1>)}
                                             <p className="text-gray-600 mb-3">{dbProgress || 'Initializing...'}</p>
                                             {downloadProgress && (
                                                 <div>
