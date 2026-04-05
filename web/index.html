@@ -556,17 +556,24 @@
                 }
 
                 const countRow = cachedExec(`
-                    WITH src AS (
-                        SELECT DISTINCT s.synset_rowid
-                        FROM senses s WHERE s.rowid IN (SELECT id FROM _wnsum_senses)
-                    )
-                    SELECT
-                        (SELECT COUNT(*) FROM definitions d
-                         WHERE d.synset_rowid IN (SELECT synset_rowid FROM src)) AS def_count,
-                        (SELECT COUNT(*) FROM sense_examples se
-                         WHERE se.sense_rowid IN (SELECT id FROM _wnsum_senses)) AS ex_count
+                    SELECT COUNT(*) AS ex_count
+                    FROM sense_examples se
+                    WHERE se.sense_rowid IN (SELECT id FROM _wnsum_senses)
                 `)[0];
-                if (countRow) { result.defCount = countRow.def_count; result.exCount = countRow.ex_count; }
+                if (countRow) result.exCount = countRow.ex_count;
+
+                const defTableRow = cachedExecProv(
+                    `SELECT rowid FROM prov_tables WHERE name = 'definitions'`
+                )[0];
+                if (defTableRow) {
+                    const defCountRow = cachedExecProv(
+                        `SELECT COUNT(*) AS cnt FROM provenance p
+                         JOIN prov_resources pr ON p.resource_rowid = pr.rowid
+                         WHERE p.table_rowid = ? AND pr.code = ?`,
+                        [defTableRow.rowid, code]
+                    )[0];
+                    if (defCountRow) result.defCount = defCountRow.cnt;
+                }
 
                 const hasCore = !!_hasCoreTable;
                 const coreExJoin = hasCore ? 'LEFT JOIN core_synsets cs ON cs.synset_rowid = syn.rowid' : '';
