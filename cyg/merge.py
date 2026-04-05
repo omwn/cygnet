@@ -51,7 +51,8 @@ CREATE TABLE pronunciations (
     rowid         INTEGER PRIMARY KEY,
     form_rowid    INTEGER NOT NULL REFERENCES forms(rowid),
     variety       TEXT,
-    pronunciation TEXT NOT NULL
+    pronunciation TEXT NOT NULL,
+    audio         TEXT
 );
 CREATE TABLE senses (
     rowid        INTEGER PRIMARY KEY,
@@ -384,7 +385,7 @@ class MergeBuilder:
         self.sense_id_to_rowid: dict[str, int] = {}
 
         # Deduplication sets (avoid re-inserting identical rows)
-        self._gloss_keys: set[tuple[int, int]] = set()
+        self._gloss_keys: dict[tuple[int, int], int] = {}
         self._sense_keys: set[tuple[int, int]] = set()
         # Maps (source, target, type_rowid) → resource_code ('' for auto-generated)
         self._synset_rel_keys: dict[tuple[int, int, int], str] = {}
@@ -535,11 +536,12 @@ class MergeBuilder:
                     new_rank += 1
                     self.n_forms += 1
                     for p in wf.findall('Pronunciation'):
-                        if p.text:
+                        audio = p.get('audio')
+                        if p.text or audio:
                             pid = self._next_pronunciation_id
                             self._next_pronunciation_id += 1
                             self._pronunciations_buf.append(
-                                (pid, fid, p.get('variety'), p.text)
+                                (pid, fid, p.get('variety'), p.text or '', audio)
                             )
                             self.n_pronunciations += 1
             self.n_prov += self._insert_prov(
@@ -550,7 +552,7 @@ class MergeBuilder:
         # Build form rows first; skip entry entirely if no valid forms
         seen: set[str] = set()
         form_rows: list[tuple] = []
-        pron_rows: list[tuple] = []  # (fid, variety, text)
+        pron_rows: list[tuple] = []  # (fid, variety, text, audio)
         for wf in elem.findall('Wordform'):
             form = wf.get('form')
             if form and form not in seen:
@@ -561,8 +563,9 @@ class MergeBuilder:
                     (fid, 0, form, remove_accents(form.lower()), len(form_rows))
                 )
                 for p in wf.findall('Pronunciation'):
-                    if p.text:
-                        pron_rows.append((fid, p.get('variety'), p.text))
+                    audio = p.get('audio')
+                    if p.text or audio:
+                        pron_rows.append((fid, p.get('variety'), p.text or '', audio))
         if not form_rows:
             return
 
@@ -582,10 +585,10 @@ class MergeBuilder:
         if len(self._forms_buf) >= BATCH_SIZE:
             self._flush_forms()
 
-        for fid, variety, text in pron_rows:
+        for fid, variety, text, audio in pron_rows:
             pid = self._next_pronunciation_id
             self._next_pronunciation_id += 1
-            self._pronunciations_buf.append((pid, fid, variety, text))
+            self._pronunciations_buf.append((pid, fid, variety, text, audio))
         self.n_pronunciations += len(pron_rows)
 
     def _do_sense(self, elem) -> None:
@@ -617,13 +620,15 @@ class MergeBuilder:
         lang_rowid = self._lang_rowid(elem.get('language'))
         key = (synset_rowid, lang_rowid)
         if key in self._gloss_keys:
+            self.n_prov += self._insert_prov(
+                'definitions', self._gloss_keys[key], elem.findall('Provenance')
+            )
             return
-        self._gloss_keys.add(key)
-
         sentence = elem.find('AnnotatedSentence')
         text, annotations = parse_annotated_sentence(sentence)
         def_rowid = self._next_def_id
         self._next_def_id += 1
+        self._gloss_keys[key] = def_rowid
         self._defs_buf.append((def_rowid, synset_rowid, text, lang_rowid))
         self.n_prov += self._insert_prov(
             'definitions', def_rowid, elem.findall('Provenance')
@@ -806,7 +811,7 @@ class MergeBuilder:
         if self._pronunciations_buf:
             self.cur.executemany(
                 'INSERT INTO pronunciations '
-                '(rowid, form_rowid, variety, pronunciation) VALUES (?, ?, ?, ?)',
+                '(rowid, form_rowid, variety, pronunciation, audio) VALUES (?, ?, ?, ?, ?)',
                 self._pronunciations_buf,
             )
             self._pronunciations_buf.clear()
@@ -1000,8 +1005,8 @@ class MergeBuilder:
                         new_form_rowid = self.cur.lastrowid
                         existing_forms.add(form)
                         self.cur.execute(
-                            'INSERT INTO pronunciations (form_rowid, variety, pronunciation)'
-                            ' SELECT ?, variety, pronunciation'
+                            'INSERT INTO pronunciations (form_rowid, variety, pronunciation, audio)'
+                            ' SELECT ?, variety, pronunciation, audio'
                             ' FROM pronunciations WHERE form_rowid = ?',
                             (new_form_rowid, old_form_rowid),
                         )
