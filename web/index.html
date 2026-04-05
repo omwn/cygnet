@@ -3300,7 +3300,7 @@
                                                                 {r.licence && <div><span className="text-gray-500">Licence:</span> {r.licence.startsWith('http') ? <a href={r.licence} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{shortLicence(r.licence)}</a> : shortLicence(r.licence)}</div>}
                                                                 {r.synset_count != null && <div><span className="text-gray-500">Concepts:</span> {r.synset_count.toLocaleString()}</div>}
                                                                 {r.sense_count != null && <div><span className="text-gray-500">Senses:</span> {r.sense_count.toLocaleString()}</div>}
-                                                                <div className="pt-1 border-t border-gray-100 text-gray-400 italic">Click for full summary</div>
+                                                                <div className="pt-1 border-t border-gray-100 text-gray-400 italic">Click for full summary (may be slow)</div>
                                                             </div>
                                                         </span>
                                                     </td>
