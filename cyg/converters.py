@@ -478,23 +478,37 @@ class WordNetToCygnetConverter:
                 script_elem = etree.SubElement(wordform_elem, 'Script')
                 script_elem.text = new_script
 
-        # Helper to add Pronunciation to Wordform if not already present
-        def merge_pronunciation(wordform_elem, pron_text, pron_variety):
-            # Check if this exact pronunciation exists
-            for existing_pron in wordform_elem.findall('Pronunciation'):
+        # Helper to add Pronunciation to Wordform if not already present.
+        # If new_audio is set but pron_text is empty, attaches audio to the
+        # single existing pronunciation (unambiguous case) rather than adding
+        # a redundant audio-only record.
+        def merge_pronunciation(wordform_elem, pron_text, pron_variety, new_audio=None):
+            existing_prons = wordform_elem.findall('Pronunciation')
+            for existing_pron in existing_prons:
                 if existing_pron.text == pron_text:
-                    # Same pronunciation text - check variety
                     existing_variety = existing_pron.get('variety')
-                    if existing_variety == pron_variety:
-                        return False  # Already exists
-                    elif existing_variety is None and pron_variety is None:
-                        return False  # Both have no variety
+                    if existing_variety == pron_variety or (
+                        existing_variety is None and pron_variety is None
+                    ):
+                        # Same entry — attach audio if missing
+                        if new_audio and not existing_pron.get('audio'):
+                            existing_pron.set('audio', new_audio)
+                        return False  # Already exists (possibly updated)
 
-            # Add new pronunciation
+            # Audio-only record: attach to existing pronunciation when unambiguous
+            if new_audio and not pron_text:
+                without_audio = [p for p in existing_prons if not p.get('audio')]
+                if len(without_audio) == 1:
+                    without_audio[0].set('audio', new_audio)
+                    return False
+                # Ambiguous or no existing prons — fall through to add new record
+
             new_pron = etree.SubElement(wordform_elem, 'Pronunciation')
             new_pron.text = pron_text
             if pron_variety:
                 new_pron.set('variety', pron_variety)
+            if new_audio:
+                new_pron.set('audio', new_audio)
             return True
 
         # Process new_lemma
@@ -510,7 +524,8 @@ class WordNetToCygnetConverter:
             for pronunciation in new_lemma.findall('Pronunciation'):
                 pron_text = pronunciation.text or ''
                 pron_variety = pronunciation.get('variety')
-                if merge_pronunciation(wordform_elem, pron_text, pron_variety):
+                pron_audio = pronunciation.get('audio')
+                if merge_pronunciation(wordform_elem, pron_text, pron_variety, pron_audio):
                     added_count += 1
 
         # Process new_forms
@@ -527,7 +542,8 @@ class WordNetToCygnetConverter:
                 for pronunciation in form.findall('Pronunciation'):
                     pron_text = pronunciation.text or ''
                     pron_variety = pronunciation.get('variety')
-                    if merge_pronunciation(wordform_elem, pron_text, pron_variety):
+                    pron_audio = pronunciation.get('audio')
+                    if merge_pronunciation(wordform_elem, pron_text, pron_variety, pron_audio):
                         added_count += 1
 
         return added_count
