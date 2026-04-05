@@ -514,25 +514,25 @@ class MergeBuilder:
     def _do_lexeme(self, elem) -> None:
         lid = elem.get('id')
         if lid in self.entry_id_to_rowid:
-            # Merge: same lexeme in a second wordnet — add any new wordforms
+            # Merge: same lexeme in a second wordnet — add new wordforms and
+            # any new pronunciations (including audio) for existing wordforms.
             entry_rowid = self.entry_id_to_rowid[lid]
-            existing = set(
-                r[0] for r in self.cur.execute(
-                    'SELECT form FROM forms WHERE entry_rowid = ?', (entry_rowid,)
-                ).fetchall()
-            )
-            new_rank = max((r for r, in self.cur.execute(
-                'SELECT rank FROM forms WHERE entry_rowid = ?', (entry_rowid,)
-            ).fetchall()), default=-1) + 1
+            existing_rows = self.cur.execute(
+                'SELECT rowid, form, rank FROM forms WHERE entry_rowid = ?', (entry_rowid,)
+            ).fetchall()
+            existing = {form: rowid for rowid, form, _rank in existing_rows}
+            new_rank = (max(r for _, _, r in existing_rows) + 1) if existing_rows else 0
             for wf in elem.findall('Wordform'):
                 form = wf.get('form')
-                if form and form not in existing:
-                    existing.add(form)
+                if not form:
+                    continue
+                if form not in existing:
                     fid = self._next_form_id
                     self._next_form_id += 1
                     self._forms_buf.append(
                         (fid, entry_rowid, form, remove_accents(form.lower()), new_rank)
                     )
+                    existing[form] = fid
                     new_rank += 1
                     self.n_forms += 1
                     for p in wf.findall('Pronunciation'):
@@ -543,6 +543,44 @@ class MergeBuilder:
                             self._pronunciations_buf.append(
                                 (pid, fid, p.get('variety'), p.text or '', audio)
                             )
+                            self.n_pronunciations += 1
+                else:
+                    # Form exists — add any pronunciations not already present.
+                    # Audio-only records attach to the single existing IPA entry
+                    # when unambiguous, rather than adding a redundant record.
+                    fid = existing[form]
+                    self._flush_pronunciations()
+                    existing_prons = self.cur.execute(
+                        'SELECT variety, pronunciation, audio FROM pronunciations'
+                        ' WHERE form_rowid = ?', (fid,)
+                    ).fetchall()
+                    for p in wf.findall('Pronunciation'):
+                        audio = p.get('audio')
+                        ptext = p.text or ''
+                        variety = p.get('variety')
+                        # Skip if exact record already exists
+                        if any(ev == variety and ep == ptext for ev, ep, _ in existing_prons):
+                            continue
+                        # Audio-only: attach to the single existing entry without audio
+                        if audio and not ptext:
+                            without_audio = [(ev, ep, ea) for ev, ep, ea in existing_prons
+                                             if not ea]
+                            if len(without_audio) == 1:
+                                self.cur.execute(
+                                    'UPDATE pronunciations SET audio = ?'
+                                    ' WHERE form_rowid = ? AND variety IS ? AND pronunciation = ?',
+                                    (audio, fid, without_audio[0][0], without_audio[0][1])
+                                )
+                                # Reflect the update in local cache
+                                ev, ep, _ = without_audio[0]
+                                existing_prons = [(v, t, a if (v != ev or t != ep) else audio)
+                                                  for v, t, a in existing_prons]
+                                continue
+                        if ptext or audio:
+                            pid = self._next_pronunciation_id
+                            self._next_pronunciation_id += 1
+                            self._pronunciations_buf.append((pid, fid, variety, ptext, audio))
+                            existing_prons.append((variety, ptext, audio))
                             self.n_pronunciations += 1
             self.n_prov += self._insert_prov(
                 'entries', entry_rowid, elem.findall('Provenance')
