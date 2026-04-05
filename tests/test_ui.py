@@ -1040,6 +1040,19 @@ class TestWordnetSummaryWithProvenance:
         summary = page_prov.locator('[data-testid="wordnet-summary"]')
         expect(summary.locator('text=Semantic relations')).to_be_visible()
 
+    def test_sense_relations_section_shown(self, page_prov: Page):
+        """With provenance DB, the summary shows a Sense relations table (wn-en has antonyms)."""
+        self._open_summary(page_prov)
+        summary = page_prov.locator('[data-testid="wordnet-summary"]')
+        expect(summary.locator('text=Sense relations')).to_be_visible()
+
+    def test_sense_relations_antonym_row(self, page_prov: Page):
+        """The Sense relations table includes an antonym row (rendered as 'opposite')."""
+        self._open_summary(page_prov)
+        summary = page_prov.locator('[data-testid="wordnet-summary"]')
+        # 'antonym' maps to display label 'opposite' via relations.json
+        expect(summary.locator('td', has_text='opposite').first).to_be_visible()
+
     def test_ili_pct_shown(self, page_prov: Page):
         """With provenance DB, ILI % card is shown in the coverage section."""
         self._open_summary(page_prov)

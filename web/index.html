@@ -516,7 +516,7 @@
         function queryWordnetSummary(code, langCode) {
             const _cacheKey = `${code}:${langCode}`;
             if (_summaryCache[_cacheKey]) return _summaryCache[_cacheKey];
-            const result = { posStats: null, iliPct: null, defCount: null, exCount: null, examples: [], relDist: [] };
+            const result = { posStats: null, iliPct: null, defCount: null, exCount: null, examples: [], relDist: [], senseRelDist: [] };
             if (!_provDb || !_db) return result;
             try {
                 const sensesTableRow = cachedExecProv(`SELECT rowid FROM prov_tables WHERE name = 'senses'`)[0];
@@ -634,6 +634,26 @@
                     ORDER BY cnt DESC
                 `, [lang]);
                 result.relDist = relRows.filter(row => !inverseTypes.has(row.type));
+
+                const senseRelRows = cachedExec(`
+                    WITH rels AS (
+                        SELECT rt.type,
+                               sr.source_rowid, sr.target_rowid,
+                               COUNT(*) OVER (PARTITION BY rt.type) AS cnt,
+                               ROW_NUMBER() OVER (PARTITION BY rt.type ORDER BY sr.rowid) AS rn
+                        FROM sense_relations sr
+                        JOIN _wnsum_senses ws ON ws.id = sr.source_rowid
+                        JOIN relation_types rt ON rt.rowid = sr.type_rowid
+                    )
+                    SELECT r.type, r.cnt, r.source_rowid AS ex_src_rowid, r.target_rowid AS ex_tgt_rowid,
+                           (SELECT f.form FROM forms f WHERE f.entry_rowid =
+                               (SELECT entry_rowid FROM senses WHERE rowid = r.source_rowid) AND f.rank = 0 LIMIT 1) AS src_form,
+                           (SELECT f.form FROM forms f WHERE f.entry_rowid =
+                               (SELECT entry_rowid FROM senses WHERE rowid = r.target_rowid) AND f.rank = 0 LIMIT 1) AS tgt_form
+                    FROM rels r WHERE rn = 1
+                    ORDER BY cnt DESC
+                `);
+                result.senseRelDist = senseRelRows.filter(row => !inverseTypes.has(row.type));
             } catch (e) {
                 console.error('queryWordnetSummary error:', e);
             }
@@ -3182,6 +3202,38 @@
                                             </table>
                                         </div>
                                     )}
+
+                                    {summary && summary.senseRelDist.length > 0 && (
+                                        <div className="border-t border-gray-200 pt-4 mb-4">
+                                            <h3 className="font-medium text-sm text-gray-700 mb-3">Sense relations</h3>
+                                            <table className="w-full text-sm border-collapse">
+                                                <thead>
+                                                    <tr className="bg-gray-100 text-left">
+                                                        <th className="px-3 py-2 border border-gray-200">Relation</th>
+                                                        <th className="px-3 py-2 border border-gray-200 text-right">Count</th>
+                                                        <th className="px-3 py-2 border border-gray-200">Example</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {summary.senseRelDist.map((row, i) => (
+                                                        <tr key={row.type} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                                                            <td className="px-3 py-2 border border-gray-200">{getRelLabel(row.type)}</td>
+                                                            <td className="px-3 py-2 border border-gray-200 text-right tabular-nums">{row.cnt.toLocaleString()}</td>
+                                                            <td className="px-3 py-2 border border-gray-200 text-xs">
+                                                                {row.src_form && row.tgt_form ? (
+                                                                    <>
+                                                                        <a href={senseHref(row.ex_src_rowid)} onClick={e => { onSenseLinkClick(e, row.ex_src_rowid); setActiveTab('browser'); }} className="text-blue-600 hover:underline">{row.src_form}</a>
+                                                                        {' → '}
+                                                                        <a href={senseHref(row.ex_tgt_rowid)} onClick={e => { onSenseLinkClick(e, row.ex_tgt_rowid); setActiveTab('browser'); }} className="text-blue-600 hover:underline">{row.tgt_form}</a>
+                                                                    </>
+                                                                ) : <span className="text-gray-400">—</span>}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
                                 </div>
                                 );
                             }
@@ -3231,9 +3283,19 @@
                                                         {r.url
                                                             ? <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{r.label || r.code}</a>
                                                             : (r.label || r.code)}
-                                                        <button onClick={() => setSelectedWordnet(r.code)}
-                                                                className="float-right text-blue-600 hover:text-blue-800"
-                                                                title="Show wordnet summary">ⓘ</button>
+                                                        <span className="float-right relative group/wni">
+                                                            <button onClick={() => setSelectedWordnet(r.code)}
+                                                                    className="text-blue-600 hover:text-blue-800"
+                                                                    title="Show wordnet summary">ⓘ</button>
+                                                            <div className="absolute right-0 top-full mt-1 hidden group-hover/wni:block bg-white border border-gray-200 rounded shadow-lg p-3 text-xs text-gray-700 z-40 w-56 space-y-1">
+                                                                {r.version && <div><span className="text-gray-500">Version:</span> {r.version}</div>}
+                                                                {r.language && <div><span className="text-gray-500">Language:</span> {getLangFullName(r.language)}</div>}
+                                                                {r.licence && <div><span className="text-gray-500">Licence:</span> {r.licence.startsWith('http') ? <a href={r.licence} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{shortLicence(r.licence)}</a> : shortLicence(r.licence)}</div>}
+                                                                {r.synset_count != null && <div><span className="text-gray-500">Concepts:</span> {r.synset_count.toLocaleString()}</div>}
+                                                                {r.sense_count != null && <div><span className="text-gray-500">Senses:</span> {r.sense_count.toLocaleString()}</div>}
+                                                                <div className="pt-1 border-t border-gray-100 text-gray-400 italic">Click for full summary</div>
+                                                            </div>
+                                                        </span>
                                                     </td>
                                                     <td className="px-3 py-2 border border-gray-200 text-right tabular-nums">{r.synset_count != null ? r.synset_count.toLocaleString() : '—'}</td>
                                                     <td className="px-3 py-2 border border-gray-200 text-right tabular-nums">{r.sense_count != null ? r.sense_count.toLocaleString() : '—'}</td>
