@@ -566,6 +566,18 @@ class WordNetToCygnetConverter:
         forms = set()
         forms.add(word_lower)
 
+        # Strip leading/trailing hyphens (e.g. Turkish verb stems like "yaz-",
+        # Arabic broken plurals like "-kātib").  Add the stripped form and recurse
+        # so it also gets spaCy/NLTK expansion, but only one level deep.
+        stripped = word_lower.strip('-')
+        if stripped and stripped != word_lower:
+            forms.add(stripped)
+            if stripped not in self.form_cache:
+                # Temporarily mark to avoid infinite recursion
+                self.form_cache[stripped] = set()
+                self.form_cache[stripped] = self._get_all_forms(stripped)
+            forms |= self.form_cache[stripped]
+
         # Get spaCy doc (cached)
         doc = self._get_doc(word_lower)
         if len(doc) > 0:
