@@ -6,6 +6,7 @@ contents, so every assertion can be exact.
 Test DB contents (see conftest._UI_TEST_WORDNET):
   Synsets:  entity (i1), animal (i2), dog (i3), brightness (i4), dogfish (i5)
   Senses:   en:entity, en:animal, en:dog, en:brightness, en:dogfish, fr:chien
+  Variants: en:dog has variant form "doggo"
   Relations: dog→animal (hypernym), animal→entity (hypernym)
 
 Expected search results (exact/glob match on normalized_form):
@@ -40,15 +41,19 @@ def page_ready(page: Page, http_server):
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _wait_for_results(page: Page) -> None:
+    """Wait until the results summary or 'No results found' banner appears."""
+    page.locator('span.text-sm.text-gray-500').filter(has_text='across').or_(
+        page.locator('text=No results found')
+    ).wait_for(timeout=_SEARCH_TIMEOUT)
+
+
 def _search(page: Page, term: str) -> None:
     """Type *term* into the search box, submit, and wait for results."""
     box = page.locator('input[placeholder*="word"]')
     box.fill(term)
     box.press('Enter')
-    # "1 result across …" uses singular; match on "across" which appears in both
-    page.locator('span.text-sm.text-gray-500').filter(has_text='across').or_(
-        page.locator('text=No results found')
-    ).wait_for(timeout=_SEARCH_TIMEOUT)
+    _wait_for_results(page)
 
 
 def _result_count(page: Page) -> int:
@@ -82,7 +87,15 @@ class TestPageLoad:
 
     def test_nav_tabs_visible(self, page_ready: Page):
         expect(page_ready.locator('button', has_text='Browser')).to_be_visible()
-        expect(page_ready.locator('button', has_text='Data')).to_be_visible()
+        expect(page_ready.locator('button', has_text='About')).to_be_visible()
+
+    def test_python_tab_absent(self, page_ready: Page):
+        """Python tab was removed — should not appear in the nav."""
+        expect(page_ready.locator('button', has_text='Python')).to_have_count(0)
+
+    def test_data_tab_absent(self, page_ready: Page):
+        """Data tab was merged into About — should not appear in the nav."""
+        expect(page_ready.locator('button', has_text='Data')).to_have_count(0)
 
 
 # ---------------------------------------------------------------------------
@@ -202,18 +215,14 @@ class TestDefinitionSearch:
         )
         en_label.click()
 
-        page_ready.locator('span.text-sm.text-gray-500').filter(has_text='across').or_(
-            page_ready.locator('text=No results found')
-        ).wait_for(timeout=_SEARCH_TIMEOUT)
+        _wait_for_results(page_ready)
 
         assert _result_count(page_ready) == 2
         assert _language_count(page_ready) == 1
 
         # Restore state — uncheck English filter
         en_label.click()
-        page_ready.locator('span.text-sm.text-gray-500').filter(has_text='across').or_(
-            page_ready.locator('text=No results found')
-        ).wait_for(timeout=_SEARCH_TIMEOUT)
+        _wait_for_results(page_ready)
 
 
 # ---------------------------------------------------------------------------
@@ -488,11 +497,10 @@ class TestArasaac:
 
 
 class TestPublications:
-    def test_publications_tab_shows_main_papers(self, page_ready: Page):
-        """Publications tab lists the Cygnet and OMW papers."""
+    def test_publications_tab_shows_configured_paper(self, page_ready: Page):
+        """Publications tab lists papers from local.json publications array."""
         page_ready.locator('button', has_text='Publications').click()
-        expect(page_ready.locator('text=Maudslay')).to_be_visible(timeout=5_000)
-        expect(page_ready.locator('text=Bond').first).to_be_visible()
+        expect(page_ready.locator('text=Test Author')).to_be_visible(timeout=5_000)
 
     def test_publications_tab_shows_wordnet_citations_header(self, page_ready: Page):
         """Publications tab has a Wordnet Citations section."""
@@ -521,11 +529,16 @@ class TestPublications:
         ).to_be_visible()
 
     def test_about_tab_citation_section(self, page_ready: Page):
-        """About tab has a Citation section with links to key papers."""
+        """About tab has a Citation section with content from local.json."""
         page_ready.locator('button', has_text='About').click()
         expect(page_ready.locator('text=Citation')).to_be_visible(timeout=5_000)
-        expect(page_ready.locator('button', has_text='Maudslay')).to_be_visible()
-        expect(page_ready.locator('button', has_text='Bond & Foster')).to_be_visible()
+        expect(page_ready.locator('text=Test Author')).to_be_visible()
+
+    def test_about_tab_download_section(self, page_ready: Page):
+        """About tab has a Download section with database links."""
+        page_ready.locator('button', has_text='About').click()
+        expect(page_ready.get_by_role('heading', name='Download')).to_be_visible(timeout=5_000)
+        expect(page_ready.locator('a', has_text='.db.gz').first).to_be_visible()
 
 
 # ---------------------------------------------------------------------------
@@ -779,9 +792,7 @@ class TestSenseRelations:
         # Click the 'glowing' button in the sense relations section
         page_ready.locator('button', has_text='glowing').first.click()
         # App switches back to search view — wait for results summary
-        page_ready.locator('span.text-sm.text-gray-500').filter(has_text='across').or_(
-            page_ready.locator('text=No results found')
-        ).wait_for(timeout=_SEARCH_TIMEOUT)
+        _wait_for_results(page_ready)
         content = page_ready.content()
         assert 'glowing' in content
 
@@ -808,8 +819,100 @@ class TestSenseRelations:
         # Target sense loads async; locator retries until the '…' resolves to 'glowing'
         page_ready.locator('.sense-box button', has_text='glowing').first.click(timeout=_TEXT_VIEW_TIMEOUT * 2)
         # App switches to search view with glowing results
-        page_ready.locator('span.text-sm.text-gray-500').filter(has_text='across').or_(
-            page_ready.locator('text=No results found')
-        ).wait_for(timeout=_SEARCH_TIMEOUT)
+        _wait_for_results(page_ready)
         content = page_ready.content()
         assert 'glowing' in content
+
+
+class TestVariantFormSearch:
+    """Searching by a variant form (rank > 0) auto-expands the variants section."""
+
+    def test_variant_search_shows_variants_expanded(self, page_ready: Page):
+        """Searching 'doggo' (a variant of 'dog') shows the Variants row without
+        requiring the user to click to expand the sense card."""
+        _search(page_ready, 'doggo')
+        page_ready.wait_for_selector('.sense-box', timeout=_SEARCH_TIMEOUT)
+        expect(
+            page_ready.locator('.sense-box').filter(has_text='Variants')
+        ).to_be_visible()
+
+    def test_lemma_search_does_not_auto_expand(self, page_ready: Page):
+        """Searching the canonical lemma 'dog' does NOT auto-expand the variants
+        section (variants are still accessible via the expand arrow)."""
+        _search(page_ready, 'dog')
+        page_ready.wait_for_selector('.sense-box', timeout=_SEARCH_TIMEOUT)
+        expect(page_ready.locator('.sense-box')).to_be_visible()
+        expect(
+            page_ready.locator('.sense-box').filter(has_text='Variants')
+        ).not_to_be_visible()
+
+
+class TestLocalJsonConfig:
+    """local.json searchLanguage/displayLanguage seed the correct UI defaults."""
+
+    @pytest.fixture()
+    def page_with_config(self, page: Page, http_server_with_config):
+        """Open the app served with a local.json setting fr as search/display language."""
+        page.goto(http_server_with_config)
+        page.wait_for_selector('input[placeholder*="word"]', timeout=_DB_LOAD_TIMEOUT)
+        return page
+
+    def test_search_language_filters_to_configured_language(
+        self, page_with_config: Page
+    ):
+        """searchLanguage:'fr' means searching i3 returns only the French sense."""
+        _search(page_with_config, 'i3')
+        # With searchLanguage=fr the filter is pre-set to French, so only chien appears
+        assert _result_count(page_with_config) == 1
+        assert _language_count(page_with_config) == 1
+        expect(page_with_config.locator('.sense-box', has_text='chien')).to_be_visible()
+
+    def test_url_param_overrides_search_language(
+        self, page: Page, http_server_with_config
+    ):
+        """A search_lang URL param overrides the local.json searchLanguage default."""
+        page.goto(http_server_with_config + '#/search?q=i3&search_lang=en')
+        page.wait_for_selector('input[placeholder*="word"]', timeout=_DB_LOAD_TIMEOUT)
+        _wait_for_results(page)
+        assert _result_count(page) == 1
+        expect(page.locator('.sense-box', has_text='dog')).to_be_visible()
+
+    def test_url_without_search_lang_respects_default(
+        self, page: Page, http_server_with_config
+    ):
+        """A URL without search_lang still uses the local.json searchLanguage default."""
+        page.goto(http_server_with_config + '#/search?q=i3')
+        page.wait_for_selector('input[placeholder*="word"]', timeout=_DB_LOAD_TIMEOUT)
+        _wait_for_results(page)
+        assert _result_count(page) == 1
+        expect(page.locator('.sense-box', has_text='chien')).to_be_visible()
+
+
+# ---------------------------------------------------------------------------
+# Header customisation via local.json
+# ---------------------------------------------------------------------------
+
+class TestHeaderCustomization:
+    @pytest.fixture()
+    def page_branding(self, page: Page, http_server_with_branding):
+        page.goto(http_server_with_branding)
+        page.wait_for_selector('input[placeholder*="word"]', timeout=_DB_LOAD_TIMEOUT)
+        return page
+
+    def test_custom_title_in_header(self, page_branding: Page):
+        """local.json title replaces 'Cygnet' in the header."""
+        expect(page_branding.locator('header h1', has_text='TestWN')).to_be_visible()
+
+    def test_custom_icon_in_header(self, page_branding: Page):
+        """local.json icon replaces the default swan emoji in the header."""
+        expect(page_branding.locator('header h1', has_text='🧪')).to_be_visible()
+
+    def test_custom_logo_name_in_header(self, page_branding: Page):
+        """local.json logo.name appears to the left of the logo image."""
+        expect(page_branding.locator('header span', has_text='TWN').first).to_be_visible()
+
+    def test_custom_title_url_in_header(self, page_branding: Page):
+        """local.json url makes the title an external link."""
+        link = page_branding.locator('header a', has_text='TestWN')
+        expect(link).to_be_visible()
+        assert link.get_attribute('href') == 'https://example.org/testwn'

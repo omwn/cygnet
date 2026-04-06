@@ -1,0 +1,40 @@
+{
+  "title":   "Cygnet",
+  "name":    "Cygnet",
+  "tagline": "A Network of Signs",
+  "icon":    "🦢",
+
+  "databases": {
+    "main": {
+      "filename":    "cygnet.db.gz",
+      "url":         "https://github.com/omwn/cygnet/releases/latest/download/cygnet.db.gz",
+      "description": "The main lexical database, containing synsets, entries, senses, definitions, examples, and pronunciations across all languages."
+    },
+    "provenance": {
+      "filename":    "provenance.db.gz",
+      "url":         "https://github.com/omwn/cygnet/releases/latest/download/provenance.db.gz",
+      "description": "Provenance records tracing every data point back to its source wordnet and original identifier."
+    }
+  },
+
+  "logo": {
+    "src":  "omw-logo.svg",
+    "url":  "https://omwn.org",
+    "alt":  "Open Multilingual Wordnet",
+    "name": "OMW"
+  },
+
+  "displayLanguage": "en",
+
+  "about": {
+    "intro": "<p>OMW Cygnet is an experimental reformulation of Wordnet that is designed to eliminate conflicting records and improve modularity. It extends the idea of the <a href='https://omwn.org/' style='text-decoration:underline'>Open Multilingual Wordnet</a> and puts concepts at the core of the structure.</p><p>Developed by Rowan Hall Maudslay and Francis Bond. Source code is available on <a href='https://github.com/omwn/cygnet' style='text-decoration:underline'>GitHub</a>.</p>",
+    "citation": "If you use Cygnet, please cite <a href='https://aclanthology.org/' style='text-decoration:underline'>Maudslay &amp; Bond (2026)</a> for Cygnet and <a href='https://aclanthology.org/P13-1133/' style='text-decoration:underline'>Bond &amp; Foster (2013)</a> for the underlying Open Multilingual Wordnet, as well as the individual wordnets whose data you use — see the Publications tab.",
+    "languageData": "The lexical data in Cygnet is drawn from a collection of open wordnets covering many languages — see the Wordnets tab for the full list of contributing projects and their licences. We are deeply grateful to every team that has worked to build and freely share these resources."
+  },
+
+  "publications": [
+    "Rowan Hall Maudslay &amp; Francis Bond (2026). Cygnet: Refactoring the Open Multilingual Wordnet. In <em>Proceedings of the 15th International Conference on Language Resources and Evaluation (LREC 2026)</em>. (to appear)",
+    "Francis Bond &amp; Ryan Foster (2013). <a href='https://aclanthology.org/P13-1133/' style='text-decoration:underline'>Linking and extending an open multilingual wordnet</a>. In <em>Proceedings of the 51st Annual Meeting of the Association for Computational Linguistics (ACL 2013)</em>. Sofia. pp. 1352–1362.",
+    "Francis Bond &amp; Kyonghee Paik (2012). A survey of wordnets and their licenses. In <em>Proceedings of the 6th Global WordNet Conference (GWC 2012)</em>. Matsue. pp. 64–71."
+  ]
+}

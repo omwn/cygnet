@@ -299,6 +299,7 @@ class WordNetToCygnetConverter:
         # Caching for performance
         self.doc_cache: dict[str, any] = {}  # spaCy document cache
         self.form_cache: dict[str, set[str]] = {}  # morphological forms cache
+        self.nltk_cache: dict[str, frozenset[str]] = {}  # NLTK lemmas per token
 
         # Build reverse mapping: concept_id -> list of sense_ids
         self.concept_to_senses: dict[str, list[str]] = defaultdict(list)
@@ -557,8 +558,10 @@ class WordNetToCygnetConverter:
             # 1. spaCy lemmatization.  Some models (e.g. Korean) output
             # morpheme-split lemmas like "크+다"; add the collapsed form and
             # the leading stem so that "크+다" and "크+ㄴ" can match via "크".
+            # Some multilingual models return "" as the lemma — skip these.
             lemma = token.lemma_
-            forms.add(lemma)
+            if lemma:
+                forms.add(lemma)
             if '+' in lemma:
                 forms.add(lemma.replace('+', ''))
                 forms.add(lemma.split('+')[0])
@@ -582,18 +585,34 @@ class WordNetToCygnetConverter:
         self.form_cache[word_lower] = forms
         return forms
 
+    def _token_candidates(self, token_lower: str, token_lemma: str) -> set[str]:
+        """Build the set of normalised forms for a single spaCy token.
+
+        Handles empty lemmas (multilingual fallback model), Korean morpheme-split
+        lemmas, and NLTK lemmatisation as a fallback for morphologically rich forms.
+        """
+        candidates = {token_lower}
+        if token_lemma:
+            candidates.add(token_lemma)
+            if '+' in token_lemma:
+                candidates.add(token_lemma.replace('+', ''))
+                candidates.add(token_lemma.split('+')[0])
+        if self.nltk_lemmatizer is not None:
+            if token_lower not in self.nltk_cache:
+                self.nltk_cache[token_lower] = frozenset(
+                    self.nltk_lemmatizer.lemmatize(token_lower, pos=p)
+                    for p in ['n', 'v', 'a', 'r']
+                )
+            candidates |= self.nltk_cache[token_lower]
+        return candidates
+
     def _match_single_word(self, wordform: str, text: str) -> str | None:
         """Match a single word using morphological form matching."""
         wordform_forms = self._get_all_forms(wordform)
         doc = self._get_doc(text)
         for token in doc:
             token_lower = token.text.lower()
-            token_lemma = token.lemma_.lower()
-            token_candidates = {token_lower, token_lemma}
-            if '+' in token_lemma:  # Korean morpheme-split lemmas
-                token_candidates.add(token_lemma.replace('+', ''))
-                token_candidates.add(token_lemma.split('+')[0])
-            if token_candidates & wordform_forms:
+            if self._token_candidates(token_lower, token.lemma_.lower()) & wordform_forms:
                 return token_lower
         return None
 
@@ -627,13 +646,7 @@ class WordNetToCygnetConverter:
                 target_forms = content_word_forms[content_match_idx]
 
                 token_lower = token.text.lower()
-                token_lemma = token.lemma_.lower()
-                token_candidates = {token_lower, token_lemma}
-                if '+' in token_lemma:  # Korean morpheme-split lemmas
-                    token_candidates.add(token_lemma.replace('+', ''))
-                    token_candidates.add(token_lemma.split('+')[0])
-
-                if target_forms & token_candidates:
+                if self._token_candidates(token_lower, token.lemma_.lower()) & target_forms:
                     matched_token_indices.append(j)
                     content_match_idx += 1
 

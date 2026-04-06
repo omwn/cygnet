@@ -140,6 +140,68 @@ WebAssembly).  No server-side component is needed after the initial file loads.
 
 See [`WEB_UI.md`](WEB_UI.md) for developer documentation.
 
+### Customising the web UI
+
+For a full guide to deploying Cygnet for your own project — including
+`wordnets.toml`, `local.json`, `build.sh`, releases, and GitHub Pages — see
+**[`CUSTOMIZE.md`](CUSTOMIZE.md)**.  The
+[Old Javanese Wordnet](https://github.com/davidmoeljadi/OJW) is a working
+example.
+
+To deploy `web/index.html` for a different project, create a `web/local.json`
+file alongside it.  All fields are optional — omit any you don't need:
+
+```json
+{
+  "title":       "My Wordnet",
+  "tagline":     "A multilingual lexical resource",
+  "icon":        "📚",
+
+  "databases": {
+    "main":       { "filename": "myproject.db.gz",            "url": "https://github.com/myorg/myproject/releases/latest/download/myproject.db.gz" },
+    "provenance": { "filename": "myproject-provenance.db.gz", "url": "https://github.com/myorg/myproject/releases/latest/download/myproject-provenance.db.gz" }
+  },
+
+  "logo": {
+    "src": "mylogo.svg",
+    "url": "https://myproject.org",
+    "alt": "My Project",
+    "name": "MWN"
+  },
+
+  "header": "<strong>Preview build</strong> — data updated 2025-01-01.",
+  "footer": "Built by the <a href='https://mylab.org'>My Lab</a> team.",
+
+  "about": {
+    "intro":    "<p>My Wordnet covers X languages…</p>",
+    "citation": "If you use this resource, please cite Doe (2025)."
+  },
+
+  "publications": [
+    "Jane Doe (2025). My Wordnet. In <em>Proceedings of GWC 2025</em>."
+  ]
+}
+```
+
+| Field | Effect |
+|---|---|
+| `title` | Header h1 and browser `<title>` |
+| `tagline` | Appended to `<title>` as `— tagline` |
+| `icon` | Emoji shown in the header and as the favicon |
+| `url` | URL for the title (left side of header); omit to use click-to-home behaviour |
+| `databases.main` | Main DB: `filename` (loaded by the UI) and `url` + `description` (shown in About tab) |
+| `databases.provenance` | Provenance DB: same fields |
+| `logo` | Header logo (`{src, url, alt, name}`); `name` shown left of image; `null` to hide |
+| `header` | HTML banner below the nav bar |
+| `footer` | HTML replacing the footer |
+| `about.intro` | HTML replacing the About tab intro paragraphs |
+| `about.citation` | HTML replacing the citation guidance in About |
+| `publications` | HTML strings prepended to the Publications list |
+
+Fields marked as "HTML" (`header`, `footer`, `about.*`, `publications`) are injected as raw HTML — treat them as trusted configuration, equivalent to editing the HTML file directly. Do not populate them from untrusted user input.
+
+This table lists the most commonly used fields. For the full reference (including `name`, `databases`, `about.languageData`, `searchLanguage`, `displayLanguage`, and more) see [`CUSTOMIZE.md`](CUSTOMIZE.md) or the annotated template at [`notes/local.json.example`](notes/local.json.example).
+
 ---
 
 ## Tests

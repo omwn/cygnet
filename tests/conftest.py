@@ -1,5 +1,6 @@
 """Shared pytest fixtures and test-data helpers for the Cygnet test suite."""
 
+import json
 import shutil
 import subprocess
 import textwrap
@@ -12,6 +13,11 @@ import pytest
 from cyg.merge import MergeBuilder
 
 _WORDNETS_DIR = Path(__file__).parent / 'wordnets'
+
+_DEFAULT_DATABASES = {
+    'main':       {'filename': 'cygnet.db.gz'},
+    'provenance': {'filename': 'provenance.db.gz'},
+}
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +186,17 @@ def test_db_dir(tmp_path_factory):
     shutil.copy(web_dir / 'relations.json', serve_dir / 'relations.json')
     shutil.copy(db_path.with_suffix('.db.gz'), serve_dir / 'cygnet.db.gz')
     shutil.copy(prov_path.with_suffix('.db.gz'), serve_dir / 'provenance.db.gz')
+    (serve_dir / 'local.json').write_text(json.dumps({
+        'title': 'Cygnet',
+        'icon': '🦢',
+        'databases': _DEFAULT_DATABASES,
+        'about': {
+            'citation': 'Please cite <a href="#">Test Author (2025)</a> when using this resource.',
+        },
+        'publications': [
+            'Test Author (2025). A test paper. In <em>Test Proceedings</em>.',
+        ],
+    }))
     return serve_dir
 
 
@@ -192,9 +209,6 @@ def valid_ili() -> str:
 # ---------------------------------------------------------------------------
 # HTTP server fixture (used by UI tests)
 # ---------------------------------------------------------------------------
-
-_UI_PORT = 9877
-
 
 def _make_handler(directory: str):
     class Handler(SimpleHTTPRequestHandler):
@@ -212,14 +226,67 @@ def _make_handler(directory: str):
     return Handler
 
 
+def _start_server(directory: str) -> tuple[HTTPServer, str]:
+    """Bind an HTTPServer to an ephemeral port; return (server, base_url)."""
+    server = HTTPServer(('localhost', 0), _make_handler(directory))
+    port = server.server_address[1]
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, f'http://localhost:{port}'
+
+
 @pytest.fixture(scope='session')
 def http_server(test_db_dir):
     """Session-scoped HTTP server serving the test DB directory."""
-    server = HTTPServer(
-        ('localhost', _UI_PORT),
-        _make_handler(str(test_db_dir)),
-    )
-    t = threading.Thread(target=server.serve_forever, daemon=True)
-    t.start()
-    yield f'http://localhost:{_UI_PORT}'
+    server, url = _start_server(str(test_db_dir))
+    yield url
+    server.shutdown()
+
+
+@pytest.fixture(scope='session')
+def http_server_with_config(test_db_dir, tmp_path_factory):
+    """HTTP server like http_server but also serves a local.json config file.
+
+    The config sets searchLanguage='fr' and displayLanguage='fr' so tests
+    can verify that local.json seeds the correct UI defaults on page load.
+    """
+    config_dir = tmp_path_factory.mktemp('serve_config')
+    for f in test_db_dir.iterdir():
+        if f.name != 'local.json':
+            shutil.copy(f, config_dir / f.name)
+    (config_dir / 'local.json').write_text(json.dumps({
+        'searchLanguage': 'fr',
+        'displayLanguage': 'fr',
+        'databases': _DEFAULT_DATABASES,
+    }))
+    server, url = _start_server(str(config_dir))
+    yield url
+    server.shutdown()
+
+
+@pytest.fixture(scope='session')
+def http_server_with_branding(test_db_dir, tmp_path_factory):
+    """HTTP server serving a local.json with full header branding.
+
+    Sets title='TestWN', icon='🧪', name='TWN', and a custom logo with
+    name='TWN' so tests can verify both header sides are customisable.
+    """
+    branding_dir = tmp_path_factory.mktemp('serve_branding')
+    for f in test_db_dir.iterdir():
+        if f.name != 'local.json':
+            shutil.copy(f, branding_dir / f.name)
+    (branding_dir / 'local.json').write_text(json.dumps({
+        'title': 'TestWN',
+        'icon': '🧪',
+        'name': 'TWN',
+        'url': 'https://example.org/testwn',
+        'logo': {
+            'src': 'omw-logo.svg',
+            'url': 'https://omwn.org',
+            'alt': 'Test Wordnet',
+            'name': 'TWN',
+        },
+        'databases': _DEFAULT_DATABASES,
+    }))
+    server, url = _start_server(str(branding_dir))
+    yield url
     server.shutdown()

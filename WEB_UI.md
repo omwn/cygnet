@@ -45,17 +45,22 @@ The whole UI is a single `App` component.  Important state:
 |---|---|---|
 | `dbReady` | `false` | True once sql.js + DB are initialised |
 | `relConfigLoaded` | `false` | True once `relations.json` has loaded; triggers label re-render |
-| `activeTab` | `'browser'` | Top-level tab: `browser`, `python`, `data`, `about`, `publications`, `wordnets` |
-| `view` | `'search'` | Within the browser tab: `search` or `concept` |
+| `siteConfig` | `{}` | Loaded from `local.json`; controls branding, DB filenames, language defaults |
+| `activeTab` | `'browser'` | Top-level tab: `browser`, `about`, `publications`, `wordnets` |
+| `view` | `'search'` | Within the browser tab: `search`, `concept`, or `sense` |
 | `relationsView` | `localStorage` / `'graph'` | How concept relations are displayed: `graph`, `text`, `none` |
 | `selectedConcept` | `null` | Synset rowid of currently open concept |
 | `selectedSense` | `null` | Sense rowid of currently open sense |
+| `languageFilter` | `new Set()` | Active search language filter (BCP 47 codes); seeded from `local.json` `searchLanguage` |
+| `definitionLanguage` | `localStorage` / `'en'` | Display language for definitions and synset labels; seeded from `local.json` `displayLanguage` if no localStorage value |
+| `synonymsCollapsed` | `{}` | Per-sense expansion state: `false` = expanded, `true` = explicitly collapsed, absent = default |
 
 Key `useEffect` hooks (in order):
 1. **`relations.json` fetch** — runs on mount; populates `_relConfig`, calls `_buildRelLookups()`, sets `relConfigLoaded`
-2. **DB init** — runs on mount; loads sql.js, fetches/decompresses `cygnet.db.gz`, sets up the DB
-3. **Provenance DB** — loads `provenance.db.gz` on demand when user clicks "Load provenance data"
-4. **URL sync** — keeps `window.location.hash` in sync with current view/search/concept
+2. **`local.json` / site config** — runs on mount; awaits `_configPromise`, sets `siteConfig` and applies `searchLanguage`/`displayLanguage` defaults
+3. **DB init** — runs on mount; awaits `_configPromise`, loads sql.js, fetches/decompresses the DB (with IndexedDB caching keyed by filename + mtime), sets up the DB
+4. **Provenance DB** — loads provenance DB on demand when user clicks "Load provenance data"
+5. **URL sync** — keeps `window.location.hash` in sync with current view/search/concept/filters
 
 ---
 
@@ -90,9 +95,7 @@ Each entry maps a **DB relation name** to its display metadata:
 | `activeTab` value | Label shown | Contents |
 |---|---|---|
 | `browser` | Browser | Search + concept/sense view |
-| `python` | Python | Placeholder |
-| `data` | Data | Download links |
-| `about` | About | Citation guidance, language data, images, ARASAAC info |
+| `about` | About | Download links, citation guidance, language data, ARASAAC info |
 | `publications` | Publications | Key papers + wordnet citations from DB |
 | `wordnets` | Wordnets | Per-resource table with concept/sense counts, licences, citations |
 
@@ -130,7 +133,7 @@ uv run pytest tests/test_ui.py -v
 
 ### Add a new top-level tab
 
-1. Add the tab ID to the array in the `{['browser', 'python', ...].map(tab => ...)}` render block (~line 1671).
+1. Add the tab ID to the array in the `{['browser', 'about', 'publications', 'wordnets'].map(tab => ...)}` render block.
 2. Add a `{activeTab === 'newtab' && ...}` block in the tab content section below.
 
 ### Add a new relation type

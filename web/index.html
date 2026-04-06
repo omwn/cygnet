@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cygnet — A Network of Signs</title>
+    <title></title>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.js"></script>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🦢</text></svg>">
+
     <style>
         .sense-box:hover { border-color: #60a5fa !important; }
         .sense-box:has(.concept-inner:hover) { border-color: #e5e7eb !important; }
@@ -28,6 +28,19 @@
         // Structure: { dbName: { short, color, en, [langCode]: label, ... } }
         let _relConfig = {};
         let _relLang = 'en';
+
+        // ========== SITE CONFIG ==========
+        // Loaded from local.json at startup; falls back silently if absent.
+        // See notes/local.json.example for supported fields.
+        let _siteConfig = {};
+        const _configPromise = fetch('local.json')
+            .then(r => r.ok ? r.json() : {})
+            .catch(() => ({}))
+            .then(cfg => {
+                if (cfg && typeof cfg === 'object' && !Array.isArray(cfg)) {
+                    Object.assign(_siteConfig, cfg);
+                }
+            });
 
         // Build lookup tables from _relConfig once loaded.
         let RELATION_TO_SHORT = {};
@@ -73,8 +86,6 @@
         let _SQL = null;
         let _provDb = null;
 
-        // Prepared statement cache
-        const _stmtCache = {};
         function cachedExec(sql, params = []) {
             if (!_db) return [];
             try {
@@ -108,7 +119,7 @@
         }
 
         const _SENSE_COLS = `s.rowid as sense_id, e.language_rowid as lang_rowid, syn.pos as pos,
-                       f.form as lemma, s.sense_index as ind, syn.rowid as synset_id`;
+                       f.form as lemma, f.rank as matched_rank, s.sense_index as ind, syn.rowid as synset_id`;
         const _SENSE_JOINS = `FROM forms f
                 JOIN entries e ON f.entry_rowid = e.rowid
                 JOIN senses s ON s.entry_rowid = e.rowid
@@ -536,6 +547,17 @@
             });
         }
 
+        function useClickOutside(ref, open, onClose) {
+            useEffect(() => {
+                if (!open) return;
+                const handleClick = (e) => {
+                    if (ref.current && !ref.current.contains(e.target)) onClose();
+                };
+                document.addEventListener('mousedown', handleClick);
+                return () => document.removeEventListener('mousedown', handleClick);
+            }, [open]);
+        }
+
         // ========== MAIN COMPONENT ==========
         function DictionaryBrowser() {
             const [dbReady, setDbReady] = useState(false);
@@ -547,6 +569,7 @@
             const [allResources, setAllResources] = useState([]);
             const [dbStats, setDbStats] = useState(null);
             const [wnSort, setWnSort] = useState({ col: null, asc: true });
+            const [siteConfig, setSiteConfig] = useState({});
             const [provenanceReady, setProvenanceReady] = useState(false);
             const [provLoading, setProvLoading] = useState(false);
             const [provError, setProvError] = useState(null);
@@ -575,6 +598,7 @@
             const [collapsedSections, setCollapsedSections] = useState({});
             const [synonymsCollapsed, setSynonymsCollapsed] = useState({});
             const [settingsOpen, setSettingsOpen] = useState(false);
+            const [helpOpen, setHelpOpen] = useState(false);
             const [relationsView, setRelationsView] = useState(() =>
                 localStorage.getItem('relationsView') || 'graph'
             );
@@ -593,6 +617,7 @@
             const [pathNotFound, setPathNotFound] = useState(false);
             const isPopStateRef = useRef(false);
             const isInitialLoadRef = useRef(true);
+            const initialUrlHandledRef = useRef(false);
             const hoverTimeoutRef = useRef(null);
             const isLoadingRelationsRef = useRef(false);
             const simulationRef = useRef(null);
@@ -604,6 +629,7 @@
             const menuRef = useRef(null);
             const menuInteractionRef = useRef(false);
             const settingsRef = useRef(null);
+            const helpRef = useRef(null);
             const hoveredNodeRef = useRef(null);
             const nodeSizeCache = useRef(new Map());
             const MAX_CACHE_SIZE = 200;
@@ -619,15 +645,8 @@
 
             useEffect(() => { hoveredNodeRef.current = hoveredNode; }, [hoveredNode]);
 
-            useEffect(() => {
-                if (!settingsOpen) return;
-                const handleClick = (e) => {
-                    if (settingsRef.current && !settingsRef.current.contains(e.target))
-                        setSettingsOpen(false);
-                };
-                document.addEventListener('mousedown', handleClick);
-                return () => document.removeEventListener('mousedown', handleClick);
-            }, [settingsOpen]);
+            useClickOutside(settingsRef, settingsOpen, () => setSettingsOpen(false));
+            useClickOutside(helpRef, helpOpen, () => setHelpOpen(false));
 
             useEffect(() => {
                 fetch('relations.json')
@@ -636,30 +655,62 @@
                     .catch(e => console.warn('relations.json fetch failed:', e));
             }, []);
 
+            useEffect(() => {
+                _configPromise.then(() => {
+                    setSiteConfig({..._siteConfig});
+                    const { title, tagline, icon, searchLanguage, displayLanguage } = _siteConfig;
+                    if (title) document.title = title + (tagline ? ` — ${tagline}` : '');
+                    if (icon) {
+                        let link = document.querySelector("link[rel='icon']");
+                        if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
+                        link.href = `data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>${encodeURIComponent(icon)}</text></svg>`;
+                    }
+                    if (displayLanguage && !localStorage.getItem('definitionLanguage')) {
+                        setDefinitionLanguage(displayLanguage);
+                    }
+                    if (searchLanguage) {
+                        const langs = Array.isArray(searchLanguage) ? searchLanguage : [searchLanguage];
+                        setLanguageFilter(new Set(langs));
+                    }
+                });
+            }, []);
+
             // Initialize database
             useEffect(() => {
                 (async () => {
                     try {
+                        await _configPromise;
+                        const dbFile = _siteConfig.databases?.main?.filename;
+                        if (!dbFile) { setDbReady(true); return; }
                         setDbProgress('Loading sql.js...');
                         const SQL = await initSqlJs({
                             locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/${file}`
                         });
 
-                        // Check IndexedDB cache, validating against server mtime
+                        // Check IndexedDB cache, validating against filename and server mtime
                         let buf;
                         try {
                             const cached = await idbGet('db');
                             if (cached) {
                                 let stale = false;
-                                try {
-                                    const head = await fetch(DB_BASE + 'cygnet.db.gz', { method: 'HEAD' });
-                                    const serverMtime = head.headers.get('last-modified') || head.headers.get('etag');
-                                    const cachedMtime = await idbGet('db-mtime');
-                                    if (serverMtime && serverMtime !== cachedMtime) stale = true;
-                                } catch (_) { /* offline — trust cache */ }
+                                const cachedFilename = await idbGet('db-filename');
+                                if (!cachedFilename || cachedFilename !== dbFile) {
+                                    stale = true;
+                                } else {
+                                    try {
+                                        const head = await fetch(DB_BASE + dbFile, { method: 'HEAD' });
+                                        const serverMtime = head.headers.get('last-modified') || head.headers.get('etag');
+                                        const cachedMtime = await idbGet('db-mtime');
+                                        if (serverMtime && serverMtime !== cachedMtime) stale = true;
+                                    } catch (_) { /* offline — trust cache */ }
+                                }
                                 if (stale) {
                                     setDbProgress('Database updated, clearing cache...');
-                                    await Promise.all([idbDel('db'), idbDel('provdb'), idbDel('db-mtime')]);
+                                    await Promise.all([
+                                        idbDel('db'), idbDel('provdb'),
+                                        idbDel('db-mtime'), idbDel('db-filename'),
+                                        idbDel('provdb-filename'),
+                                    ]);
                                 } else {
                                     setDbProgress('Loading from cache...');
                                     buf = new Uint8Array(cached);
@@ -672,7 +723,7 @@
                         if (!buf) {
                             // Fetch compressed database
                             setDbProgress('Downloading database...');
-                            const response = await fetch(DB_BASE + 'cygnet.db.gz');
+                            const response = await fetch(DB_BASE + dbFile);
                             if (!response.ok) throw new Error(`Failed to fetch database: ${response.status}`);
                             const serverMtime = response.headers.get('last-modified') || response.headers.get('etag') || '';
                             const compressedTotal = parseInt(response.headers.get('content-length') || '0');
@@ -712,6 +763,7 @@
                             setDbProgress('Caching for next visit...');
                             try {
                                 await idbPut('db', buf.buffer);
+                                await idbPut('db-filename', dbFile);
                                 if (serverMtime) await idbPut('db-mtime', serverMtime);
                             } catch (e) {
                                 console.warn('IndexedDB cache write failed:', e);
@@ -751,10 +803,13 @@
             };
 
             const toggleSynonyms = (senseId) => {
-                setSynonymsCollapsed(prev => ({
-                    ...prev,
-                    [senseId]: prev[senseId] === false ? true : false
-                }));
+                setSynonymsCollapsed(prev => {
+                    const sense = loadedSenses[senseId];
+                    const autoExpand = sense?.matched_rank > 0;
+                    const cur = prev[senseId];
+                    const isCurrentlyExpanded = cur === false || (autoExpand && cur !== true);
+                    return { ...prev, [senseId]: isCurrentlyExpanded ? true : false };
+                });
             };
 
             const loadConcept = useCallback((conceptId) => {
@@ -907,16 +962,26 @@
                 setProvLoading(true);
                 setProvError(null);
                 try {
+                    await _configPromise;
+                    const provFile = _siteConfig.databases?.provenance?.filename;
+                    if (!provFile) { setProvLoading(false); return; }
                     let buf;
                     try {
                         const cached = await idbGet('provdb');
-                        if (cached) buf = new Uint8Array(cached);
+                        if (cached) {
+                            const cachedFilename = await idbGet('provdb-filename');
+                            if (!cachedFilename || cachedFilename !== provFile) {
+                                await Promise.all([idbDel('provdb'), idbDel('provdb-filename')]);
+                            } else {
+                                buf = new Uint8Array(cached);
+                            }
+                        }
                     } catch (e) {
                         console.warn('IndexedDB provenance cache read failed:', e);
                     }
 
                     if (!buf) {
-                        const response = await fetch(DB_BASE + 'provenance.db.gz');
+                        const response = await fetch(DB_BASE + provFile);
                         if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`);
                         const ds = new DecompressionStream('gzip');
                         const reader = response.body.pipeThrough(ds).getReader();
@@ -931,7 +996,10 @@
                         buf = new Uint8Array(loaded);
                         let offset = 0;
                         for (const chunk of chunks) { buf.set(chunk, offset); offset += chunk.length; }
-                        try { await idbPut('provdb', buf.buffer); } catch (e) {
+                        try {
+                            await idbPut('provdb', buf.buffer);
+                            await idbPut('provdb-filename', provFile);
+                        } catch (e) {
                             console.warn('IndexedDB provenance cache write failed:', e);
                         }
                     }
@@ -997,20 +1065,21 @@
                     const hash = window.location.hash.slice(1);
                     const [path, queryString] = hash.split('?');
 
-                    if (['python', 'data', 'about', 'publications', 'wordnets'].includes(path?.replace('/', ''))) {
+                    if (['about', 'publications', 'wordnets'].includes(path?.replace('/', ''))) {
                         setActiveTab(path.replace('/', ''));
                     } else {
                         setActiveTab('browser');
                         const params = new URLSearchParams(queryString || '');
                         const urlSearch = params.get('q');
-                        const urlSearchLang = params.get('search_lang') ? new Set(params.get('search_lang').split(',')) : new Set();
+                        const rawSearchLang = params.get('search_lang');
+                        const urlSearchLang = rawSearchLang ? new Set(rawSearchLang.split(',')) : null;
                         const urlDisplayLang = params.get('display_lang');
                         const urlPos = params.get('pos') ? new Set(params.get('pos').split(',')) : new Set();
                         const urlSense = params.get('sense');
                         const urlSenseFilter = params.get('s');
                         const urlConcept = params.get('concept');
 
-                        setLanguageFilter(urlSearchLang);
+                        if (urlSearchLang !== null) setLanguageFilter(urlSearchLang);
                         if (urlDisplayLang) setDefinitionLanguage(urlDisplayLang);
                         setPosFilter(urlPos);
                         setSenseFilter(urlSenseFilter);
@@ -1033,13 +1102,22 @@
                             if (urlSearch) {
                                 setSearchTerm(urlSearch);
                                 setCurrentSearch(urlSearch);
+                                // Use URL param if provided; otherwise fall back to
+                                // the local.json searchLanguage default (read directly
+                                // from _siteConfig to avoid stale closure over state).
+                                const def = _siteConfig.searchLanguage;
+                                const searchLang = urlSearchLang ?? (def
+                                    ? new Set(Array.isArray(def) ? def : [def])
+                                    : new Set());
+                                performSearch(urlSearch, searchLang, urlPos, urlSenseFilter);
                             }
                         }
                     }
                 };
 
-                // Handle initial URL
-                if (dbReady) {
+                // Handle initial URL (only once, even if effect re-runs due to dep changes)
+                if (dbReady && !initialUrlHandledRef.current) {
+                    initialUrlHandledRef.current = true;
                     const hash = window.location.hash;
                     if (hash && hash !== '#/search') handlePopState();
                 }
@@ -1069,18 +1147,21 @@
                     const sid = r.sense_id.toString();
                     if (sense && sid !== sense) return;
 
+                    const prev = senseMap[sid];
                     senseMap[sid] = {
                         id: sid,
                         l: r.lemma,
                         lg: r.lg,
                         c: r.synset_id,
                         ind: r.ind,
-                        ontological_category: r.pos
+                        ontological_category: r.pos,
+                        matched_rank: prev ? Math.max(prev.matched_rank, r.matched_rank) : r.matched_rank,
                     };
                 });
 
                 setLoadedSenses(prev => ({ ...prev, ...senseMap }));
                 setCurrentSearchSenseIds(new Set(Object.keys(senseMap)));
+
                 setLoadingResults(false);
 
                 if (sense) {
@@ -1094,12 +1175,14 @@
                 const loadBatch = () => {
                     if (i >= senseIds.length) return;
                     const batch = senseIds.slice(i, i + BATCH_SIZE);
-                    const updates = {};
-                    batch.forEach(sid => {
-                        const full = querySense(parseInt(sid));
-                        if (full) updates[sid] = full;
+                    setLoadedSenses(prev => {
+                        const updates = {};
+                        batch.forEach(sid => {
+                            const full = querySense(parseInt(sid));
+                            if (full) updates[sid] = { ...full, matched_rank: prev[sid]?.matched_rank };
+                        });
+                        return { ...prev, ...updates };
                     });
-                    setLoadedSenses(prev => ({ ...prev, ...updates }));
                     i += BATCH_SIZE;
                     if (i < senseIds.length) setTimeout(loadBatch, 0);
                 };
@@ -1113,6 +1196,8 @@
                 setCurrentSearch(term);
                 setSenseFilter(null);
                 setSynonymsCollapsed({});
+                setActiveTab('browser');
+                setView('search');
                 performSearch(term, languageFilter, posFilter, null);
             };
 
@@ -1656,6 +1741,7 @@
             }, []);
 
             const allPosValues = ['NOUN', 'VERB', 'ADJ', 'ADV', 'CONJ', 'ADP', 'NREF', 'UNK'];
+            const siteName = siteConfig.name || siteConfig.title || '';
 
             useEffect(() => { if (dbError) setActiveTab('about'); }, [dbError]);
 
@@ -1680,17 +1766,35 @@
                         <div className="max-w-4xl mx-auto px-4 py-3">
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-3">
-                                    <button onClick={handleLogoClick} className="text-left hover:opacity-80 flex items-center gap-1.5">
-                                        <h1 className="text-4xl -mt-0.5">🦢</h1>
-                                        <h1 className="text-3xl font-bold text-gray-800"> Cygnet</h1>
-                                    </button>
+                                    {siteConfig.url
+                                        ? <a href={siteConfig.url} target="_blank" rel="noopener noreferrer" className="hover:opacity-80 flex items-center gap-1.5">
+                                              {siteConfig.icon && <h1 className="text-4xl -mt-0.5">{siteConfig.icon}</h1>}
+                                              {siteConfig.title && <h1 className="text-3xl font-bold text-gray-800"> {siteConfig.title}</h1>}
+                                          </a>
+                                        : <button onClick={handleLogoClick} className="text-left hover:opacity-80 flex items-center gap-1.5">
+                                              {siteConfig.icon && <h1 className="text-4xl -mt-0.5">{siteConfig.icon}</h1>}
+                                              {siteConfig.title && <h1 className="text-3xl font-bold text-gray-800"> {siteConfig.title}</h1>}
+                                          </button>
+                                    }
                                 </div>
-                                <a href="https://omwn.org" target="_blank" rel="noopener noreferrer" className="hover:opacity-80">
-                                    <img src="omw-logo.svg" alt="Open Multilingual Wordnet" className="h-10" />
-                                </a>
+                                {siteConfig.logo !== null && (
+                                    siteConfig.logo
+                                        ? (
+                                            siteConfig.logo.url
+                                                ? <a href={siteConfig.logo.url} target="_blank" rel="noopener noreferrer" className="hover:opacity-80 flex items-center gap-2">
+                                                      {siteConfig.logo.name && <span className="text-3xl font-bold text-gray-800">{siteConfig.logo.name}</span>}
+                                                      <img src={siteConfig.logo.src} alt={siteConfig.logo.alt || ''} className="h-10" />
+                                                  </a>
+                                                : <span className="flex items-center gap-2">
+                                                      {siteConfig.logo.name && <span className="text-3xl font-bold text-gray-800">{siteConfig.logo.name}</span>}
+                                                      <img src={siteConfig.logo.src} alt={siteConfig.logo.alt || ''} className="h-10" />
+                                                  </span>
+                                          )
+                                        : null
+                                )}
                             </div>
-                            <nav className="flex items-end gap-3 mt-3 -mb-3">
-                                {['browser', 'python', 'data', 'about', 'publications', 'wordnets'].map(tab => (
+                            <nav className="flex items-end gap-3 mt-3 -mb-3 flex-wrap">
+                                {['browser', 'about', 'publications', 'wordnets'].map(tab => (
                                     <button key={tab}
                                         onClick={() => setActiveTab(tab)}
                                         className={`px-4 py-2 rounded-t-lg border-b-2 transition-colors ${
@@ -1700,7 +1804,48 @@
                                         }`}
                                     >{tab.charAt(0).toUpperCase() + tab.slice(1)}</button>
                                 ))}
-                                <div className="ml-auto relative pb-0" ref={settingsRef}>
+                                <div className="flex items-center gap-1.5 flex-grow min-w-48 pb-0.5">
+                                    <input type="text" value={searchTerm}
+                                        onChange={(e) => setSearchTerm(e.target.value)}
+                                        onKeyPress={handleKeyPress}
+                                        placeholder={dbReady ? "word, hot*, *ness, i1234, def:bright" : "Loading…"}
+                                        disabled={!dbReady}
+                                        className="flex-grow min-w-0 px-3 py-1.5 text-sm border border-gray-300 rounded disabled:opacity-50"
+                                    />
+                                    <div className="relative group flex-shrink-0">
+                                        <button className="w-6 h-6 rounded-full border border-gray-400 text-gray-500 text-xs font-bold hover:border-blue-500 hover:text-blue-500 flex items-center justify-center">ℹ</button>
+                                        <div className="absolute right-0 top-full mt-1 hidden group-hover:block bg-white border border-gray-200 rounded shadow-lg p-3 text-xs text-gray-700 z-30 w-64 space-y-1.5">
+                                            <div><span className="font-mono font-semibold">word</span> — exact match</div>
+                                            <div><span className="font-mono font-semibold">hot*</span> or <span className="font-mono font-semibold">*ness</span> — glob (<span className="font-mono">*</span> = any characters, <span className="font-mono">?</span> = one)</div>
+                                            <div><span className="font-mono font-semibold">i1234</span> or <span className="font-mono font-semibold">cili.i1234</span> — look up concept by ILI</div>
+                                            <div><span className="font-mono font-semibold">def:word</span> — search inside definitions</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="relative pb-0" ref={helpRef}>
+                                    <button onClick={() => setHelpOpen(o => !o)}
+                                        title="Help"
+                                        className={`px-3 py-2 rounded-t-lg border-b-2 transition-colors ${helpOpen ? 'bg-gray-50 border-blue-500 text-blue-700' : 'border-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-50'}`}>
+                                        ?
+                                    </button>
+                                    {helpOpen && (
+                                        <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded shadow-lg z-20 w-80 p-4 text-sm text-gray-700 space-y-3">
+                                            <p>Type in the search box and press <kbd className="px-1 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs">Enter</kbd> to search. Results are <strong>senses</strong> — a word in a specific meaning. Click a sense to open its <strong>concept view</strong>, which shows relations (hypernyms, hyponyms, …) and lexicalizations across all languages.</p>
+                                            <div className="space-y-1">
+                                                <p className="font-semibold text-gray-500 text-xs uppercase tracking-wide">Search syntax</p>
+                                                <div><span className="font-mono font-semibold">dog</span> — exact word match</div>
+                                                <div><span className="font-mono font-semibold">dog*</span> or <span className="font-mono font-semibold">*ness</span> — wildcard (<span className="font-mono">*</span> = any characters, <span className="font-mono">?</span> = one)</div>
+                                                <div><span className="font-mono font-semibold">def:bright</span> — search inside definitions</div>
+                                                <div><span className="font-mono font-semibold">i1234</span> — look up concept by ILI</div>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <p className="font-semibold text-gray-500 text-xs uppercase tracking-wide">Filtering &amp; display</p>
+                                                <p>Use <strong>⚙ Settings</strong> to filter results by language or part of speech, and to set the display language for definitions and synset labels.</p>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="relative pb-0" ref={settingsRef}>
                                     <button onClick={() => setSettingsOpen(o => !o)}
                                         title="Settings"
                                         className={`px-3 py-2 rounded-t-lg border-b-2 transition-colors relative ${settingsOpen ? 'bg-gray-50 border-blue-500 text-blue-700' : 'border-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-50'}`}>
@@ -1820,6 +1965,13 @@
                         </div>
                     </header>
 
+                    {siteConfig.header && (
+                        <div className="w-full bg-blue-50 border-b border-blue-100">
+                            <div className="max-w-4xl mx-auto px-4 py-3 text-sm text-gray-700"
+                                 dangerouslySetInnerHTML={{ __html: siteConfig.header }} />
+                        </div>
+                    )}
+
                     <main className="w-full max-w-4xl mx-auto px-4 pt-6 pb-4 flex-grow">
                         {activeTab === 'browser' && (
                             <div>
@@ -1828,9 +1980,8 @@
                                         <h2 className="font-bold text-xl mb-2">Error Loading Database</h2>
                                         <p className="mb-4 text-gray-700">{dbError}</p>
                                         <p className="text-sm text-gray-500">
-                                            On localhost, make sure <code>cygnet.db.gz</code> is in the same directory as this HTML file.<br/>
-                                            In production, the database is fetched from the{' '}
-                                            <a href="https://github.com/rowanhm/cygnet/releases/latest" className="text-blue-600 hover:underline">latest GitHub release</a>.
+                                            {siteConfig.databases?.main?.filename && <>On localhost, make sure <code>{siteConfig.databases.main.filename}</code> is in the same directory as this HTML file.<br/></>}
+                                            In production, the database is fetched from the release URL configured in <code>local.json</code>.
                                             The release may still be building.
                                         </p>
                                     </div>
@@ -1838,7 +1989,7 @@
                                 {!dbReady && !dbError && (
                                     <div className="flex justify-center mt-16">
                                         <div className="text-center w-72">
-                                            <h1 className="text-4xl mb-4">🦢</h1>
+                                            {siteConfig.icon && <h1 className="text-4xl mb-4">{siteConfig.icon}</h1>}
                                             <p className="text-gray-600 mb-3">{dbProgress || 'Initializing...'}</p>
                                             {downloadProgress && (
                                                 <div>
@@ -1852,29 +2003,21 @@
                                         </div>
                                     </div>
                                 )}
+                                {view === 'search' && dbReady && !currentSearch && !senseFilter && (
+                                    <div className="max-w-lg mx-auto mt-16 text-gray-600 space-y-5">
+                                        <p className="text-base">Search for a word, definition, or concept ILI — results are <strong>senses</strong> (a word in a specific meaning). Click any sense to open its <strong>concept view</strong>, which shows how concepts relate to each other and how they are expressed across languages.</p>
+                                        <div className="bg-gray-50 border border-gray-200 rounded p-4 space-y-1.5 text-sm">
+                                            <p className="font-semibold text-gray-500 text-xs uppercase tracking-wide mb-2">Search syntax</p>
+                                            <div><span className="font-mono font-semibold text-gray-800">dog</span> — exact word match</div>
+                                            <div><span className="font-mono font-semibold text-gray-800">dog*</span> or <span className="font-mono font-semibold text-gray-800">*ness</span> — wildcard (<span className="font-mono">*</span> = any characters, <span className="font-mono">?</span> = one character)</div>
+                                            <div><span className="font-mono font-semibold text-gray-800">def:bright</span> — search inside definitions</div>
+                                            <div><span className="font-mono font-semibold text-gray-800">i1234</span> or <span className="font-mono font-semibold text-gray-800">cili.i1234</span> — look up concept by ILI</div>
+                                        </div>
+                                        <p className="text-sm">Use <strong>⚙ Settings</strong> to filter results by language or part of speech, and to choose the display language for definitions and synset labels. This guide is always available via the <strong>?</strong> button.</p>
+                                    </div>
+                                )}
                                 {view === 'search' && dbReady && (
                                     <div className="mb-8">
-                                        {!senseFilter && (
-                                            <div className="flex items-center gap-2">
-                                                <input type="text" value={searchTerm}
-                                                    onChange={(e) => setSearchTerm(e.target.value)}
-                                                    onKeyPress={handleKeyPress}
-                                                    placeholder="word, hot*, *ness, i1234, def:bright"
-                                                    className="flex-grow px-3 py-2 border border-gray-300 rounded"
-                                                />
-                                                <div className="relative group flex-shrink-0">
-                                                    <button className="w-6 h-6 rounded-full border border-gray-400 text-gray-500 text-xs font-bold hover:border-blue-500 hover:text-blue-500 flex items-center justify-center">ℹ</button>
-                                                    <div className="absolute right-0 top-full mt-1 hidden group-hover:block bg-white border border-gray-200 rounded shadow-lg p-3 text-xs text-gray-700 z-30 w-64 space-y-1.5">
-                                                        <div><span className="font-mono font-semibold">word</span> — exact match</div>
-                                                        <div><span className="font-mono font-semibold">hot*</span> or <span className="font-mono font-semibold">*ness</span> — glob (<span className="font-mono">*</span> = any characters, <span className="font-mono">?</span> = one)</div>
-                                                        <div><span className="font-mono font-semibold">i1234</span> or <span className="font-mono font-semibold">cili.i1234</span> — look up concept by ILI</div>
-                                                        <div><span className="font-mono font-semibold">def:word</span> — search inside definitions</div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        )}
-
-
                                         {senseFilter && (
                                             <div className="mb-4 bg-blue-50 border border-blue-200 rounded p-4">
                                                 <div className="flex items-center justify-between">
@@ -1960,6 +2103,9 @@
                                                                                                 const [definition, defLang] = selectDef(concept?.d, definitionLanguage);
                                                                                                 const defIsFallback = defLang && defLang !== definitionLanguage;
                                                                                                 const hasExtra = !!(sense.v?.length || synonyms.length || sense.ex?.length || sense.sr?.length);
+                                                                                                const autoExpand = sense.matched_rank > 0;
+                                                                                                const isExpanded = synonymsCollapsed[sense.id] === false ||
+                                                                                                                  (autoExpand && synonymsCollapsed[sense.id] !== true);
                                                                                                 return (
                                                                                                     <div key={sense.id}
                                                                                                         className={`bg-gray-50 p-3 rounded border border-gray-200 sense-box ${hasExtra ? 'hover:border-blue-400 cursor-pointer' : ''}`}
@@ -1997,11 +2143,11 @@
                                                                                                             </div>
                                                                                                             {hasExtra && (
                                                                                                                 <div className="text-gray-500 text-sm pt-1 flex-shrink-0">
-                                                                                                                    {synonymsCollapsed[sense.id] === false ? '▼' : '▶'}
+                                                                                                                    {isExpanded ? '▼' : '▶'}
                                                                                                                 </div>
                                                                                                             )}
                                                                                                         </div>
-                                                                                                        {synonymsCollapsed[sense.id] === false && (
+                                                                                                        {isExpanded && (
                                                                                                             <div className="mt-2 space-y-2">
                                                                                                                 {sense.v && sense.v.length > 0 && (
                                                                                                                     <div className="text-sm text-gray-600">
@@ -2460,40 +2606,13 @@
                             </div>
                         )}
 
-                        {activeTab === 'python' && <div><h2 className="text-xl font-bold mb-4">Python Module</h2><p className="text-gray-600">Coming soon.</p></div>}
-                        {activeTab === 'data' && (
-                            <div>
-                                <h2 className="text-xl font-bold mb-4">Data Download</h2>
-                                <p className="text-gray-700 mb-6">
-                                    The Cygnet databases are available for download below. Both are SQLite databases compressed with gzip.
-                                </p>
-                                <ul className="space-y-4 mb-8">
-                                    <li className="text-sm text-gray-800">
-                                        <a href="https://github.com/rowanhm/cygnet/releases/latest/download/cygnet.db.gz" className="text-blue-600 hover:underline font-medium">cygnet.db.gz</a>
-                                        {' '}— The main lexical database, containing synsets, entries, senses, definitions, examples, and pronunciations across all languages.
-                                    </li>
-                                    <li className="text-sm text-gray-800">
-                                        <a href="https://github.com/rowanhm/cygnet/releases/latest/download/provenance.db.gz" className="text-blue-600 hover:underline font-medium">provenance.db.gz</a>
-                                        {' '}— Provenance records tracing every data point back to its source wordnet and original identifier.
-                                    </li>
-                                </ul>
-                                <p className="text-gray-700 mb-4">
-                                    The individual wordnets that make up Cygnet are each available from their respective projects — see the <button onClick={() => setActiveTab('wordnets')} className="text-blue-600 hover:underline">Wordnets</button> tab for the full list with links.
-                                </p>
-                                <p className="text-gray-700">
-                                    Source code for merging and displaying wordnets is available on <a href="https://github.com/rowanhm/cygnet" className="text-blue-600 hover:underline">GitHub</a>.
-                                </p>
-                            </div>
-                        )}
                         {activeTab === 'about' && (
                             <div>
                                 <h2 className="text-xl font-bold mb-4">About</h2>
-                                <p className="text-gray-700 mb-4">
-                                    OMW Cygnet is an experimental reformulation of Wordnet that is designed to eliminate conflicting records, and improve modularity. It extends the idea of the <a href="https://omwn.org/" className="text-blue-600 hover:underline">Open Multilingual Wordnet</a> and puts concepts at the core of the structure.
-                                </p>
-                                <p className="text-gray-700 mb-4">
-                                    Developed by Rowan Hall Maudslay and Francis Bond. Source code is available on <a href="https://github.com/rowanhm/cygnet" className="text-blue-600 hover:underline">GitHub</a>.
-                                </p>
+                                {siteConfig.about?.intro &&
+                                    <div className="text-gray-700 mb-4"
+                                         dangerouslySetInnerHTML={{ __html: siteConfig.about.intro }} />
+                                }
                                 {dbStats && (
                                     <div className="border-t border-gray-200 pt-4 mb-4">
                                         <h3 className="font-medium text-sm text-gray-700 mb-3">Database statistics</h3>
@@ -2515,13 +2634,49 @@
                                 )}
                                 <div className="border-t border-gray-200 pt-4 mb-4">
                                     <h3 className="font-medium text-sm text-gray-700 mb-2">Citation</h3>
-                                    <p className="text-sm text-gray-600">If you use Cygnet, please cite <button onClick={() => setActiveTab('publications')} className="text-blue-600 hover:underline">Maudslay &amp; Bond (2026)</button> for Cygnet and <button onClick={() => setActiveTab('publications')} className="text-blue-600 hover:underline">Bond &amp; Foster (2013)</button> for the underlying Open Multilingual Wordnet, as well as the individual <button onClick={() => setActiveTab('wordnets')} className="text-blue-600 hover:underline">wordnets</button> whose data you use.</p>
+                                    {siteConfig.about?.citation &&
+                                        <div className="text-sm text-gray-600"
+                                             dangerouslySetInnerHTML={{ __html: siteConfig.about.citation }} />
+                                    }
+                                </div>
+                                <div className="border-t border-gray-200 pt-4 mb-4">
+                                    <h3 className="font-medium text-sm text-gray-700 mb-2">Download</h3>
+                                    {(() => {
+                                        const rawDbs = siteConfig.databases;
+                                        const dbs = !rawDbs ? []
+                                            : Array.isArray(rawDbs) ? rawDbs
+                                            : [rawDbs.main, rawDbs.provenance].filter(Boolean);
+                                        return (<>
+                                            <p className="text-sm text-gray-600 mb-3">
+                                                The{siteName ? ` ${siteName}` : ''} databases are available for download below. These are SQLite databases compressed with gzip.
+                                            </p>
+                                            <ul className="space-y-3 mb-3">
+                                                {dbs.map((db, i) => {
+                                                    const href = db.url || db.filename || null;
+                                                    return (
+                                                        <li key={i} className="text-sm text-gray-800">
+                                                            {href ? (
+                                                                <a href={href} className="text-blue-600 hover:underline font-medium">{db.filename}</a>
+                                                            ) : (
+                                                                <span className="font-medium">{db.filename}</span>
+                                                            )}
+                                                            {db.description ? <>{' '}— {db.description}</> : null}
+                                                        </li>
+                                                    );
+                                                })}
+                                            </ul>
+                                            <p className="text-sm text-gray-600">
+                                                The individual wordnets that make up{siteName ? ` ${siteName}` : ' this resource'} are each available from their respective projects — see the <button onClick={() => setActiveTab('wordnets')} className="text-blue-600 hover:underline">Wordnets</button> tab for the full list with links.
+                                            </p>
+                                        </>);
+                                    })()}
                                 </div>
                                 <div className="border-t border-gray-200 pt-4 mb-4">
                                     <h3 className="font-medium text-sm text-gray-700 mb-2">Language Data</h3>
-                                    <p className="text-sm text-gray-600">
-                                        The lexical data in Cygnet is drawn from a collection of open wordnets covering many languages — see the <button onClick={() => setActiveTab('wordnets')} className="text-blue-600 hover:underline">Wordnets tab</button> for the full list of contributing projects and their licences. We are deeply grateful to every team that has worked to build and freely share these resources. Thanks to all the projects that have released their data openly!
-                                    </p>
+                                    {siteConfig.about?.languageData &&
+                                        <div className="text-sm text-gray-600"
+                                             dangerouslySetInnerHTML={{ __html: siteConfig.about.languageData }} />
+                                    }
                                 </div>
                                 <div className="border-t border-gray-200 pt-4 mb-4">
                                     <h3 className="font-medium text-sm text-gray-700 mb-2">Images</h3>
@@ -2571,15 +2726,10 @@
                             <div>
                                 <h2 className="text-xl font-bold mb-4">Publications</h2>
                                 <ul className="space-y-4 mb-8">
-                                    <li className="text-sm text-gray-800">
-                                        Rowan Hall Maudslay &amp; Francis Bond (2026). Cygnet: Refactoring the Open Multilingual Wordnet. In <em>Proceedings of the 15th International Conference on Language Resources and Evaluation (LREC 2026)</em>. (to appear)
-                                    </li>
-                                    <li className="text-sm text-gray-800">
-                                        Francis Bond &amp; Ryan Foster (2013). Linking and extending an open multilingual wordnet. In <em>Proceedings of the 51st Annual Meeting of the Association for Computational Linguistics (ACL 2013)</em>. Sofia. pp. 1352–1362.
-                                    </li>
-                                    <li className="text-sm text-gray-800">
-                                        Francis Bond &amp; Kyonghee Paik (2012). A survey of wordnets and their licenses. In <em>Proceedings of the 6th Global WordNet Conference (GWC 2012)</em>. Matsue. pp. 64–71.
-                                    </li>
+                                    {(siteConfig.publications || []).map((pub, i) => (
+                                        <li key={`cfg-pub-${i}`} className="text-sm text-gray-800"
+                                            dangerouslySetInnerHTML={{ __html: pub }} />
+                                    ))}
                                 </ul>
                                 <h2 className="text-xl font-bold mb-2">Wordnet Citations</h2>
                                 <p className="text-sm text-gray-500 italic mb-4">Citation data taken from each wordnet's source XML.</p>
@@ -2684,16 +2834,20 @@
 
                     <footer className="mt-auto py-4">
                         <div className="max-w-4xl mx-auto px-4 border-t border-gray-200 pt-4">
-                            <div className="max-w-4xl mx-auto text-center text-sm text-gray-600">
-                                <div className="mb-2">
-                                    <span>Produced with the support of</span>
-                                </div>
-                                <div>
-                                    <a href="https://www.culturelab.psl.eu/" target="_blank" rel="noopener noreferrer" className="inline-block hover:opacity-80">
-                                        <img src="culturelab.png" alt="CultureLab" className="h-14 inline-block" />
-                                    </a>
-                                </div>
-                            </div>
+                            {siteConfig.footer
+                                ? <div className="max-w-4xl mx-auto text-center text-sm text-gray-600"
+                                       dangerouslySetInnerHTML={{ __html: siteConfig.footer }} />
+                                : <div className="max-w-4xl mx-auto text-center text-sm text-gray-600">
+                                    <div className="mb-2">
+                                        <span>Produced with the support of</span>
+                                    </div>
+                                    <div>
+                                        <a href="https://www.culturelab.psl.eu/" target="_blank" rel="noopener noreferrer" className="inline-block hover:opacity-80">
+                                            <img src="culturelab.png" alt="Culture Lab" className="h-14 inline-block" />
+                                        </a>
+                                    </div>
+                                  </div>
+                            }
                         </div>
                     </footer>
 
