@@ -36,7 +36,7 @@
     "text": "Produced with the support of",
     "logos": [
 	{ "src": "img/culturelab.png", "alt": "Culture Lab", "url": "https://www.culturelab.psl.eu/" },
-	{ "src": "img/UP_logo_FF_horizont_en.png", "alt": "Palacký University Olomouc", "url": "https://www.ff.upol.cz/en/" }
+	{ "src": "img/UP_logo_FF_UP_horizont_en.png", "alt": "Palacký University Olomouc", "url": "https://www.ff.upol.cz/en/" }
     ]
   },
 
