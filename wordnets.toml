@@ -169,3 +169,5 @@ yue = ["https://raw.githubusercontent.com/lmorgadodacosta/CantoneseWN/refs/heads
 # Abui
 abz = ["https://raw.githubusercontent.com/fanacek/abuiwn/refs/heads/main/abwn.xml"]
 
+# Old Javanese
+kaw = ["https://github.com/omwn/OJW/releases/download/v2026.03.14/wnkaw-2026.03.14.tar.xz"]
