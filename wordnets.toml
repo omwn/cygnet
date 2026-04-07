@@ -141,12 +141,11 @@ ko = ["https://github.com/omwn/tufs/releases/download/2.0/tufs-ko-2.0.tar.xz"]
 lo = ["https://github.com/omwn/tufs/releases/download/2.0/tufs-lo-2.0.tar.xz"]
 
 # Mongolian
-# ToDO get newer version from https://github.com/myanmaropenwordnet/mow
 mn = ["https://github.com/omwn/tufs/releases/download/2.0/tufs-mn-2.0.tar.xz"]
 
 # Burmese
-# ToDo get newer version
-my = ["https://github.com/omwn/tufs/releases/download/2.0/tufs-my-2.0.tar.xz"]
+my = ["https://github.com/omwn/tufs/releases/download/2.0/tufs-my-2.0.tar.xz",
+   "https://github.com/omwn/mow/releases/download/v0.1.3/wnmow-0.1.3.tar.xz"]
 
 # Russian
 ru = ["https://github.com/omwn/tufs/releases/download/2.0/tufs-ru-2.0.tar.xz"]
