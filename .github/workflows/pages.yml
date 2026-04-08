@@ -23,12 +23,15 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Get latest release tag
+      - name: Get release tag
         id: release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG=$(gh release view --repo omwn/cygnet --json tagName --jq .tagName)
+          TAG="${{ github.event.release.tag_name }}"
+          if [[ -z "$TAG" ]]; then
+            TAG=$(gh release view --repo ${{ github.repository }} --json tagName --jq .tagName)
+          fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Cache release databases
@@ -42,7 +45,7 @@ jobs:
         if: steps.cache-db.outputs.cache-hit != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release download --repo omwn/cygnet --pattern "*.db.gz" --dir web/
+        run: gh release download --repo ${{ github.repository }} --tag ${{ steps.release.outputs.tag }} --pattern "*.db.gz" --dir web/
 
       - uses: actions/configure-pages@v5
 
