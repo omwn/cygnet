@@ -147,8 +147,9 @@ CREATE INDEX idx_provenance_lookup ON provenance(table_rowid, item_rowid);
 """
 
 INDEXES = """
-CREATE INDEX idx_forms_normalized ON forms(normalized_form);
-CREATE INDEX idx_senses_entry     ON senses(entry_rowid);
+CREATE INDEX idx_forms_normalized  ON forms(normalized_form);
+CREATE INDEX idx_forms_lower       ON forms(LOWER(form), rank, entry_rowid);
+CREATE INDEX idx_senses_entry      ON senses(entry_rowid);
 CREATE INDEX idx_senses_synset    ON senses(synset_rowid);
 CREATE INDEX idx_definitions_synset        ON definitions(synset_rowid);
 CREATE INDEX idx_synset_relations_source   ON synset_relations(source_rowid);

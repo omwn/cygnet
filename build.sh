@@ -106,12 +106,19 @@ run_pipeline() {
 # Download a wordnet archive and extract its XML files into bin/raw_wns/ (flat).
 download_standalone() {
     local name="$1" url="$2"
-    echo "  Downloading $name..."
     (
         local tmpdir
         tmpdir=$(mktemp -d)
         trap 'rm -rf "$tmpdir"' EXIT
-        curl -fSL -o "$tmpdir/archive" "$url"
+        if [[ "$url" == file://* ]]; then
+            local local_path="${url#file://}"
+            [[ "$local_path" != /* ]] && local_path="$DATA_DIR/$local_path"
+            echo "  Copying $name..."
+            cp "$local_path" "$tmpdir/archive"
+        else
+            echo "  Downloading $name..."
+            curl -fSL -o "$tmpdir/archive" "$url"
+        fi
         tar xf "$tmpdir/archive" -C "$tmpdir/"
         find "$tmpdir" \( -name '*.xml' -o -name '*.xml.gz' -o -name '*.xml.xz' \) \
             -exec cp -n {} "$DATA_DIR/bin/raw_wns/" \;
@@ -182,11 +189,18 @@ with open(f'{d}/cili_defs.tsv') as fin, open(f'{d}/cili.tsv', 'w', newline='') a
     echo "  Downloading wordnets from wordnets.toml..."
     while IFS=$'\t' read -r stem url; do
         if [[ "$url" == *.xml.gz ]] || [[ "$url" == *.xml.xz ]] || [[ "$url" == *.xml ]]; then
-            # Direct XML (possibly compressed) — download straight to bin/raw_wns/
+            # Direct XML (possibly compressed) — download or copy to bin/raw_wns/
             fname="$DATA_DIR/bin/raw_wns/$(basename "$url")"
             if [ ! -f "$fname" ]; then
-                echo "  Downloading $(basename "$url")..."
-                curl -fSL -o "$fname" "$url"
+                if [[ "$url" == file://* ]]; then
+                    local_path="${url#file://}"
+                    [[ "$local_path" != /* ]] && local_path="$DATA_DIR/$local_path"
+                    echo "  Copying $(basename "$url")..."
+                    cp "$local_path" "$fname"
+                else
+                    echo "  Downloading $(basename "$url")..."
+                    curl -fSL -o "$fname" "$url"
+                fi
             else
                 echo "  $(basename "$url") already present, skipping."
             fi

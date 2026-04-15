@@ -10,6 +10,12 @@ import tomllib
 
 from cyg.converters import WordNetToCygnetConverter
 
+# Lexicon IDs that are valid as the English base (first wordnet processed).
+# Both OEWN and the OMW English wordnet provide the synset backbone.
+_EN_BASE_IDS: frozenset[str] = frozenset({"oewn", "omw-en"})
+# Filename substrings used to detect the English base before reading the file.
+_EN_BASE_FILENAME_PATTERNS: tuple[str, ...] = ("english-wordnet", "omw-en")
+
 
 def _url_stem(url: str) -> str:
     """Derive a file-matching prefix from a download URL."""
@@ -89,8 +95,12 @@ def batch_convert(cili_file, toml_path, raw_wns_dir="raw_wns", output_dir="cygne
     skipped_count = 0
     oewn_relations_path = None
 
-    # OEWN must be processed first so other wordnets can reference its relations
-    oewn = next((t for t in xml_files if "english-wordnet" in str(t)), None)
+    # The English base must be processed first so other wordnets can reference
+    # its relations.  Detect it by filename before reading.
+    def _is_english_base(p: Path) -> bool:
+        return any(pat in p.name for pat in _EN_BASE_FILENAME_PATTERNS)
+
+    oewn = next((t for t in xml_files if _is_english_base(t)), None)
     if oewn:
         xml_files.remove(oewn)
         xml_files.insert(0, oewn)
@@ -103,12 +113,18 @@ def batch_convert(cili_file, toml_path, raw_wns_dir="raw_wns", output_dir="cygne
                 converter = WordNetToCygnetConverter(cili_path=cili_file, skip_cili_defns=True)
             else:
                 if oewn_relations_path is None:
-                    oewn_matches = sorted(output_path.glob("oewn-*.xml"))
-                    if not oewn_matches:
-                        print(f"  Skipping {xml_file.name} (OEWN output not found)")
+                    en_base_matches = [
+                        m for en_id in _EN_BASE_IDS
+                        for m in sorted(output_path.glob(f"{en_id}-*.xml"))
+                    ]
+                    if not en_base_matches:
+                        print(
+                            f"  Skipping {xml_file.name} "
+                            "(English base output not found)"
+                        )
                         error_count += 1
                         continue
-                    oewn_relations_path = str(oewn_matches[0])
+                    oewn_relations_path = str(en_base_matches[0])
                 converter = WordNetToCygnetConverter(
                     cili_path=cili_file,
                     relations_path=oewn_relations_path,
@@ -119,13 +135,16 @@ def batch_convert(cili_file, toml_path, raw_wns_dir="raw_wns", output_dir="cygne
             lexicon_id = converter.lexicon_id
             lexicon_version = converter.lexicon_version
 
-            if i == 1 and lexicon_id != "oewn":
+            if i == 1 and lexicon_id not in _EN_BASE_IDS:
                 raise ValueError(
-                    f"Expected OEWN first, got '{lexicon_id}' from {xml_file.name}"
+                    f"Expected English base first (one of: "
+                    f"{', '.join(sorted(_EN_BASE_IDS))}), "
+                    f"got '{lexicon_id}' from {xml_file.name}"
                 )
-            if i != 1 and lexicon_id == "oewn":
+            if i != 1 and lexicon_id in _EN_BASE_IDS:
                 raise ValueError(
-                    f"OEWN appeared at position {i}, expected position 1"
+                    f"English base '{lexicon_id}' appeared at position {i},"
+                    f" expected position 1"
                 )
 
             if lexicon_id is None or lexicon_version is None:
