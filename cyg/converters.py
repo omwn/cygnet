@@ -988,17 +988,19 @@ class WordNetToCygnetConverter:
                 # Store mapping
                 self.synset_to_concept[synset_id] = concept_id
 
-                # Process Definition to create Gloss
-                definition_elem = synset.find('Definition')
-                if definition_elem is not None:
+                # Process all Definitions — a synset may carry translations
+                # (e.g. language="en" + language="sl" in the Slovene WN).
+                # Honour each element's own language attribute rather than
+                # stamping every definition with self.lexicon_language.
+                should_add_gloss = not (self.skip_cili_defns and concept_id.startswith('cili.'))
+                for definition_elem in synset.findall('Definition'):
                     definition_text = self._extract_text_content(definition_elem)
-
-                    should_add_gloss = not (self.skip_cili_defns and concept_id.startswith('cili.'))
+                    definition_lang = definition_elem.get('language', self.lexicon_language)
 
                     if should_add_gloss:
                         gloss = etree.Element('Gloss',
                                               definiendum=concept_id,
-                                              language=self.lexicon_language)
+                                              language=definition_lang)
 
                         # Create AnnotatedSentence container for the definition text
                         annotated_sentence = etree.SubElement(gloss, 'AnnotatedSentence')
