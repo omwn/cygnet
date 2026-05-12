@@ -99,6 +99,34 @@ class TestPageLoad:
 
 
 # ---------------------------------------------------------------------------
+# Search help button (ⓘ)
+# ---------------------------------------------------------------------------
+
+class TestSearchHelpButton:
+    def test_help_button_shows_circled_i(self, page_ready: Page):
+        """The help button must show ⓘ, not ?."""
+        btn = page_ready.locator('button[title="Help"]')
+        expect(btn).to_contain_text('ⓘ')
+
+    def test_hover_shows_tooltip(self, page_ready: Page):
+        """Hovering the ⓘ button reveals the short-syntax tooltip."""
+        page_ready.locator('button[title="Help"]').hover()
+        expect(page_ready.locator('text=exact match')).to_be_visible()
+
+    def test_click_button_opens_full_help(self, page_ready: Page):
+        """Clicking ⓘ opens the full help panel."""
+        page_ready.locator('button[title="Help"]').click()
+        expect(page_ready.locator('text=Filtering & display')).to_be_visible()
+
+    def test_click_tooltip_opens_full_help(self, page_ready: Page):
+        """Clicking anywhere inside the hover tooltip also opens the full help panel."""
+        btn = page_ready.locator('button[title="Help"]')
+        btn.hover()
+        page_ready.locator('text=exact match').click()
+        expect(page_ready.locator('text=Filtering & display')).to_be_visible()
+
+
+# ---------------------------------------------------------------------------
 # Exact search
 # ---------------------------------------------------------------------------
 

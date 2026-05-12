@@ -2049,10 +2049,10 @@
                                     <button onClick={() => setHelpOpen(o => !o)}
                                         title="Help"
                                         className={`px-3 py-2 rounded-t-lg border-b-2 transition-colors ${helpOpen ? 'bg-gray-50 border-blue-500 text-blue-700' : 'border-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-50'}`}>
-                                        ?
+                                        ⓘ
                                     </button>
                                     {!helpOpen && (
-                                        <div className="absolute right-0 top-full mt-1 hidden group-hover:block bg-white border border-gray-200 rounded shadow-lg p-3 text-xs text-gray-700 z-30 w-64 space-y-1.5">
+                                        <div onClick={() => setHelpOpen(true)} className="absolute right-0 top-full mt-1 hidden group-hover:block bg-white border border-gray-200 rounded shadow-lg p-3 text-xs text-gray-700 z-30 w-64 space-y-1.5 cursor-pointer">
                                             <div><span className="font-mono font-semibold">word</span> — exact match</div>
                                             <div><span className="font-mono font-semibold">hot*</span> or <span className="font-mono font-semibold">*ness</span> — glob (<span className="font-mono">*</span> = any characters, <span className="font-mono">?</span> = one)</div>
                                             <div><span className="font-mono font-semibold">i1234</span> or <span className="font-mono font-semibold">cili.i1234</span> — look up concept by ILI</div>
