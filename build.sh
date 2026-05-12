@@ -119,7 +119,11 @@ download_standalone() {
             echo "  Downloading $name..."
             curl -fSL -o "$tmpdir/archive" "$url"
         fi
-        tar xf "$tmpdir/archive" -C "$tmpdir/"
+        if [[ "$url" == *.zip ]]; then
+            unzip -q "$tmpdir/archive" -d "$tmpdir/"
+        else
+            tar xf "$tmpdir/archive" -C "$tmpdir/"
+        fi
         find "$tmpdir" \( -name '*.xml' -o -name '*.xml.gz' -o -name '*.xml.xz' \) \
             -exec cp -n {} "$DATA_DIR/bin/raw_wns/" \;
     )

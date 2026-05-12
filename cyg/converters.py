@@ -3,6 +3,7 @@ Converters for transforming external lexical resources into Cygnet format.
 """
 
 import argparse
+import html
 import json
 import gzip
 import logging
@@ -280,6 +281,11 @@ class WordNetToCygnetConverter:
                     'skipped': 0,
                     'success_rate_pct': 0.0,
                     'failed_matches': []
+                },
+                'html_entity_fixes': {
+                    'count': 0,
+                    'note': 'Source XML contains double-encoded HTML entities '
+                            '(e.g. &amp;#39;); consider reporting to upstream.'
                 }
             }
         }
@@ -873,7 +879,11 @@ class WordNetToCygnetConverter:
                 parts.append(child.text)
             if child.tail:
                 parts.append(child.tail)
-        return ''.join(parts)
+        raw = ''.join(parts)
+        unescaped = html.unescape(raw)
+        if unescaped != raw:
+            self.log['statistics']['html_entity_fixes']['count'] += 1
+        return unescaped
 
     def load_relations_file(self):
         """Load and parse the relations file to identify existing concept relations."""
@@ -1527,8 +1537,12 @@ class WordNetToCygnetConverter:
 
                 for example in synset.findall('Example'):
                     if example.text:
+                        raw = example.text.strip()
+                        unescaped = html.unescape(raw)
+                        if unescaped != raw:
+                            self.log['statistics']['html_entity_fixes']['count'] += 1
                         self._process_single_example(
-                            example.text.strip(),
+                            unescaped,
                             f"ex_{example_counter}",
                             is_synset_example=True,
                             concept_id=concept_id
@@ -1551,8 +1565,12 @@ class WordNetToCygnetConverter:
 
                     for example in sense.findall('Example'):
                         if example.text:
+                            raw = example.text.strip()
+                            unescaped = html.unescape(raw)
+                            if unescaped != raw:
+                                self.log['statistics']['html_entity_fixes']['count'] += 1
                             self._process_single_example(
-                                example.text.strip(),
+                                unescaped,
                                 f"ex_{example_counter}",
                                 is_synset_example=False,
                                 old_sense_id=old_sense_id
@@ -1567,6 +1585,12 @@ class WordNetToCygnetConverter:
 
         logger.info(f"  Examples processed: {self.log['statistics']['examples']['processed']}")
         logger.warning(f"  Examples skipped: {self.log['statistics']['examples']['skipped']}")
+        fixes = self.log['statistics']['html_entity_fixes']['count']
+        if fixes:
+            logger.warning(
+                f"  HTML entity fixes: {fixes} — source XML contains "
+                "double-encoded entities (e.g. &amp;#39;); consider reporting upstream."
+            )
         if total_examples > 0:
             success_rate = (self.log['statistics']['examples']['processed'] / total_examples) * 100
             self.log['statistics']['examples']['success_rate_pct'] = round(success_rate, 1)
