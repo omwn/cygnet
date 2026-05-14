@@ -272,9 +272,9 @@ gh workflow run pages.yml
 
 ## Contributing
 
-To add a wordnet source, append its archive URL to `wordnets.toml` under the
-appropriate BCP 47 language code, then rebuild.  The source must be in
-[Global WordNet LMF](https://globalwordnet.github.io/schemas/) format.
+To add a wordnet, see **[`CONTRIBUTING.md`](CONTRIBUTING.md)** for the full
+guide — format requirements, license rules, validation steps, and how to
+submit.
 
 Bug reports and pull requests are welcome on
-[GitHub](https://github.com/rowanhm/cygnet).
+[GitHub](https://github.com/omwn/cygnet).
