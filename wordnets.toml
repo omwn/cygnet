@@ -91,7 +91,7 @@ lt = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-lt-2.0.tar.xz
 nb = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-nb-2.0.tar.xz"]
 
 # Dutch — OMW Dutch
-nl = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-nl-2.0.tar.xz"]
+nl = ["https://github.com/cltl/OpenDutchWordnet/raw/refs/heads/master/resources/odwn/odwn_orbn_gwg-LMF_1.4.xml.gz"]
 
 # Norwegian Nynorsk — OMW Norwegian Nynorsk
 nn = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-nn-2.0.tar.xz"]
