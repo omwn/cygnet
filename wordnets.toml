@@ -63,6 +63,9 @@ it = [
     "https://github.com/omwn/omw-data/releases/download/v2.0/omw-iwn-2.0.tar.xz",
 ]
 
+#Hungarian - Hungarian WordNet
+hu = [ "https://raw.githubusercontent.com/nytud/huwn/refs/heads/master/huwn.xml" ]
+
 
 # Japanese
 # ToDo get better
