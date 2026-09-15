@@ -58,7 +58,11 @@ hr = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-hr-2.0.tar.xz
 is = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-is-2.0.tar.xz"]
 
 # Italian — OMW Italian + Italian WordNet (IWN)
-it = ["https://github.com/valeq/IWN-OMW/raw/refs/heads/main/data/LMF-XML/IWN-OMW_LMF_v1.0.xml"]
+it = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-it-2.0.tar.xz",,
+"https://github.com/valeq/IWN-OMW/raw/refs/heads/main/data/LMF-XML/IWN-OMW_LMF_v1.0.xml"]
+
+# Irish 
+ie = ["https://github.com/kscanne/wordnet-gaeilge/releases/download/v1.1/lsg-lmf.zip"]
 
 # Hungarian - Hungarian WordNet
 hu = ["https://github.com/igamasniak/Wordnetexpansionproject/releases/download/v0.1/HungarianWordNet.xml.xz"]
