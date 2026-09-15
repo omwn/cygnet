@@ -29,7 +29,7 @@ de = ["https://github.com/hdaSprachtechnologie/odenet/releases/download/v1.4/ode
 "https://github.com/omwn/tufs/releases/download/v2026.04.06/tufs-de-2026.04.06.tar.xz"]
 
 # Greek — OMW Greek
-el = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-el-2.0.tar.xz"]
+el = ["https://github.com/igamasniak/Wordnetexpansionproject/releases/download/v0.1/GreekWordNet.xml.xz"]
 
 # Spanish — OMW Spanish
 es = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-es-2.0.tar.xz",
@@ -178,6 +178,7 @@ yue = ["https://raw.githubusercontent.com/lmorgadodacosta/CantoneseWN/refs/heads
 
 # Abui
 abz = ["https://raw.githubusercontent.com/fanacek/abuiwn/refs/heads/main/abwn.xml"]
+
 
 ## Old wordnets
 
