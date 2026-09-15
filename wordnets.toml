@@ -66,6 +66,8 @@ it = [
 # Hungarian - Hungarian WordNet
 hu = ["https://github.com/igamasniak/Wordnetexpansionproject/releases/download/v0.1/HungarianWordNet.xml.xz"]
 
+# Estonian 
+et = ["https://gitlab.keeleressursid.ee/avalik/data/-/raw/master/estwn/estwn-et-2.7/estwn-et-2.7.0.xml?inline=false"]
 
 # Japanese
 # ToDo get better
@@ -183,8 +185,7 @@ abz = ["https://raw.githubusercontent.com/fanacek/abuiwn/refs/heads/main/abwn.xm
 ## Old wordnets
 
 # Old Javanese
-kaw = ["https://github.com/omwn/OJW/releases/download/v2026.03.14/wnkaw-2026.03.14.tar.xz", 
-"https://github.com/igamasniak/Wordnetexpansionproject/releases/download/v0.1/OldJavaneseWordNet.xml.xz"]
+kaw = ["https://github.com/omwn/OJW/releases/download/v2026.03.14/wnkaw-2026.03.14.tar.xz"]
 
 #  Coptic WordNet
 cop = ["https://raw.githubusercontent.com/coptic-wordnet/data/master/copwn.xml"]
