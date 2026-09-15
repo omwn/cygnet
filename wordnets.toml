@@ -149,12 +149,12 @@ lo = ["https://github.com/omwn/tufs/releases/download/v2026.04.06/tufs-lo-2026.0
 mn = ["https://github.com/omwn/tufs/releases/download/v2026.04.06/tufs-mn-2026.04.06.tar.xz"]
 
 # Burmese
-my = ["https://github.com/omwn/tufs/releases/download/v2026.04.06/tufs-my-2026.04.06.tar.xz",
-   "https://github.com/omwn/mow/releases/download/v0.1.3/wnmow-0.1.3.tar.xz"]
+my = ["https://github.com/omwn/mow/releases/download/v0.1.3/wnmow-0.1.3.tar.xz", 
+"https://github.com/omwn/tufs/releases/download/v2026.04.06/tufs-my-2026.04.06.tar.xz"]
 
 # Russian
-ru = ["https://github.com/omwn/tufs/releases/download/v2026.04.06/tufs-ru-2026.04.06.tar.xz",
-"https://github.com/igamasniak/Wordnetexpansionproject/releases/download/v0.1/RussianWordNet.xml.xz"]
+ru = ["https://github.com/igamasniak/Wordnetexpansionproject/releases/download/v0.1/RussianWordNet.xml.xz",
+"https://github.com/omwn/tufs/releases/download/v2026.04.06/tufs-ru-2026.04.06.tar.xz"]
 
 # Filipino
 tl = ["https://github.com/omwn/tufs/releases/download/v2026.04.06/tufs-tl-2026.04.06.tar.xz"]
@@ -186,4 +186,9 @@ kaw = ["https://github.com/omwn/OJW/releases/download/v2026.03.14/wnkaw-2026.03.
 
 #  Coptic WordNet
 cop = ["https://raw.githubusercontent.com/coptic-wordnet/data/master/copwn.xml"]
+
+# Latin - Latin Wordnet Archive + Latin Wordnet Revision
+la = ["https://github.com/igamasniak/Wordnetexpansionproject/releases/download/v0.1/LatinWordNet.xml.xz", 
+"https://github.com/igamasniak/Wordnetexpansionproject/releases/download/v0.1/LatinWordNet_revised.xml.xz",
+"https://github.com/igamasniak/Wordnetexpansionproject/releases/download/v0.1/LatinWordNet_revised_csv.xml.xz"]
 
