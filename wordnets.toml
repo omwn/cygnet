@@ -130,6 +130,21 @@ th = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-th-2.0.tar.xz
 # Note bug in data, the licence is wrong, I have confirmed it is CC BY-SA 4.0
 lv = ["https://repository.clarin.lv/repository/xmlui/bitstream/handle/20.500.12574/119/tezaurs_2025_1_lmf.xml"]
 
+# isiXhosa (Xhosa) - African Wordnet
+xh = ["https://repo.sadilar.org/bitstreams/519cda34-0ff4-40a4-a02d-2341d9d7499c/download"]
+
+# isiZulu (Zulu) - African Wordnet
+zu = ["https://repo.sadilar.org/bitstreams/68f7ac3d-0cad-4249-a548-98001f76165e/download"]
+
+# Sesotho sa Leboa - African Wordnet
+# Sesotho sa Leboa does not have a 2-letter ISO 639-1 code
+nso = ["https://repo.sadilar.org/bitstreams/359a5b50-479b-4ca5-be1a-b2bd645e3add/download"]
+
+# Setswana (Tswana) - African Wordnet
+tn = ["https://repo.sadilar.org/bitstreams/8d8a8cac-53ba-4ca6-a79e-55f6de7e15e0/download"]
+
+# Tshivenda (Venda) - African Wordnet
+ve = ["https://repo.sadilar.org/bitstreams/5983a7b5-1a5e-4992-8e6b-a3f2bbc860b2/download"]
 
 ## from TUFS
 
