@@ -211,3 +211,6 @@ la = ["https://github.com/igamasniak/omw-converters/releases/download/v0.1/Latin
 "https://github.com/igamasniak/omw-converters/releases/download/v0.1/LatinWordNet_revised.xml.xz",
 "https://github.com/igamasniak/omw-converters/releases/download/v0.1/LatinWordNet_revised_csv.xml.xz"]
 
+# Ancient Greek - Ancient Greek WordNet
+grc = [https://github.com/igamasniak/omw-converters/releases/download/v0.1/AncientGreekWordNet.xml.xz"]
+
