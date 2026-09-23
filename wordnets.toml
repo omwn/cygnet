@@ -58,7 +58,7 @@ hr = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-hr-2.0.tar.xz
 is = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-is-2.0.tar.xz"]
 
 # Italian — OMW Italian + Italian WordNet (IWN)
-it = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-it-2.0.tar.xz",,
+it = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-it-2.0.tar.xz",
 "https://github.com/valeq/IWN-OMW/raw/refs/heads/main/data/LMF-XML/IWN-OMW_LMF_v1.0.xml"]
 
 # Irish 
@@ -84,9 +84,6 @@ zsm = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-zsm-2.0.tar.
 # ToDo get better
 id = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-id-2.0.tar.xz",
 "https://github.com/omwn/tufs/releases/download/v2026.04.06/tufs-id-2026.04.06.tar.xz"]
-
-# Myanmar 
-mm = ["https://github.com/igamasniak/Wordnetexpansionproject/releases/download/v0.1/MyanmarWordNet.xml.xz"]
 
 # Kurdish (Kurmanji) — KurdNet
 kmr = ["https://github.com/sinaahmadi/kurdnet/releases/download/kurdnet-1.0.tar.xz/kurdnet-1.0.tar.xz"]

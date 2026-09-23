@@ -154,8 +154,11 @@ CREATE INDEX idx_senses_synset    ON senses(synset_rowid);
 CREATE INDEX idx_definitions_synset        ON definitions(synset_rowid);
 CREATE INDEX idx_synset_relations_source   ON synset_relations(source_rowid);
 CREATE INDEX idx_sense_relations_source    ON sense_relations(source_rowid);
+CREATE INDEX idx_sense_relations_target    ON sense_relations(target_rowid);
 CREATE INDEX idx_sense_examples_sense      ON sense_examples(sense_rowid);
 CREATE INDEX idx_example_annotations_example ON example_annotations(example_rowid);
+CREATE INDEX idx_example_annotations_sense ON example_annotations(sense_rowid);
+CREATE INDEX idx_definition_annotations_sense ON definition_annotations(sense_rowid);
 CREATE INDEX idx_arasaac_synset ON arasaac(synset_rowid);
 CREATE INDEX idx_core_synsets ON core_synsets(synset_rowid);
 """

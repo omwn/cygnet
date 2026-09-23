@@ -119,13 +119,15 @@ download_standalone() {
             echo "  Downloading $name..."
             curl -fSL -o "$tmpdir/archive" "$url"
         fi
-        if [[ "$url" == *.zip ]]; then
+        # Detect archive type from file content — some hosts (e.g. DSpace
+        # repositories) serve zip files behind extensionless /download URLs.
+        if file -b "$tmpdir/archive" | grep -qi "Zip archive"; then
             unzip -q "$tmpdir/archive" -d "$tmpdir/"
         else
             tar xf "$tmpdir/archive" -C "$tmpdir/"
         fi
         find "$tmpdir" \( -name '*.xml' -o -name '*.xml.gz' -o -name '*.xml.xz' \) \
-            -exec cp -n {} "$DATA_DIR/bin/raw_wns/" \;
+            -exec cp --update=none {} "$DATA_DIR/bin/raw_wns/" \;
     )
 }
 
@@ -137,7 +139,7 @@ import re, sys
 content = open(sys.argv[1]).read()
 
 def stem(url):
-    name = url.rstrip("/").split("/")[-1]
+    name = url.split("?")[0].rstrip("/").split("/")[-1]
     for ext in [".tar.xz", ".tar.gz", ".tar.bz2", ".xz", ".gz"]:
         if name.endswith(ext):
             name = name[:-len(ext)]
@@ -191,10 +193,12 @@ with open(f'{d}/cili_defs.tsv') as fin, open(f'{d}/cili.tsv', 'w', newline='') a
 
     # Wordnets (from wordnets.toml)
     echo "  Downloading wordnets from wordnets.toml..."
+    FAILED_DOWNLOADS=()
     while IFS=$'\t' read -r stem url; do
-        if [[ "$url" == *.xml.gz ]] || [[ "$url" == *.xml.xz ]] || [[ "$url" == *.xml ]]; then
+        url_path="${url%%\?*}"  # strip query string for extension/filename checks
+        if [[ "$url_path" == *.xml.gz ]] || [[ "$url_path" == *.xml.xz ]] || [[ "$url_path" == *.xml ]]; then
             # Direct XML (possibly compressed) — download or copy to bin/raw_wns/
-            fname="$DATA_DIR/bin/raw_wns/$(basename "$url")"
+            fname="$DATA_DIR/bin/raw_wns/$(basename "$url_path")"
             if [ ! -f "$fname" ]; then
                 if [[ "$url" == file://* ]]; then
                     local_path="${url#file://}"
@@ -203,7 +207,11 @@ with open(f'{d}/cili_defs.tsv') as fin, open(f'{d}/cili.tsv', 'w', newline='') a
                     cp "$local_path" "$fname"
                 else
                     echo "  Downloading $(basename "$url")..."
-                    curl -fSL -o "$fname" "$url"
+                    if ! curl -fSL -o "$fname" "$url"; then
+                        echo "  WARNING: failed to download $url (skipping)" >&2
+                        rm -f "$fname"
+                        FAILED_DOWNLOADS+=("$stem: $url")
+                    fi
                 fi
             else
                 echo "  $(basename "$url") already present, skipping."
@@ -212,7 +220,10 @@ with open(f'{d}/cili_defs.tsv') as fin, open(f'{d}/cili.tsv', 'w', newline='') a
             # Archive — extract and copy XMLs flat into bin/raw_wns/
             if ! compgen -G "$DATA_DIR/bin/raw_wns/${stem}*.xml" > /dev/null 2>&1 && \
                ! compgen -G "$DATA_DIR/bin/raw_wns/*/${stem}*/*.xml" > /dev/null 2>&1; then
-                download_standalone "$stem" "$url"
+                if ! download_standalone "$stem" "$url"; then
+                    echo "  WARNING: failed to fetch $stem from $url (skipping)" >&2
+                    FAILED_DOWNLOADS+=("$stem: $url")
+                fi
             else
                 echo "  $stem already present, skipping."
             fi
@@ -225,6 +236,10 @@ with open(f'{d}/cili_defs.tsv') as fin, open(f'{d}/cili.tsv', 'w', newline='') a
         mv "$DATA_DIR/bin/raw_wns/deWordNet.xml" "$DATA_DIR/bin/raw_wns/odenet.xml" || true
 
     echo "  Downloads complete."
+    if [[ ${#FAILED_DOWNLOADS[@]} -gt 0 ]]; then
+        echo "  WARNING: ${#FAILED_DOWNLOADS[@]} wordnet source(s) could not be fetched and were skipped:"
+        printf '    - %s\n' "${FAILED_DOWNLOADS[@]}"
+    fi
     echo
 fi
 

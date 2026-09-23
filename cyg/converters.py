@@ -209,6 +209,7 @@ class WordNetToCygnetConverter:
 
         # Logging
         self.log = {
+            'invalid_pos_values': {},  # e.g., "i": 3229 (unmapped POS code -> occurrence count)
             'synset_concept_pos_mismatches': {
                 'total_count': 0,
                 'by_pos_pair': {}  # e.g., "synset_r-cili_s": count
@@ -362,7 +363,9 @@ class WordNetToCygnetConverter:
         Should be called after validation.
         """
         if pos not in NEW_POS_LABELS:
-            logger.warning('Warning! Invalid POS! Setting to unknown!')
+            self.log['invalid_pos_values'][pos] = (
+                self.log['invalid_pos_values'].get(pos, 0) + 1
+            )
             pos = 'u'
         return NEW_POS_LABELS[pos]
 
@@ -1245,6 +1248,15 @@ class WordNetToCygnetConverter:
         logger.info(f"  Merged {self.log['lexeme_merging']['total_merges']} duplicate lexemes")
         logger.info(f"  Created {self.log['statistics']['senses']['created']} senses")
         logger.warning(f"  Found {self.log['lexeme_concept_pos_mismatches']['total_count']} lexeme-concept POS mismatches")
+        if self.log['invalid_pos_values']:
+            total_invalid = sum(self.log['invalid_pos_values'].values())
+            breakdown = ', '.join(
+                f"{value!r}: {count}"
+                for value, count in sorted(self.log['invalid_pos_values'].items())
+            )
+            logger.warning(
+                f"  Found {total_invalid} invalid POS value(s), set to unknown ({breakdown})"
+            )
 
     def _get_concept_ontological_category(self, concept_id: str) -> str | None:
         """Get the ontological category for a concept (O(1) lookup)."""

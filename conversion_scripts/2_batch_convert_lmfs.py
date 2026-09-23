@@ -4,6 +4,7 @@ Batch convert GlobalWordNet XML files to Cygnet XML format.
 """
 
 import re
+import sys
 from pathlib import Path
 
 import tomllib
@@ -186,6 +187,8 @@ def batch_convert(cili_file, toml_path, raw_wns_dir="raw_wns", output_dir="cygne
 
 def main():
     import argparse
+
+    sys.stdout.reconfigure(line_buffering=True)
 
     parser = argparse.ArgumentParser(
         description="Batch convert GlobalWordNet XML files to Cygnet XML format."
