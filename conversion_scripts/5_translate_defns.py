@@ -78,8 +78,12 @@ def get_already_translated():
             for line in f:
                 if line.strip():
                     record = json.loads(line)
-                    # Create unique key from definiendum_id and language
-                    translated_ids.add((record['definiendum_id'], record['source_language']))
+                    # A concept can have more than one Definition in the same
+                    # language (e.g. Latvian tezaurs), so definiendum_id+language
+                    # alone isn't a unique key — include the source text too.
+                    translated_ids.add(
+                        (record['definiendum_id'], record['source_language'], record['source_text'])
+                    )
         print(f"Found {len(translated_ids)} already translated glosses")
 
     return translated_ids
@@ -87,7 +91,10 @@ def get_already_translated():
 
 def filter_pending_glosses(glosses, translated_ids):
     """Filter out already translated glosses."""
-    pending = [g for g in glosses if (g['definiendum_id'], g['language']) not in translated_ids]
+    pending = [
+        g for g in glosses
+        if (g['definiendum_id'], g['language'], g['definition']) not in translated_ids
+    ]
     print(f"Remaining glosses to translate: {len(pending)}")
     return pending
 
@@ -160,7 +167,8 @@ def translate_language_batch(language_code, glosses, output_file):
             record = {
                 'translated_definition': translated_text,
                 'definiendum_id': gloss['definiendum_id'],
-                'source_language': language_code
+                'source_language': language_code,
+                'source_text': gloss['definition']
             }
 
             # Write as single line JSON
@@ -220,7 +228,6 @@ def create_xml_from_translations():
 def main():
     # Step 1: Extract or load glosses
     all_glosses = extract_glosses()
-    assert len({g['definiendum_id'] for g in all_glosses}) == len(all_glosses)
 
     languages = {g['language'] for g in all_glosses}
     print(f"\nFound {len(languages)} unique languages: {sorted(languages)}")
