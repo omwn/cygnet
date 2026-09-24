@@ -59,7 +59,9 @@ is = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-is-2.0.tar.xz
 
 # Italian — OMW Italian + Italian WordNet (IWN)
 it = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-it-2.0.tar.xz",
-"https://github.com/valeq/IWN-OMW/raw/refs/heads/main/data/LMF-XML/IWN-OMW_LMF_v1.0.xml"]
+"https://github.com/omwn/omw-data/releases/download/v2.0/omw-ien-2.0.tar.xz"]
+# illformed
+#"https://github.com/valeq/IWN-OMW/raw/refs/heads/main/data/LMF-XML/IWN-OMW_LMF_v1.0.xml"
 
 # Irish 
 ga = ["https://github.com/kscanne/wordnet-gaeilge/releases/download/v1.1/lsg-lmf.zip"]
@@ -94,8 +96,8 @@ lt = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-lt-2.0.tar.xz
 # Norwegian Bokmål — OMW Norwegian Bokmål
 nb = ["https://github.com/igamasniak/omw-converters/releases/download/v0.1/NorwegianWordNet.xml.xz"]
 
-# Dutch — OMW Dutch
-nl = ["https://github.com/cltl/OpenDutchWordnet/raw/refs/heads/master/resources/odwn/odwn_orbn_gwg-LMF_1.4.xml.gz"]
+# Dutch — Open Dutch WordNet
+nl = ["https://raw.githubusercontent.com/cltl/OpenDutchWordnet/refs/heads/master/resources/cili/odwn_cili.xml"]
 
 # Norwegian Nynorsk — OMW Norwegian Nynorsk
 nn = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-nn-2.0.tar.xz"]
