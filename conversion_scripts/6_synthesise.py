@@ -78,12 +78,19 @@ def main() -> None:
     print('\nCreating indexes...')
     builder.create_indexes()
 
-    print('\nPhase 1b: Validating no cycles remain...')
+    print('\nPhase 1b: Resolving residual cycles...')
+    n_resolved = builder.resolve_residual_cycles()
+    if n_resolved:
+        print(f'  Removed {n_resolved:,} residual cycle-causing relation(s)'
+              f' (see {conflicts_path})')
+
     n_cycles = builder.detect_cycles()
     if n_cycles:
-        print(f'  WARNING: {n_cycles:,} residual cycle(s) found')
-    else:
-        print('  OK — no cycles.')
+        print(f'  ERROR: {n_cycles:,} cycle(s) remain after resolution — '
+              f'refusing to build a release with a cyclic hypernym hierarchy')
+        builder.write_conflicts_json(conflicts_path)
+        sys.exit(1)
+    print('  OK — no cycles.')
 
     print(f'\nWriting conflict log to {conflicts_path}...')
     builder.write_conflicts_json(conflicts_path)
