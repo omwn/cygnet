@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: write
+  actions: read  # to fetch the translate.yml artifact below
 
 jobs:
   release:
@@ -34,6 +35,20 @@ jobs:
 
       - name: Download wordnet data
         run: bash build.sh --download-only
+
+      - name: Fetch pre-translated glosses (best-effort)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p bin/cygnets_presynth
+          RUN_ID=$(gh run list --workflow=translate.yml --status=success --limit=1 \
+                     --json databaseId --jq '.[0].databaseId' || true)
+          if [ -n "$RUN_ID" ]; then
+            gh run download "$RUN_ID" --name translated-glosses --dir bin/cygnets_presynth/ \
+              || echo "No translated-glosses artifact on run $RUN_ID; continuing without translations"
+          else
+            echo "No successful translate.yml run found; continuing without translations"
+          fi
 
       - name: Build databases
         run: bash build.sh --build-only --skip-tests

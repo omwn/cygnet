@@ -24,6 +24,10 @@
 #                      (requires xmlstarlet; slow — 678 MB output)
 #   --download-only    Download data without running the build
 #   --build-only       Run the build without downloading (assumes data exists)
+#   --translate-only   Run only through Step 5 (translate definitions) and
+#                      stop — implies --with-translate. For a separate CI
+#                      job that produces bin/cygnets_presynth/mtg-1.0.xml
+#                      without paying for the full (fast) database build.
 #   --skip-tests       Skip the test suite
 #
 set -euo pipefail
@@ -39,6 +43,7 @@ WITH_XML=false
 DO_DOWNLOAD=true
 DO_BUILD=true
 DO_TESTS=true
+TRANSLATE_ONLY=false
 WORK_DIR=""
 
 while [[ $# -gt 0 ]]; do
@@ -57,6 +62,7 @@ while [[ $# -gt 0 ]]; do
         --with-xml)       WITH_XML=true;        shift ;;
         --download-only)  DO_BUILD=false;       shift ;;
         --build-only)     DO_DOWNLOAD=false;    shift ;;
+        --translate-only) TRANSLATE_ONLY=true; WITH_TRANSLATE=true; shift ;;
         --skip-tests)     DO_TESTS=false;       shift ;;
         --help|-h)
             sed -n '3,/^$/{ s/^# \?//; p }' "$0"
@@ -294,6 +300,12 @@ if $DO_BUILD; then
         echo "=== Step 5: Translate definitions ==="
         run_pipeline 5_translate_defns.py
         echo
+    fi
+
+    if $TRANSLATE_ONLY; then
+        echo "=== Translate-only mode: stopping after Step 5 ==="
+        echo "Output: $DATA_DIR/bin/cygnets_presynth/mtg-1.0.xml"
+        exit 0
     fi
 
     echo "=== Step 6: Synthesise ==="

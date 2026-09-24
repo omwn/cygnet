@@ -1,0 +1,79 @@
+name: Translate non-English glosses
+
+# Runs Steps 1-5 of the pipeline only (extract CILI, convert wordnets,
+# translate definitions) and stops — it does NOT build the databases.
+# release.yml picks up this workflow's output artifact (best-effort) so
+# every tagged release doesn't have to pay for a fresh multi-hour
+# translation run. Translation progress is resumable across runs (see
+# 5_translate_defns.py), so this is safe to run on a schedule.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'wordnets.toml'
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 1 * *'  # 03:00 UTC on the 1st of each month
+
+permissions:
+  contents: read
+
+jobs:
+  translate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Install system dependencies
+        run: sudo apt-get install -y libxml2-dev libxslt-dev
+
+      - name: Cache downloaded wordnet data
+        uses: actions/cache@v4
+        with:
+          path: bin/
+          key: wordnet-data-${{ hashFiles('build.sh') }}
+          restore-keys: wordnet-data-
+
+      - name: Cache argos-translate models
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/argos-translate
+          key: argos-models-v1
+
+      - name: Cache translation progress
+        uses: actions/cache@v4
+        with:
+          # Only the actual translations — NOT bin/extra_glosses.json. That
+          # file is extract_glosses()'s "already scanned" cache: it's
+          # trusted unconditionally with no staleness check, so if it
+          # persisted across runs it would hide newly-converted wordnets
+          # (exactly the case this workflow's wordnets.toml trigger exists
+          # for). Re-scanning is cheap (~25s for the full corpus), so we
+          # always redo it and only cache the expensive part.
+          path: bin/translated_glosses.jsonl
+          # Always save a fresh entry keyed on this run (so this run's
+          # progress is available to the *next* run); restore-keys falls
+          # back to the most recent previous entry.
+          key: translation-progress-${{ github.run_id }}
+          restore-keys: translation-progress-
+
+      - name: Download wordnet data
+        run: bash build.sh --download-only
+
+      - name: Translate definitions
+        run: |
+          # Guard against a stale extra_glosses.json sneaking in via the
+          # wordnet-data cache above (which covers all of bin/).
+          rm -f bin/extra_glosses.json
+          bash build.sh --build-only --translate-only
+
+      - name: Upload translated glosses
+        uses: actions/upload-artifact@v4
+        with:
+          name: translated-glosses
+          path: bin/cygnets_presynth/mtg-1.0.xml
+          retention-days: 90
