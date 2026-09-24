@@ -20,14 +20,27 @@ _EN_BASE_FILENAME_PATTERNS: tuple[str, ...] = ("english-wordnet", "omw-en")
 
 def _url_stem(url: str) -> str:
     """Derive a file-matching prefix from a download URL."""
-    name = url.rstrip("/").split("/")[-1]
-    for ext in (".tar.xz", ".tar.gz", ".tar.bz2", ".xz", ".gz"):
+    name = url.split("?")[0].rstrip("/").split("/")[-1]
+    for ext in (".tar.xz", ".tar.gz", ".tar.bz2", ".zip", ".xz", ".gz"):
         if name.endswith(ext):
             name = name[: -len(ext)]
             break
     if name.endswith(".xml"):
         name = name[:-4]
-    return re.sub(r"-\d[\d.]*$", "", name)
+    return re.sub(r"[-_]\d[\d.]*$", "", name)
+
+
+# Some hosts (e.g. SADiLaR's DSpace bitstream URLs) put no filename in the
+# URL at all — it's just ".../download" — so the extracted content's actual
+# name bears no relation to anything _url_stem() can derive. Map those
+# language codes directly to their real resource stem.
+_KNOWN_STEM_OVERRIDES = {
+    "xh": "wnxho",
+    "zu": "wnzul",
+    "nso": "wnnso",
+    "tn": "wntsn",
+    "ve": "wnven",
+}
 
 
 def collect_xml_files(toml_path: Path, raw_wns_dir: Path) -> list[Path]:
@@ -58,6 +71,9 @@ def collect_xml_files(toml_path: Path, raw_wns_dir: Path) -> list[Path]:
                 + sorted(raw_wns_dir.glob(f"{stem}*.xml.xz"))
                 + sorted(raw_wns_dir.glob(f"*/{stem}*/*.xml"))
             )
+            if not matches and _lang in _KNOWN_STEM_OVERRIDES:
+                stem = _KNOWN_STEM_OVERRIDES[_lang]
+                matches = sorted(raw_wns_dir.glob(f"{stem}*.xml"))
             if not matches:
                 print(f"  Warning: no XML found for {url} (stem: {stem})")
                 continue

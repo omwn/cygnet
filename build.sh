@@ -107,6 +107,12 @@ run_pipeline() {
 download_standalone() {
     local name="$1" url="$2"
     (
+        # This subshell is invoked as `if ! download_standalone ...; then`,
+        # which suspends `set -e` for everything inside it (a well-known
+        # bash gotcha: errexit is disabled for the whole compound command
+        # under test, including nested subshells). Each step below must
+        # therefore check its own exit status explicitly with `|| exit 1`
+        # rather than relying on inherited errexit.
         local tmpdir
         tmpdir=$(mktemp -d)
         trap 'rm -rf "$tmpdir"' EXIT
@@ -114,17 +120,17 @@ download_standalone() {
             local local_path="${url#file://}"
             [[ "$local_path" != /* ]] && local_path="$DATA_DIR/$local_path"
             echo "  Copying $name..."
-            cp "$local_path" "$tmpdir/archive"
+            cp "$local_path" "$tmpdir/archive" || exit 1
         else
             echo "  Downloading $name..."
-            curl -fSL -o "$tmpdir/archive" "$url"
+            curl -fSL -o "$tmpdir/archive" "$url" || exit 1
         fi
         # Detect archive type from file content — some hosts (e.g. DSpace
         # repositories) serve zip files behind extensionless /download URLs.
         if file -b "$tmpdir/archive" | grep -qi "Zip archive"; then
-            unzip -q "$tmpdir/archive" -d "$tmpdir/"
+            unzip -q "$tmpdir/archive" -d "$tmpdir/" || exit 1
         else
-            tar xf "$tmpdir/archive" -C "$tmpdir/"
+            tar xf "$tmpdir/archive" -C "$tmpdir/" || exit 1
         fi
         find "$tmpdir" \( -name '*.xml' -o -name '*.xml.gz' -o -name '*.xml.xz' \) \
             -exec cp --update=none {} "$DATA_DIR/bin/raw_wns/" \;
@@ -140,13 +146,13 @@ content = open(sys.argv[1]).read()
 
 def stem(url):
     name = url.split("?")[0].rstrip("/").split("/")[-1]
-    for ext in [".tar.xz", ".tar.gz", ".tar.bz2", ".xz", ".gz"]:
+    for ext in [".tar.xz", ".tar.gz", ".tar.bz2", ".zip", ".xz", ".gz"]:
         if name.endswith(ext):
             name = name[:-len(ext)]
             break
     if name.endswith(".xml"):
         name = name[:-4]
-    return re.sub(r"-\d[\d.]*$", "", name)
+    return re.sub(r"[-_]\d[\d.]*$", "", name)
 
 for m in re.finditer(r"^\s*[\w-]+\s*=\s*(\[.*?\])", content, re.MULTILINE | re.DOTALL):
     for url in re.findall(r'"([^"]*)"', m.group(1)):
