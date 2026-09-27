@@ -27,6 +27,65 @@ The report is purely informational — it writes to stdout and always exits 0.
 
 ---
 
+## One Markdown report per wordnet
+
+`--all`/`--md` concatenates every wordnet into a single stream. To get one
+Markdown file per wordnet instead (e.g. for browsing individually in
+`reports/`, or linking a specific wordnet's report from an issue), loop over
+the pre-synth files yourself and redirect each invocation:
+
+```bash
+mkdir -p reports
+for f in bin/cygnets_presynth/*.xml; do
+  stem=$(basename "$f" .xml)
+  uv run python scripts/report.py --md "$f" > "reports/${stem}.md"
+done
+```
+
+This produces `reports/own-pt-1.0.0.md`, `reports/wordnet_lv-1.0.md`, etc. —
+one file per resource. `cili-1.0.xml` (the interlingual index, not a
+wordnet) produces an empty file, since `report_file()` intentionally prints
+nothing for it — delete or ignore `reports/cili-1.0.md`.
+
+Each `uv run` invocation re-resolves the environment, so looping like this
+over all ~78 wordnets takes a couple of minutes.
+
+---
+
+## Cross-wordnet issue summary
+
+`--summary` re-groups every wordnet's issues by *issue type* instead of by
+file, so you can see how one kind of problem (e.g. "Concepts without
+definitions") is distributed across every wordnet at a glance, ranked
+worst-first:
+
+```bash
+# Plain text, every wordnet in bin/cygnets_presynth/
+uv run python scripts/report.py --summary
+
+# Markdown
+uv run python scripts/report.py --md --summary > reports/_summary.md
+
+# Restrict to specific files (otherwise --summary implies --all)
+uv run python scripts/report.py --summary bin/cygnets_presynth/wordnet_lv-1.0.xml bin/cygnets_presynth/estwn-2.7.0.xml
+```
+
+This is the better tool when the question is "which wordnets have issue X
+and how much" rather than "what's wrong with wordnet Y" — e.g. it's how the
+two `Unrecognised part-of-speech code` entries below were found to span
+`estwn`/`odwn-nl`/`wordnet_lv` (shared empty-string code) and `kenet` (code
+`'i'`) respectively.
+
+Within a single wordnet's report, when one concept dominates the raw
+`failed_matches` log (e.g. a common, heavily-inflected word with many
+corpus examples that all fail morphological matching), the **Example
+sentences not matched to a sense** section samples across distinct
+concepts rather than showing the same one N times — so a 10-item sample is
+representative of the file's spread of problems, not just whichever concept
+happened to appear first.
+
+---
+
 ## What the report checks
 
 Issues are grouped into three severity levels: **CRITICAL** (data is lost),
@@ -54,6 +113,7 @@ The script combines three sources, using whichever are available:
 | **Hypernym cycles spanning multiple wordnets** | A relation from this file creates a cycle when combined with relations from other wordnets | The offending relation is removed; the existing cross-wordnet chain is shown |
 | **Relations reversed relative to another wordnet** | This file asserts `A hypernym B` but another wordnet already established `B hypernym A` | The conflicting relation is skipped |
 | **Duplicate IDs** | A concept, entry, or sense ID appears more than once | Duplicate concepts crash the build; duplicate entries/senses are merged or skipped |
+| **Unrecognised part-of-speech code** | A `<Synset>` or `<Lemma>` uses a `partOfSpeech` value Cygnet doesn't recognise (valid: `n`, `v`, `a`, `r`, `s`, `c`, `p`, `x`, `u`) — including a missing/empty attribute | Coerced to `UNK`; the concept's real part of speech is lost |
 
 ### WARNING issues — possible errors
 

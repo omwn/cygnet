@@ -647,6 +647,37 @@ def parse_conflicts_json(resource_id: str, xml_stem: str) -> tuple[list[dict], l
 # Checks derived from log files
 # ---------------------------------------------------------------------------
 
+def _diversify(entries: list[dict], limit: int) -> list[dict]:
+    """Pick up to *limit* entries, spread across distinct candidate-wordform
+    groups (a proxy for "distinct concept") round-robin, rather than taking
+    the first *limit* in file order.
+
+    failed_matches records don't carry a concept/synset id, but entries for
+    the same concept share the same candidate_wordforms list, so grouping on
+    that is the closest available proxy. Without this, a concept whose
+    examples happen to appear first in the source file (e.g. a common word
+    with many corpus examples that all fail morphological matching) fills
+    the whole sample and looks like a single dominant bug rather than one
+    concept among many.
+    """
+    groups: dict[tuple, list[dict]] = defaultdict(list)
+    for entry in entries:
+        groups[tuple(entry.get("candidate_wordforms", []))].append(entry)
+
+    picked: list[dict] = []
+    group_iters = [iter(g) for g in groups.values()]
+    while len(picked) < limit and group_iters:
+        for it in list(group_iters):
+            try:
+                picked.append(next(it))
+            except StopIteration:
+                group_iters.remove(it)
+                continue
+            if len(picked) >= limit:
+                break
+    return picked
+
+
 def issues_from_json_log(log: dict, log_path: Path | None = None) -> list[Issue]:
     """Turn converter-log entries into Issue objects."""
     if not log:
@@ -708,6 +739,32 @@ def issues_from_json_log(log: dict, log_path: Path | None = None) -> list[Issue]
                 f"{log_path.name} (lexeme_concept_pos_mismatches.by_pos_pair)"
                 if log_path else ""
             ),
+        ))
+
+    # POS codes with no mapping to a standard WN-LMF category. Each was
+    # silently coerced to UNK during conversion, so its real part of speech
+    # is lost. One Issue per distinct code (not lumped together) so the
+    # cross-wordnet --summary groups matching codes (e.g. two wordnets both
+    # using an empty string) under the same title.
+    invalid_pos = log.get("invalid_pos_values", {})
+    for code, count in sorted(invalid_pos.items(), key=lambda kv: -kv[1]):
+        label = repr(code) if code else "(empty)"
+        _add(Issue(
+            severity="CRITICAL",
+            title=f"Unrecognised part-of-speech code {label}",
+            total=count,
+            explanation=(
+                f"{count:,} concept(s) used the part-of-speech code {label}, which "
+                "Cygnet does not recognise (valid codes: n, v, a, r, s, c, p, x, u). "
+                "Each was silently coerced to UNK, so its real part of speech is lost."
+            ),
+            recommendation=(
+                f"Check your source data for the {label} code and either map it to a "
+                "standard WN-LMF part-of-speech before conversion, or report it "
+                "upstream if it indicates a missing or incorrect partOfSpeech attribute."
+            ),
+            items=[],
+            source_hint=f"{log_path.name} (invalid_pos_values)" if log_path else "",
         ))
 
     # Relations dropped because the same relation was already established by another wordnet
@@ -795,7 +852,7 @@ def issues_from_json_log(log: dict, log_path: Path | None = None) -> list[Issue]
     if ex_skipped:
         failed = ex_stats.get("failed_matches", [])
         items = []
-        for entry in failed[:MAX_EXAMPLES]:
+        for entry in _diversify(failed, MAX_EXAMPLES):
             text = entry.get("text", "")[:70]
             forms = entry.get("candidate_wordforms", [])
             if forms:
@@ -992,19 +1049,18 @@ def format_report(
     return "\n".join(lines)
 
 
-def report_file(path: Path, markdown: bool = False) -> None:
-    """Parse, check, and print a report for one XML file.
+def collect_issues(path: Path) -> tuple[WordnetData, list[Issue]] | None:
+    """Parse one pre-synth file and run every check against it.
 
-    Returns without printing anything for the CILI file, which is an
-    infrastructure resource rather than a wordnet.
+    Returns None for the CILI file, which is an infrastructure resource
+    rather than a wordnet.
     """
     data = parse_xml(path)
     if data.resource_id == "cili":
-        return
-    xml_issues = run_checks(data)
-    for issue in xml_issues:
+        return None
+    issues = run_checks(data)
+    for issue in issues:
         issue.source_hint = path.name
-    issues = xml_issues
 
     # Augment with converter log (created at pre-synth time)
     log_path = path.with_name(path.stem + "_log.json")
@@ -1015,7 +1071,167 @@ def report_file(path: Path, markdown: bool = False) -> None:
     reversed_rels, cycles = parse_conflicts_json(data.resource_id, path.stem)
     issues.extend(issues_from_conflicts_log(reversed_rels, cycles, data, xml_stem=path.stem))
 
+    return data, issues
+
+
+def report_file(path: Path, markdown: bool = False) -> None:
+    """Parse, check, and print a report for one XML file."""
+    result = collect_issues(path)
+    if result is None:
+        return
+    data, issues = result
     print(format_report(path, data, issues, markdown))
+
+
+# Maps an issue title to the kind of denominator that makes its count
+# meaningful as a proportion (e.g. "372 concepts without definitions" means
+# little without knowing the wordnet has 400 concepts total). Titles not
+# listed here get no percentage rather than a guessed-wrong one.
+_DENOMINATOR_KEY_FOR_TITLE = {
+    "Concepts without definitions": "concepts",
+    "Hypernym loops (cycles in the is-a hierarchy)": "concepts",
+    "Synsets without a CILI mapping": "concepts",
+    "Defined concepts with no senses in this file": "concepts",
+    "POS mismatches: synset vs CILI concept": "concepts",
+    "Word entries with no wordforms": "entries",
+    "POS mismatches: lexeme vs its concept": "entries",
+    "Senses referencing undeclared entries": "senses",
+    "Senses with unresolvable synset (conversion time)": "senses",
+    "Example sentences with no matching sense annotations": "examples",
+    "Example sentences not matched to a sense (conversion time)": "examples_found",
+    "Hypernym cycles spanning multiple wordnets": "relations",
+    "Relations reversed relative to another wordnet": "relations",
+    "Contradictory relation directions within this file": "relations",
+    "Self-referential relations": "relations",
+    "Relations with incompatible POS categories": "relations",
+    "Non-standard relation types": "relations",
+    "Concept relations already covered by another wordnet": "relations",
+}
+
+_DENOMINATOR_LABEL = {
+    "concepts": "concepts",
+    "entries": "entries",
+    "senses": "senses",
+    "relations": "relations",
+    "examples": "examples in this file",
+    "examples_found": "examples found before conversion",
+}
+
+
+def _denominator_key(title: str) -> str | None:
+    """The kind of size denominator *title* should be shown as a % of, if any."""
+    if title.startswith("Duplicate ") and title.endswith(" IDs"):
+        kind = title[len("Duplicate "):-len(" IDs")]
+        return {"concept": "concepts", "entry": "entries", "sense": "senses"}.get(kind)
+    # "Unrecognised part-of-speech code" has no denominator: it's counted once
+    # per raw pre-dedup Synset/LexicalEntry in the converter, but WordnetData's
+    # concept/entry counts are post-dedup — the count can exceed both, so any
+    # percentage against them would be misleading (occasionally over 100%).
+    return _DENOMINATOR_KEY_FOR_TITLE.get(title)
+
+
+def _denominator_value(key: str, data: WordnetData, issue_total: int) -> int:
+    """The actual size for *key* on this wordnet's data."""
+    if key == "concepts":
+        return len(data.concepts)
+    if key == "entries":
+        return len(data.entries)
+    if key == "senses":
+        return len(data.senses)
+    if key == "relations":
+        return len(data.concept_rels) + len(data.sense_rels)
+    if key == "examples":
+        return len(data.examples)
+    if key == "examples_found":
+        # Examples that failed conversion-time matching never made it into
+        # the pre-synth file, so add the failure count back to recover the
+        # original total.
+        return len(data.examples) + issue_total
+    raise ValueError(f"unknown denominator key: {key}")
+
+
+def format_summary(paths: list[Path], markdown: bool) -> str:
+    """Aggregate issue counts across many wordnets, grouped by issue type.
+
+    For each issue title (e.g. "Concepts without definitions"), lists every
+    wordnet that has it, how many, and — where a sensible denominator exists
+    — what proportion of the wordnet's own concepts/entries/senses/relations
+    that represents, so a small wordnet's 50 mismatches (25% of it) doesn't
+    get lost under a large wordnet's 5,000 (0.5% of it).
+    """
+    by_title: dict[str, dict[str, int]] = defaultdict(dict)
+    severity_of: dict[str, str] = {}
+    data_by_resource: dict[str, WordnetData] = {}
+
+    for path in paths:
+        if not path.exists():
+            print(f"File not found: {path}", file=sys.stderr)
+            continue
+        result = collect_issues(path)
+        if result is None:
+            continue
+        data, issues = result
+        data_by_resource[data.resource_id] = data
+        for issue in issues:
+            by_title[issue.title][data.resource_id] = issue.total
+            severity_of[issue.title] = issue.severity
+
+    lines: list[str] = []
+    if markdown:
+        lines.append("# Cross-Wordnet Issue Summary")
+    else:
+        lines += ["CROSS-WORDNET ISSUE SUMMARY", "=" * 27]
+
+    for sev in ("CRITICAL", "WARNING", "INFO"):
+        titles = sorted(
+            (t for t, s in severity_of.items() if s == sev),
+            key=lambda t: -sum(by_title[t].values()),
+        )
+        if not titles:
+            continue
+        lines.append(f"\n## {sev}" if markdown else f"\n{sev}\n{'-' * len(sev)}")
+
+        for title in titles:
+            counts = by_title[title]
+            total = sum(counts.values())
+            ranked = sorted(counts.items(), key=lambda kv: -kv[1])
+            denom_key = _denominator_key(title)
+            denom_label = _DENOMINATOR_LABEL.get(denom_key, "") if denom_key else ""
+
+            def pct(wn: str, n: int, denom_key: str | None = denom_key) -> str:
+                data = data_by_resource.get(wn)
+                if denom_key is None or data is None:
+                    return ""
+                size = _denominator_value(denom_key, data, n)
+                return f"{100 * n / size:.1f}%" if size else "—"
+
+            if markdown:
+                lines.append(
+                    f"\n### {title} — {_fmt(total)} total across "
+                    f"{len(counts)} wordnet(s)"
+                )
+                if denom_key:
+                    lines.append(f"\n| Wordnet | Count | % of {denom_label} |")
+                    lines.append("|---|---:|---:|")
+                    lines += [f"| {wn} | {_fmt(n)} | {pct(wn, n)} |" for wn, n in ranked]
+                else:
+                    lines.append("\n| Wordnet | Count |")
+                    lines.append("|---|---:|")
+                    lines += [f"| {wn} | {_fmt(n)} |" for wn, n in ranked]
+            else:
+                lines.append(
+                    f"\n  {title} — {_fmt(total)} total across "
+                    f"{len(counts)} wordnet(s)"
+                )
+                if denom_key:
+                    lines += [
+                        f"    {wn:24s} {_fmt(n):>10s}  ({pct(wn, n)} of {denom_label})"
+                        for wn, n in ranked
+                    ]
+                else:
+                    lines += [f"    {wn:24s} {_fmt(n):>10s}" for wn, n in ranked]
+
+    return "\n".join(lines)
 
 
 def main() -> None:
@@ -1026,15 +1242,23 @@ def main() -> None:
     parser.add_argument("--all", action="store_true",
                         help=f"Check all *.xml files in {PRESYNTH_DIR}")
     parser.add_argument("--md", action="store_true", help="Output in Markdown format")
+    parser.add_argument("--summary", action="store_true",
+                        help="Print one cross-wordnet count per issue type "
+                             "instead of a per-file report (implies --all "
+                             "when no files are given)")
     args = parser.parse_args()
 
     paths: list[Path] = list(args.files)
-    if args.all:
+    if args.all or (args.summary and not paths):
         paths = sorted(PRESYNTH_DIR.glob("*.xml"))
 
     if not paths:
         parser.print_help()
         sys.exit(0)
+
+    if args.summary:
+        print(format_summary(paths, args.md))
+        return
 
     for i, p in enumerate(paths):
         if not p.exists():
