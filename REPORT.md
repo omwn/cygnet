@@ -5,6 +5,17 @@ produces a human-readable summary of every issue that would cause Cygnet to
 silently drop or modify data — phrased for upstream wordnet maintainers who
 may not be familiar with Cygnet's internals.
 
+For the complementary question — not "what's wrong" but "how big is it and
+what's it made of" — see `scripts/statistics.py`:
+
+```bash
+uv run python scripts/statistics.py --md > reports/_statistics.md
+```
+
+It reports overall counts (languages, concepts, senses, relations,
+definitions, examples) plus breakdowns by part of speech and relation type,
+read directly from the built `web/cygnet.db`.
+
 ---
 
 ## Generating a report
