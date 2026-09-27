@@ -225,7 +225,7 @@ INVERSE_SENSE_RELATIONS: dict[str, str] = {
 # This list is curated by hand, not derived automatically: a resource's
 # raw cycle/conflict count is not a reliable trust signal on its own, since
 # a resource can rack up a high count simply by frequently intersecting
-# with one genuinely bad resource (see conversion_scripts/trust_report.py's
+# with one genuinely bad resource (see scripts/trust_report.py's
 # module docstring for a worked example of this trap). Add an entry only
 # after reviewing that script's report across multiple builds and manually
 # confirming the direction error via the per-SCC edge dump, not from the
