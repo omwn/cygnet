@@ -477,3 +477,111 @@ class TestCheckAndRemoveNewCycles:
         assert 'wn-b' in caplog.text
         assert 'hypernym' in caplog.text
         assert 'existing chain' in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# resolve_residual_cycles / LOW_TRUST_RESOURCES tie-break
+# ---------------------------------------------------------------------------
+
+# Base wordnet: three concepts plus a trusted edge a2->a3. Deliberately
+# omits the a1<->a2<->a3<->a1 back-edges so no per-file cycle exists yet —
+# those are added by two more files below to build a genuinely *residual*
+# cycle (one check_and_remove_new_cycles is never even asked to look at).
+_RESIDUAL_BASE_BODY = """\
+<Concept id="cili.a1" ontological_category="NOUN" status="1">
+  <Provenance resource="wn-a" version="1.0"/>
+</Concept>
+<Concept id="cili.a2" ontological_category="NOUN" status="1">
+  <Provenance resource="wn-a" version="1.0"/>
+</Concept>
+<Concept id="cili.a3" ontological_category="NOUN" status="1">
+  <Provenance resource="wn-a" version="1.0"/>
+</Concept>
+<Gloss definiendum="cili.a1" language="en">
+  <AnnotatedSentence>alpha</AnnotatedSentence>
+  <Provenance resource="wn-a" version="1.0"/>
+</Gloss>
+<Gloss definiendum="cili.a2" language="en">
+  <AnnotatedSentence>beta</AnnotatedSentence>
+  <Provenance resource="wn-a" version="1.0"/>
+</Gloss>
+<Gloss definiendum="cili.a3" language="en">
+  <AnnotatedSentence>gamma</AnnotatedSentence>
+  <Provenance resource="wn-a" version="1.0"/>
+</Gloss>
+<ConceptRelation relation_type="hypernym" source="cili.a2" target="cili.a3">
+  <Provenance resource="wn-trusted" version="1.0"/>
+</ConceptRelation>
+"""
+
+
+def _has_hypernym(builder, src_ili: str, tgt_ili: str) -> bool:
+    row = builder.cur.execute(
+        """
+        SELECT 1 FROM synset_relations sr
+        JOIN synsets s1 ON s1.rowid = sr.source_rowid
+        JOIN synsets s2 ON s2.rowid = sr.target_rowid
+        JOIN relation_types rt ON rt.rowid = sr.type_rowid
+        WHERE s1.ili = ? AND s2.ili = ? AND rt.type = 'hypernym'
+        """,
+        (src_ili.replace('cili.', ''), tgt_ili.replace('cili.', '')),
+    ).fetchone()
+    return row is not None
+
+
+class TestResolveResidualCyclesTrustOrder:
+    """resolve_residual_cycles() must rank by LOW_TRUST_RESOURCES order, not
+    by merge-order rowid, when more than one low-trust resource is involved.
+    """
+
+    def _build_residual_cycle(self, builder, tmp_path):
+        """a1->a2 (mild)->a3 (trusted)->a1 (worst), 'worst' merged first."""
+        (tmp_path / 'base.xml').write_text(wn_xml('wn-a', _RESIDUAL_BASE_BODY))
+        builder.process_file(tmp_path / 'base.xml')
+
+        (tmp_path / 'worst.xml').write_text(wn_xml('wn-worst', """\
+<ConceptRelation relation_type="hypernym" source="cili.a3" target="cili.a1">
+  <Provenance resource="wn-worst" version="1.0"/>
+</ConceptRelation>
+"""))
+        builder.process_file(tmp_path / 'worst.xml')
+
+        (tmp_path / 'mild.xml').write_text(wn_xml('wn-mild', """\
+<ConceptRelation relation_type="hypernym" source="cili.a1" target="cili.a2">
+  <Provenance resource="wn-mild" version="1.0"/>
+</ConceptRelation>
+"""))
+        builder.process_file(tmp_path / 'mild.xml')
+        builder.create_indexes()
+
+    def test_worst_ranked_resource_loses_despite_lower_rowid(
+        self, builder, tmp_path, monkeypatch
+    ):
+        """'wn-worst' merges first (lower rowid) but is ranked worse than
+        'wn-mild' in LOW_TRUST_RESOURCES — its edge must be the one removed,
+        not the mild resource's, even though a naive rowid tie-break within
+        a boolean is-low-trust group would pick the opposite.
+        """
+        monkeypatch.setattr(
+            'cyg.merge.LOW_TRUST_RESOURCES', ('wn-worst', 'wn-mild')
+        )
+        self._build_residual_cycle(builder, tmp_path)
+
+        removed = builder.resolve_residual_cycles()
+
+        assert removed == 1
+        assert builder.detect_cycles() == 0
+        assert not _has_hypernym(builder, 'cili.a3', 'cili.a1')
+        assert _has_hypernym(builder, 'cili.a1', 'cili.a2')
+        assert _has_hypernym(builder, 'cili.a2', 'cili.a3')
+
+    def test_trusted_edge_never_removed(self, builder, tmp_path, monkeypatch):
+        """The non-low-trust edge always survives regardless of rank order."""
+        monkeypatch.setattr(
+            'cyg.merge.LOW_TRUST_RESOURCES', ('wn-worst', 'wn-mild')
+        )
+        self._build_residual_cycle(builder, tmp_path)
+
+        builder.resolve_residual_cycles()
+
+        assert _has_hypernym(builder, 'cili.a2', 'cili.a3')

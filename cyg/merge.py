@@ -215,13 +215,22 @@ INVERSE_SENSE_RELATIONS: dict[str, str] = {
 }
 
 # Resources with a documented, systematic hypernym-direction bug in their
-# source data (upstream bug reports pending/filed). Per-file cycle removal
-# already catches most of these when the reversed edge closes a cycle
-# against relations from files merged before it; this list only affects
-# resolve_residual_cycles()'s tie-break, for the cases that only become
-# cyclic once a later file supplies the correct-direction edge for the
-# same concept pair.
-LOW_TRUST_RESOURCES: frozenset[str] = frozenset({'own-pt', 'UzWordnet-uz'})
+# source data (upstream bug reports pending/filed), ordered WORST FIRST.
+# Per-file cycle removal already catches most of these when the reversed
+# edge closes a cycle against relations from files merged before it; this
+# list only affects resolve_residual_cycles()'s tie-break, for the cases
+# that only become cyclic once a later file supplies the correct-direction
+# edge for the same concept pair.
+#
+# This list is curated by hand, not derived automatically: a resource's
+# raw cycle/conflict count is not a reliable trust signal on its own, since
+# a resource can rack up a high count simply by frequently intersecting
+# with one genuinely bad resource (see conversion_scripts/trust_report.py's
+# module docstring for a worked example of this trap). Add an entry only
+# after reviewing that script's report across multiple builds and manually
+# confirming the direction error via the per-SCC edge dump, not from the
+# aggregate rate table alone.
+LOW_TRUST_RESOURCES: tuple[str, ...] = ('UzWordnet-uz', 'own-pt')
 
 INVERSE_CONCEPT_RELATIONS: dict[str, str] = {
     'hypernym':          'hyponym',
@@ -1432,20 +1441,32 @@ class MergeBuilder:
         already-kept edges, so the first-processed of two conflicting
         edges always wins — consistent with check_and_remove_new_cycles()
         (single-file cycles), generalised to the whole graph. Edges are
-        processed LOW_TRUST_RESOURCES last (regardless of rowid), then by
-        ascending rowid: raw insertion order alone isn't a reliable trust
-        signal (it can be an accident of alphabetical filename sort, e.g.
-        'UzWordnet' sorts before 'odwn-nl' by case rather than any
-        property of the data), so an explicit, documented resource list
-        is used instead — see LOW_TRUST_RESOURCES.
+        processed in LOW_TRUST_RESOURCES order last (worst resource last
+        of all), regardless of rowid, then by ascending rowid. Raw
+        insertion order alone isn't a reliable trust signal (it can be an
+        accident of alphabetical filename sort, e.g. 'UzWordnet' sorts
+        before 'odwn-nl' by case rather than any property of the data) —
+        and this applies just as much *within* the low-trust group, so a
+        second, milder low-trust entry must not be able to out-rank a
+        worse one purely because it happened to merge later. An explicit,
+        ranked resource list is used instead — see LOW_TRUST_RESOURCES.
         """
-        def sort_key(item: tuple[int, int, int]) -> tuple[bool, int]:
+        n_low_trust = len(LOW_TRUST_RESOURCES)
+
+        def trust_rank(code: str) -> int:
+            # 0 = default (most trusted); worst entry in LOW_TRUST_RESOURCES
+            # gets the highest rank, so it's evaluated dead last regardless
+            # of any other low-trust resource's merge-order rowid.
+            try:
+                return n_low_trust - LOW_TRUST_RESOURCES.index(code)
+            except ValueError:
+                return 0
+
+        def sort_key(item: tuple[int, int, int]) -> tuple[int, int]:
             rowid, _src, _tgt = item
             resource = self._edge_resource_label(rowid)
-            is_low_trust = any(
-                r in LOW_TRUST_RESOURCES for r in resource.split(',')
-            )
-            return (is_low_trust, rowid)
+            rank = max(trust_rank(r) for r in resource.split(','))
+            return (rank, rowid)
 
         scc_edges = sorted(
             (
