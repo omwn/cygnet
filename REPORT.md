@@ -110,7 +110,8 @@ The script combines three sources, using whichever are available:
 | **Concepts without definitions** | `<Concept>` in this file has no matching `<Gloss>` | Concept and all its senses are deleted |
 | **Word entries with no wordforms** | `<Lexeme>` has no `<Wordform>` children | Entry and all its senses are silently skipped |
 | **Hypernym loops (within this file)** | A set of `hypernym`/`instance_hypernym` relations forms a cycle internally | The relation that closes the loop is removed |
-| **Hypernym cycles spanning multiple wordnets** | A relation from this file creates a cycle when combined with relations from other wordnets | The offending relation is removed; the existing cross-wordnet chain is shown |
+| **Hypernym cycles spanning multiple wordnets** | A relation from this file creates a cycle when combined with relations already merged from other wordnets, caught immediately after this file is merged | The offending relation is removed; the existing cross-wordnet chain is shown |
+| **Hypernym cycles found only after the full build (residual)** | A relation from this file only closes a cycle once *later*-merged wordnets are also in the graph, so no per-file check (including the one above) could catch it at merge time — see `resolve_residual_cycles()` in `cyg/merge.py` | Caught by one final whole-graph check after every wordnet is merged; the resource judged most likely to be wrong (`cyg.merge.LOW_TRUST_RESOURCES`) has its relation removed |
 | **Relations reversed relative to another wordnet** | This file asserts `A hypernym B` but another wordnet already established `B hypernym A` | The conflicting relation is skipped |
 | **Duplicate IDs** | A concept, entry, or sense ID appears more than once | Duplicate concepts crash the build; duplicate entries/senses are merged or skipped |
 | **Unrecognised part-of-speech code** | A `<Synset>` or `<Lemma>` uses a `partOfSpeech` value Cygnet doesn't recognise (valid: `n`, `v`, `a`, `r`, `s`, `c`, `p`, `x`, `u`) — including a missing/empty attribute | Coerced to `UNK`; the concept's real part of speech is lost |
@@ -149,9 +150,12 @@ sections are:
   hypernym direction is inverted (more-general → more-specific instead of
   more-specific → more-general). Show the table of examples.
 
-- **Hypernym cycles** — the "existing chain" shows the path already in the
+- **Hypernym cycles** (both the per-file and "found only after the full
+  build" sections) — the "existing chain" shows the path already in the
   database, helping the maintainer identify which link in their hierarchy
-  is incorrect.
+  is incorrect. The residual section in particular can surface a genuine
+  error in a wordnet that looks clean on its own — it only became visible
+  once other wordnets were merged in.
 
 - **Concepts without definitions** — straightforward: a synset ID is missing
   its gloss.

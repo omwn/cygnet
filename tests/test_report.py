@@ -869,6 +869,12 @@ class TestParseConflictsJson:
         "cycles": [
             {"xml_stem": "wn-test-1.0", "src": "cili.i1", "rel": "hypernym",
              "tgt": "cili.i2", "chain": ["cili.i2", "cili.i1"]},
+            # Residual records are logged under the bare resource code (no
+            # version), unlike file_cycles above — see resolve_residual_
+            # cycles()'s attribution in cyg/merge.py. Deliberately mismatched
+            # here to guard against matching residual records on xml_stem.
+            {"xml_stem": "wn-test", "src": "cili.i5", "rel": "hypernym",
+             "tgt": "cili.i6", "chain": ["cili.i6", "cili.i5"], "residual": True},
         ],
     }
 
@@ -879,27 +885,33 @@ class TestParseConflictsJson:
 
     def test_returns_empty_when_no_log(self, tmp_path, monkeypatch):
         monkeypatch.setattr(_mod, "CONFLICTS_JSON", tmp_path / "nonexistent.json")
-        rev, cyc = parse_conflicts_json("wn-test", "wn-test-1.0")
-        assert rev == [] and cyc == []
+        rev, file_cyc, residual_cyc = parse_conflicts_json("wn-test", "wn-test-1.0")
+        assert rev == [] and file_cyc == [] and residual_cyc == []
 
     def test_parses_reversed_relation_by_resource_id(self, tmp_path, monkeypatch):
         monkeypatch.setattr(_mod, "CONFLICTS_JSON", self._write_json(tmp_path))
-        rev, cyc = parse_conflicts_json("wn-test", "wn-test-1.0")
+        rev, _file_cyc, _residual_cyc = parse_conflicts_json("wn-test", "wn-test-1.0")
         assert len(rev) == 1
         assert rev[0]["src"] == "cili.i1"
 
     def test_excludes_other_resource(self, tmp_path, monkeypatch):
         monkeypatch.setattr(_mod, "CONFLICTS_JSON", self._write_json(tmp_path))
-        rev, _cyc = parse_conflicts_json("other-wn", "other-wn-1.0")
+        rev, _file_cyc, _residual_cyc = parse_conflicts_json("other-wn", "other-wn-1.0")
         assert len(rev) == 1
         assert rev[0]["src"] == "cili.i3"
 
     def test_parses_cycle_by_xml_stem(self, tmp_path, monkeypatch):
         monkeypatch.setattr(_mod, "CONFLICTS_JSON", self._write_json(tmp_path))
-        _rev, cyc = parse_conflicts_json("wn-test", "wn-test-1.0")
-        assert len(cyc) == 1
-        assert cyc[0]["src"] == "cili.i1"
-        assert "cili.i2" in cyc[0]["chain"]
+        _rev, file_cyc, _residual_cyc = parse_conflicts_json("wn-test", "wn-test-1.0")
+        assert len(file_cyc) == 1
+        assert file_cyc[0]["src"] == "cili.i1"
+        assert "cili.i2" in file_cyc[0]["chain"]
+
+    def test_splits_residual_from_file_cycles(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(_mod, "CONFLICTS_JSON", self._write_json(tmp_path))
+        _rev, file_cyc, residual_cyc = parse_conflicts_json("wn-test", "wn-test-1.0")
+        assert len(file_cyc) == 1 and len(residual_cyc) == 1
+        assert residual_cyc[0]["src"] == "cili.i5"
 
 
 # ---------------------------------------------------------------------------
@@ -910,7 +922,7 @@ class TestIssuesFromConflictsLog:
     _empty_data = _mod.WordnetData()
 
     def test_empty_inputs_return_no_issues(self):
-        assert issues_from_conflicts_log([], [], self._empty_data) == []
+        assert issues_from_conflicts_log([], [], [], self._empty_data) == []
 
     def test_reversed_relations_produce_critical_issue(self):
         recs = [
@@ -921,24 +933,53 @@ class TestIssuesFromConflictsLog:
              "src": "cili.i3", "rel": "hypernym", "tgt": "cili.i4",
              "prior_resource": "oewn"},
         ]
-        result = issues_from_conflicts_log(recs, [], self._empty_data)
+        result = issues_from_conflicts_log(recs, [], [], self._empty_data)
         assert len(result) == 1
         issue = result[0]
         assert issue.severity == "CRITICAL"
         assert issue.total == 2
         assert any("cili.i1" in item for item in issue.items)
 
-    def test_cycles_produce_critical_issue(self):
+    def test_file_cycles_produce_critical_issue(self):
         recs = [
             {"xml_stem": "wn-1.0", "src": "cili.i1", "rel": "hypernym",
              "tgt": "cili.i2", "chain": ["cili.i2", "cili.i1"]},
         ]
-        result = issues_from_conflicts_log([], recs, self._empty_data)
+        result = issues_from_conflicts_log([], recs, [], self._empty_data)
         assert len(result) == 1
         issue = result[0]
         assert issue.severity == "CRITICAL"
+        assert issue.title == "Hypernym cycles spanning multiple wordnets"
         assert issue.total == 1
         assert any("cili.i1" in item for item in issue.items)
+
+    def test_residual_cycles_produce_separate_issue(self):
+        recs = [
+            {"xml_stem": "wn-1.0", "src": "cili.i5", "rel": "hypernym",
+             "tgt": "cili.i6", "chain": ["cili.i6", "cili.i5"]},
+        ]
+        result = issues_from_conflicts_log([], [], recs, self._empty_data)
+        assert len(result) == 1
+        issue = result[0]
+        assert issue.severity == "CRITICAL"
+        assert "residual" in issue.title
+        assert issue.total == 1
+        assert any("cili.i5" in item for item in issue.items)
+
+    def test_file_and_residual_cycles_produce_two_separate_issues(self):
+        file_recs = [
+            {"xml_stem": "wn-1.0", "src": "cili.i1", "rel": "hypernym",
+             "tgt": "cili.i2", "chain": ["cili.i2", "cili.i1"]},
+        ]
+        residual_recs = [
+            {"xml_stem": "wn-1.0", "src": "cili.i5", "rel": "hypernym",
+             "tgt": "cili.i6", "chain": ["cili.i6", "cili.i5"]},
+        ]
+        result = issues_from_conflicts_log([], file_recs, residual_recs, self._empty_data)
+        assert len(result) == 2
+        titles = {i.title for i in result}
+        assert "Hypernym cycles spanning multiple wordnets" in titles
+        assert any("residual" in t for t in titles)
 
 
 # ---------------------------------------------------------------------------
@@ -1046,7 +1087,7 @@ class TestCollectIssues:
         path = _write_xml(tmp_path, body)
         result = collect_issues(path)
         assert result is not None
-        data, issues = result
+        data, issues, _json_log = result
         assert data.resource_id == "wn-test"
         assert any(i.title == "Concepts without definitions" for i in issues)
 
@@ -1058,9 +1099,22 @@ class TestCollectIssues:
 </Concept>
 """
         path = _write_xml(tmp_path, body)
-        _, issues = collect_issues(path)
+        _, issues, _json_log = collect_issues(path)
         issue = next(i for i in issues if i.title == "Concepts without definitions")
         assert issue.source_hint == path.name
+
+    def test_returns_converter_log(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(_mod, "CONFLICTS_JSON", tmp_path / "nonexistent.json")
+        path = _write_xml(tmp_path, _GOOD, wn_id="wn-test")
+        path.with_name("wn-test_log.json").write_text('{"missing_cili_concepts": {"count": 3}}')
+        _data, _issues, json_log = collect_issues(path)
+        assert json_log["missing_cili_concepts"]["count"] == 3
+
+    def test_returns_empty_dict_when_no_log_file(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(_mod, "CONFLICTS_JSON", tmp_path / "nonexistent.json")
+        path = _write_xml(tmp_path, _GOOD, wn_id="wn-test")
+        _data, _issues, json_log = collect_issues(path)
+        assert json_log == {}
 
 
 # ---------------------------------------------------------------------------
@@ -1184,14 +1238,69 @@ class TestDenominator:
         data = _parse(tmp_path, _GOOD)
         data.concept_rels = [("a", "hypernym", "b")]
         data.sense_rels = [("s1", "antonym", "s2")]
-        assert _denominator_value("relations", data, 0) == 2
+        assert _denominator_value("relations", data, 0, {}) == 2
 
     def test_examples_found_adds_back_the_failures(self, tmp_path):
         data = _parse(tmp_path, _GOOD)
         data.examples = [("one sentence", frozenset())]
-        assert _denominator_value("examples_found", data, 9) == 10
+        assert _denominator_value("examples_found", data, 9, {}) == 10
 
     def test_unknown_key_raises(self, tmp_path):
         data = _parse(tmp_path, _GOOD)
         with pytest.raises(ValueError):
-            _denominator_value("not-a-real-key", data, 0)
+            _denominator_value("not-a-real-key", data, 0, {})
+
+    def test_lexeme_vs_concept_pos_uses_senses_not_entries(self):
+        """Regression: ancientgreek-grc showed 379% when this used 'entries' —
+        the check increments once per Sense link, not per LexicalEntry, so
+        senses (which can vastly outnumber entries) is the correct scope.
+        """
+        assert _denominator_key("POS mismatches: lexeme vs its concept") == "senses"
+
+    def test_hypernym_loops_uses_relation_graph_nodes_not_concepts(self):
+        """Regression: odwn-nl showed 10120% when this used len(data.concepts)
+        — cyclic-SCC membership ranges over concepts *referenced* by this
+        file's relations (mostly pre-existing cili.* concepts), not just the
+        <Concept> elements this file itself defines.
+        """
+        assert (
+            _denominator_key("Hypernym loops (cycles in the is-a hierarchy)")
+            == "relation_graph_nodes"
+        )
+
+    def test_relation_graph_nodes_counts_distinct_referenced_concepts(self, tmp_path):
+        data = _parse(tmp_path, _GOOD)
+        data.concept_rels = [("a", "hypernym", "b"), ("b", "hypernym", "c")]
+        assert _denominator_value("relation_graph_nodes", data, 0, {}) == 3
+
+    def test_concepts_from_cili_reads_converter_log(self, tmp_path):
+        data = _parse(tmp_path, _GOOD)
+        log = {"statistics": {"concepts": {"from_cili": 42}}}
+        assert _denominator_value("concepts_from_cili", data, 0, log) == 42
+
+    def test_concepts_from_cili_defaults_to_zero(self, tmp_path):
+        data = _parse(tmp_path, _GOOD)
+        assert _denominator_value("concepts_from_cili", data, 0, {}) == 0
+
+    def test_relations_attempted_sums_created_skipped_and_duplicates(self, tmp_path):
+        data = _parse(tmp_path, _GOOD)
+        log = {
+            "statistics": {"relations": {"concept_relations_created": 10}},
+            "relation_processing": {
+                "skipped_existing_relations": {"concept_relations": {"count": 3}},
+                "duplicates_removed": {"concept_relations": {"count": 2}},
+            },
+        }
+        assert _denominator_value("relations_attempted", data, 0, log) == 15
+
+    def test_synset_vs_cili_pos_mismatch_uses_from_cili(self):
+        assert (
+            _denominator_key("POS mismatches: synset vs CILI concept")
+            == "concepts_from_cili"
+        )
+
+    def test_concept_relations_covered_uses_relations_attempted(self):
+        assert (
+            _denominator_key("Concept relations already covered by another wordnet")
+            == "relations_attempted"
+        )
