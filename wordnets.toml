@@ -199,6 +199,9 @@ yue = ["https://raw.githubusercontent.com/lmorgadodacosta/CantoneseWN/refs/heads
 # Abui
 abz = ["https://raw.githubusercontent.com/fanacek/abuiwn/refs/heads/main/abwn.xml"]
 
+# Ukrainian - Ukrajinet
+uk = ["https://github.com/hdaSprachtechnologie/ukrajinet/raw/refs/heads/main/ukrajinet.xml"]
+
 
 ## Old wordnets
 
