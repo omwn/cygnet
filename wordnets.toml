@@ -202,6 +202,8 @@ abz = ["https://raw.githubusercontent.com/fanacek/abuiwn/refs/heads/main/abwn.xm
 # Ukrainian - Ukrajinet
 uk = ["https://github.com/hdaSprachtechnologie/ukrajinet/raw/refs/heads/main/ukrajinet.xml"]
 
+# Welsh - WordNet Cymraeg
+cy = ["https://github.com/igamasniak/omw-converters/releases/download/v0.1/WelshWordNet.xml.xz"]
 
 ## Old wordnets
 
