@@ -209,6 +209,12 @@ cy = ["https://github.com/igamasniak/omw-converters/releases/download/v0.1/Welsh
 # Bengali - BanglaNet
 bn = ["https://github.com/igamasniak/omw-converters/releases/download/v0.1/BengaliWordNet.xml.xz"]
 
+# Scottish Gaelic - The Unified Scottish Gaelic Wordnet
+gd = ["https://github.com/igamasniak/omw-converters/releases/download/v0.1/ScottishGaelicWordNet.xml.xz"]
+
+# Tatar - TatWordNet
+tt = ["https://github.com/igamasniak/omw-converters/releases/download/v0.1/TatarWordNet.xml.xz"]
+
 ## Old wordnets
 
 # Old Javanese
