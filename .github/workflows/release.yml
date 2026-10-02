@@ -13,7 +13,6 @@ on:
 
 permissions:
   contents: write
-  actions: read  # to fetch the translate.yml artifact below
 
 jobs:
   release:
@@ -41,14 +40,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p bin/cygnets_presynth
-          RUN_ID=$(gh run list --workflow=translate.yml --status=success --limit=1 \
-                     --json databaseId --jq '.[0].databaseId' || true)
-          if [ -n "$RUN_ID" ]; then
-            gh run download "$RUN_ID" --name translated-glosses --dir bin/cygnets_presynth/ \
-              || echo "No translated-glosses artifact on run $RUN_ID; continuing without translations"
-          else
-            echo "No successful translate.yml run found; continuing without translations"
-          fi
+          gh release download translated-glosses \
+            --pattern mtg-1.0.xml --dir bin/cygnets_presynth/ \
+            || echo "No translated-glosses release found; continuing without translations"
 
       - name: Build databases
         run: bash build.sh --build-only --skip-tests

@@ -25,9 +25,11 @@
 #   --download-only    Download data without running the build
 #   --build-only       Run the build without downloading (assumes data exists)
 #   --translate-only   Run only through Step 5 (translate definitions) and
-#                      stop — implies --with-translate. For a separate CI
-#                      job that produces bin/cygnets_presynth/mtg-1.0.xml
-#                      without paying for the full (fast) database build.
+#                      stop — implies --with-translate. Used by
+#                      scripts/upload_translations.sh to produce
+#                      bin/cygnets_presynth/mtg-1.0.xml for local, manual
+#                      publishing (translation takes hours, so it isn't run
+#                      in CI — see .github/workflows/check-wordnets.yml).
 #   --skip-tests       Skip the test suite
 #
 set -euo pipefail
