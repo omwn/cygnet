@@ -290,7 +290,17 @@ def main():
         print(f"\nProcessing {len(by_language)} languages...")
         for i, (lang_code, lang_glosses) in enumerate(sorted(by_language.items()), 1):
             print(f"\n[{i}/{len(by_language)}] ", end='')
-            translate_language_batch(lang_code, lang_glosses, output_file)
+            try:
+                translate_language_batch(lang_code, lang_glosses, output_file)
+            except Exception as e:
+                # A single language's MT pipeline misbehaving (e.g. a stale
+                # or incompatible stanza resource index) must not abort every
+                # other language in what's otherwise a multi-hour run. Any
+                # glosses already written for this language before the
+                # failure are preserved (translate_language_batch appends
+                # incrementally); the rest are simply retried on a future run.
+                print(f"Warning: {lang_code} failed unexpectedly ({e}); "
+                      f"skipping remaining glosses in {lang_code}")
 
         print("\n" + "=" * 60)
         print("✓ Translation complete!")

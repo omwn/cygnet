@@ -23,6 +23,11 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_DIR"
 
 echo "=== Running translation pipeline (this takes a while) ==="
+# extract_glosses() trusts bin/extra_glosses.json unconditionally with no
+# staleness check, so a stale copy would silently hide any wordnet added or
+# removed since it was written — exactly the scenario this script exists
+# for. Re-extracting is cheap (~25s for the full corpus).
+rm -f bin/extra_glosses.json
 ./build.sh --translate-only
 
 MTG_FILE="bin/cygnets_presynth/mtg-1.0.xml"
