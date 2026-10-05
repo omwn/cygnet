@@ -28,6 +28,11 @@ check_unmatched_examples = _mod.check_unmatched_examples
 check_non_standard_relations = _mod.check_non_standard_relations
 check_duplicate_ids = _mod.check_duplicate_ids
 check_glossed_concepts_without_senses = _mod.check_glossed_concepts_without_senses
+collect_issues = _mod.collect_issues
+format_summary = _mod.format_summary
+_diversify = _mod._diversify
+_denominator_key = _mod._denominator_key
+_denominator_value = _mod._denominator_value
 load_json_log = _mod.load_json_log
 parse_conflicts_json = _mod.parse_conflicts_json
 issues_from_json_log = _mod.issues_from_json_log
@@ -689,6 +694,34 @@ class TestLoadJsonLog:
 
 
 # ---------------------------------------------------------------------------
+# _diversify
+# ---------------------------------------------------------------------------
+
+class TestDiversify:
+    def test_spreads_across_groups_before_repeating(self):
+        entries = (
+            [{"candidate_wordforms": ["a"]}] * 5
+            + [{"candidate_wordforms": ["b"]}] * 5
+            + [{"candidate_wordforms": ["c"]}] * 5
+        )
+        picked = _diversify(entries, 3)
+        groups = {tuple(e["candidate_wordforms"]) for e in picked}
+        assert groups == {("a",), ("b",), ("c",)}
+
+    def test_returns_fewer_than_limit_if_not_enough_entries(self):
+        entries = [{"candidate_wordforms": ["a"]}]
+        assert len(_diversify(entries, 5)) == 1
+
+    def test_empty_input_returns_empty(self):
+        assert _diversify([], 5) == []
+
+    def test_falls_back_to_repeating_once_groups_exhausted(self):
+        entries = [{"candidate_wordforms": ["a"]}] * 3 + [{"candidate_wordforms": ["b"]}]
+        picked = _diversify(entries, 4)
+        assert len(picked) == 4
+
+
+# ---------------------------------------------------------------------------
 # issues_from_json_log
 # ---------------------------------------------------------------------------
 
@@ -761,6 +794,23 @@ class TestIssuesFromJsonLog:
         assert any("no senses/wordforms found" in item for item in match.items)
         assert not any("looked for:" in item for item in match.items)
 
+    def test_dominant_concept_does_not_crowd_out_sample(self):
+        """One concept with many failures at the front of the file must not
+        fill the whole example sample — this is the Latvian wordnet_lv case
+        (38 failed "gads" examples all sorting first) that motivated
+        diversifying the sample instead of taking failed_matches[:N].
+        """
+        failed = [
+            {"text": f"gads sentence {i}", "candidate_wordforms": ["gads"]}
+            for i in range(20)
+        ] + [
+            {"text": "a different concept's sentence", "candidate_wordforms": ["cits"]},
+        ]
+        log = {"statistics": {"examples": {"skipped": len(failed), "failed_matches": failed}}}
+        result = issues_from_json_log(log)
+        match = next(i for i in result if "Example" in i.title)
+        assert any("cits" in item for item in match.items)
+
     def test_zero_counts_produce_no_issues(self):
         log = {
             "synset_concept_pos_mismatches": {"total_count": 0, "by_pos_pair": {}},
@@ -769,6 +819,34 @@ class TestIssuesFromJsonLog:
             "statistics": {"examples": {"skipped": 0}},
         }
         assert issues_from_json_log(log) == []
+
+    def test_invalid_pos_values_reported(self):
+        log = {"invalid_pos_values": {"i": 3229}}
+        result = issues_from_json_log(log)
+        issue = next(i for i in result if "Unrecognised part-of-speech" in i.title)
+        assert issue.severity == "CRITICAL"
+        assert issue.total == 3229
+        assert "'i'" in issue.title
+
+    def test_invalid_pos_values_empty_code_labelled(self):
+        log = {"invalid_pos_values": {"": 92492}}
+        result = issues_from_json_log(log)
+        issue = next(i for i in result if "Unrecognised part-of-speech" in i.title)
+        assert "(empty)" in issue.title
+        assert issue.total == 92492
+
+    def test_invalid_pos_values_one_issue_per_code(self):
+        log = {"invalid_pos_values": {"i": 5, "q": 2}}
+        result = [
+            i for i in issues_from_json_log(log)
+            if "Unrecognised part-of-speech" in i.title
+        ]
+        assert len(result) == 2
+        assert {i.total for i in result} == {5, 2}
+
+    def test_no_invalid_pos_values_key_produces_no_issue(self):
+        result = issues_from_json_log({"missing_cili_concepts": {"count": 1}})
+        assert not any("Unrecognised part-of-speech" in i.title for i in result)
 
 
 # ---------------------------------------------------------------------------
@@ -791,6 +869,12 @@ class TestParseConflictsJson:
         "cycles": [
             {"xml_stem": "wn-test-1.0", "src": "cili.i1", "rel": "hypernym",
              "tgt": "cili.i2", "chain": ["cili.i2", "cili.i1"]},
+            # Residual records are logged under the bare resource code (no
+            # version), unlike file_cycles above — see resolve_residual_
+            # cycles()'s attribution in cyg/merge.py. Deliberately mismatched
+            # here to guard against matching residual records on xml_stem.
+            {"xml_stem": "wn-test", "src": "cili.i5", "rel": "hypernym",
+             "tgt": "cili.i6", "chain": ["cili.i6", "cili.i5"], "residual": True},
         ],
     }
 
@@ -801,27 +885,33 @@ class TestParseConflictsJson:
 
     def test_returns_empty_when_no_log(self, tmp_path, monkeypatch):
         monkeypatch.setattr(_mod, "CONFLICTS_JSON", tmp_path / "nonexistent.json")
-        rev, cyc = parse_conflicts_json("wn-test", "wn-test-1.0")
-        assert rev == [] and cyc == []
+        rev, file_cyc, residual_cyc = parse_conflicts_json("wn-test", "wn-test-1.0")
+        assert rev == [] and file_cyc == [] and residual_cyc == []
 
     def test_parses_reversed_relation_by_resource_id(self, tmp_path, monkeypatch):
         monkeypatch.setattr(_mod, "CONFLICTS_JSON", self._write_json(tmp_path))
-        rev, cyc = parse_conflicts_json("wn-test", "wn-test-1.0")
+        rev, _file_cyc, _residual_cyc = parse_conflicts_json("wn-test", "wn-test-1.0")
         assert len(rev) == 1
         assert rev[0]["src"] == "cili.i1"
 
     def test_excludes_other_resource(self, tmp_path, monkeypatch):
         monkeypatch.setattr(_mod, "CONFLICTS_JSON", self._write_json(tmp_path))
-        rev, _cyc = parse_conflicts_json("other-wn", "other-wn-1.0")
+        rev, _file_cyc, _residual_cyc = parse_conflicts_json("other-wn", "other-wn-1.0")
         assert len(rev) == 1
         assert rev[0]["src"] == "cili.i3"
 
     def test_parses_cycle_by_xml_stem(self, tmp_path, monkeypatch):
         monkeypatch.setattr(_mod, "CONFLICTS_JSON", self._write_json(tmp_path))
-        _rev, cyc = parse_conflicts_json("wn-test", "wn-test-1.0")
-        assert len(cyc) == 1
-        assert cyc[0]["src"] == "cili.i1"
-        assert "cili.i2" in cyc[0]["chain"]
+        _rev, file_cyc, _residual_cyc = parse_conflicts_json("wn-test", "wn-test-1.0")
+        assert len(file_cyc) == 1
+        assert file_cyc[0]["src"] == "cili.i1"
+        assert "cili.i2" in file_cyc[0]["chain"]
+
+    def test_splits_residual_from_file_cycles(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(_mod, "CONFLICTS_JSON", self._write_json(tmp_path))
+        _rev, file_cyc, residual_cyc = parse_conflicts_json("wn-test", "wn-test-1.0")
+        assert len(file_cyc) == 1 and len(residual_cyc) == 1
+        assert residual_cyc[0]["src"] == "cili.i5"
 
 
 # ---------------------------------------------------------------------------
@@ -832,7 +922,7 @@ class TestIssuesFromConflictsLog:
     _empty_data = _mod.WordnetData()
 
     def test_empty_inputs_return_no_issues(self):
-        assert issues_from_conflicts_log([], [], self._empty_data) == []
+        assert issues_from_conflicts_log([], [], [], self._empty_data) == []
 
     def test_reversed_relations_produce_critical_issue(self):
         recs = [
@@ -843,24 +933,53 @@ class TestIssuesFromConflictsLog:
              "src": "cili.i3", "rel": "hypernym", "tgt": "cili.i4",
              "prior_resource": "oewn"},
         ]
-        result = issues_from_conflicts_log(recs, [], self._empty_data)
+        result = issues_from_conflicts_log(recs, [], [], self._empty_data)
         assert len(result) == 1
         issue = result[0]
         assert issue.severity == "CRITICAL"
         assert issue.total == 2
         assert any("cili.i1" in item for item in issue.items)
 
-    def test_cycles_produce_critical_issue(self):
+    def test_file_cycles_produce_critical_issue(self):
         recs = [
             {"xml_stem": "wn-1.0", "src": "cili.i1", "rel": "hypernym",
              "tgt": "cili.i2", "chain": ["cili.i2", "cili.i1"]},
         ]
-        result = issues_from_conflicts_log([], recs, self._empty_data)
+        result = issues_from_conflicts_log([], recs, [], self._empty_data)
         assert len(result) == 1
         issue = result[0]
         assert issue.severity == "CRITICAL"
+        assert issue.title == "Hypernym cycles spanning multiple wordnets"
         assert issue.total == 1
         assert any("cili.i1" in item for item in issue.items)
+
+    def test_residual_cycles_produce_separate_issue(self):
+        recs = [
+            {"xml_stem": "wn-1.0", "src": "cili.i5", "rel": "hypernym",
+             "tgt": "cili.i6", "chain": ["cili.i6", "cili.i5"]},
+        ]
+        result = issues_from_conflicts_log([], [], recs, self._empty_data)
+        assert len(result) == 1
+        issue = result[0]
+        assert issue.severity == "CRITICAL"
+        assert "residual" in issue.title
+        assert issue.total == 1
+        assert any("cili.i5" in item for item in issue.items)
+
+    def test_file_and_residual_cycles_produce_two_separate_issues(self):
+        file_recs = [
+            {"xml_stem": "wn-1.0", "src": "cili.i1", "rel": "hypernym",
+             "tgt": "cili.i2", "chain": ["cili.i2", "cili.i1"]},
+        ]
+        residual_recs = [
+            {"xml_stem": "wn-1.0", "src": "cili.i5", "rel": "hypernym",
+             "tgt": "cili.i6", "chain": ["cili.i6", "cili.i5"]},
+        ]
+        result = issues_from_conflicts_log([], file_recs, residual_recs, self._empty_data)
+        assert len(result) == 2
+        titles = {i.title for i in result}
+        assert "Hypernym cycles spanning multiple wordnets" in titles
+        assert any("residual" in t for t in titles)
 
 
 # ---------------------------------------------------------------------------
@@ -946,3 +1065,242 @@ class TestLabelConcept:
         issue = check_hypernym_cycles(data)
         assert issue is not None
         assert any("anjing/dog" in item for item in issue.items)
+
+
+# ---------------------------------------------------------------------------
+# collect_issues
+# ---------------------------------------------------------------------------
+
+class TestCollectIssues:
+    def test_returns_none_for_cili(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(_mod, "CONFLICTS_JSON", tmp_path / "nonexistent.json")
+        path = _write_xml(tmp_path, _GOOD, wn_id="cili")
+        assert collect_issues(path) is None
+
+    def test_returns_data_and_issues(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(_mod, "CONFLICTS_JSON", tmp_path / "nonexistent.json")
+        body = """\
+<Concept id="cili.i99" ontological_category="NOUN" status="1">
+  <Provenance resource="wn-test" version="1.0"/>
+</Concept>
+"""
+        path = _write_xml(tmp_path, body)
+        result = collect_issues(path)
+        assert result is not None
+        data, issues, _json_log = result
+        assert data.resource_id == "wn-test"
+        assert any(i.title == "Concepts without definitions" for i in issues)
+
+    def test_source_hint_set_on_xml_issues(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(_mod, "CONFLICTS_JSON", tmp_path / "nonexistent.json")
+        body = """\
+<Concept id="cili.i99" ontological_category="NOUN" status="1">
+  <Provenance resource="wn-test" version="1.0"/>
+</Concept>
+"""
+        path = _write_xml(tmp_path, body)
+        _, issues, _json_log = collect_issues(path)
+        issue = next(i for i in issues if i.title == "Concepts without definitions")
+        assert issue.source_hint == path.name
+
+    def test_returns_converter_log(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(_mod, "CONFLICTS_JSON", tmp_path / "nonexistent.json")
+        path = _write_xml(tmp_path, _GOOD, wn_id="wn-test")
+        path.with_name("wn-test_log.json").write_text('{"missing_cili_concepts": {"count": 3}}')
+        _data, _issues, json_log = collect_issues(path)
+        assert json_log["missing_cili_concepts"]["count"] == 3
+
+    def test_returns_empty_dict_when_no_log_file(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(_mod, "CONFLICTS_JSON", tmp_path / "nonexistent.json")
+        path = _write_xml(tmp_path, _GOOD, wn_id="wn-test")
+        _data, _issues, json_log = collect_issues(path)
+        assert json_log == {}
+
+
+# ---------------------------------------------------------------------------
+# format_summary
+# ---------------------------------------------------------------------------
+
+# One unglossed concept
+_ONE_UNGLOSSED = """\
+<Concept id="cili.i1" ontological_category="NOUN" status="1">
+  <Provenance resource="wn-a" version="1.0"/>
+</Concept>
+"""
+
+# Two unglossed concepts
+_TWO_UNGLOSSED = """\
+<Concept id="cili.i1" ontological_category="NOUN" status="1">
+  <Provenance resource="wn-b" version="1.0"/>
+</Concept>
+<Concept id="cili.i2" ontological_category="NOUN" status="1">
+  <Provenance resource="wn-b" version="1.0"/>
+</Concept>
+"""
+
+
+class TestFormatSummary:
+    def test_counts_per_wordnet(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(_mod, "CONFLICTS_JSON", tmp_path / "nonexistent.json")
+        paths = [
+            _write_xml(tmp_path, _ONE_UNGLOSSED, wn_id="wn-a"),
+            _write_xml(tmp_path, _TWO_UNGLOSSED, wn_id="wn-b"),
+        ]
+        summary = format_summary(paths, markdown=False)
+        assert "Concepts without definitions" in summary
+        assert "3 total across 2 wordnet(s)" in summary
+        assert "wn-a" in summary
+        assert "wn-b" in summary
+
+    def test_clean_wordnet_not_listed_under_issue(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(_mod, "CONFLICTS_JSON", tmp_path / "nonexistent.json")
+        paths = [
+            _write_xml(tmp_path, _GOOD, wn_id="wn-clean"),
+            _write_xml(tmp_path, _ONE_UNGLOSSED, wn_id="wn-a"),
+        ]
+        summary = format_summary(paths, markdown=False)
+        section = summary.split("Concepts without definitions")[1].split("\n\n")[0]
+        assert "wn-clean" not in section
+
+    def test_cili_excluded(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(_mod, "CONFLICTS_JSON", tmp_path / "nonexistent.json")
+        paths = [
+            _write_xml(tmp_path, _ONE_UNGLOSSED, wn_id="cili"),
+            _write_xml(tmp_path, _ONE_UNGLOSSED, wn_id="wn-a"),
+        ]
+        summary = format_summary(paths, markdown=False)
+        assert "1 total across 1 wordnet(s)" in summary
+
+    def test_markdown_output_has_table(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(_mod, "CONFLICTS_JSON", tmp_path / "nonexistent.json")
+        paths = [_write_xml(tmp_path, _ONE_UNGLOSSED, wn_id="wn-a")]
+        summary = format_summary(paths, markdown=True)
+        assert "| Wordnet | Count |" in summary
+        assert "| wn-a | 1 |" in summary
+
+    def test_grouped_by_severity(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(_mod, "CONFLICTS_JSON", tmp_path / "nonexistent.json")
+        paths = [_write_xml(tmp_path, _ONE_UNGLOSSED, wn_id="wn-a")]
+        summary = format_summary(paths, markdown=False)
+        assert summary.index("CRITICAL") < summary.index("Concepts without definitions")
+
+    def test_same_invalid_pos_code_grouped_across_wordnets(self, tmp_path, monkeypatch):
+        """Two wordnets both hitting an empty POS code show up under one title."""
+        monkeypatch.setattr(_mod, "CONFLICTS_JSON", tmp_path / "nonexistent.json")
+        path_a = _write_xml(tmp_path, _GOOD, wn_id="wn-a")
+        path_a.with_name("wn-a_log.json").write_text('{"invalid_pos_values": {"": 10}}')
+        path_b = _write_xml(tmp_path, _GOOD, wn_id="wn-b")
+        path_b.with_name("wn-b_log.json").write_text('{"invalid_pos_values": {"": 5}}')
+
+        summary = format_summary([path_a, path_b], markdown=False)
+
+        section = summary.split("Unrecognised part-of-speech code (empty)")[1]
+        section = section.split("\n\n")[0]
+        assert "wn-a" in section and "10" in section
+        assert "wn-b" in section and "5" in section
+
+    def test_percentage_column_for_concepts_issue(self, tmp_path, monkeypatch):
+        """1 unglossed concept out of 1 total concept is a 100% proportion."""
+        monkeypatch.setattr(_mod, "CONFLICTS_JSON", tmp_path / "nonexistent.json")
+        paths = [_write_xml(tmp_path, _ONE_UNGLOSSED, wn_id="wn-a")]
+        summary = format_summary(paths, markdown=True)
+        assert "% of concepts" in summary
+        assert "| wn-a | 1 | 100.0% |" in summary
+
+    def test_unrecognised_pos_code_has_no_percentage_column(self, tmp_path, monkeypatch):
+        """No denominator exists for this title — must not show a % column."""
+        monkeypatch.setattr(_mod, "CONFLICTS_JSON", tmp_path / "nonexistent.json")
+        path_a = _write_xml(tmp_path, _GOOD, wn_id="wn-a")
+        path_a.with_name("wn-a_log.json").write_text('{"invalid_pos_values": {"i": 5}}')
+        summary = format_summary([path_a], markdown=True)
+        section = summary.split("Unrecognised part-of-speech code")[1].split("\n\n")[0]
+        assert "%" not in section
+
+
+# ---------------------------------------------------------------------------
+# _denominator_key / _denominator_value
+# ---------------------------------------------------------------------------
+
+class TestDenominator:
+    def test_duplicate_ids_map_to_matching_kind(self):
+        assert _denominator_key("Duplicate concept IDs") == "concepts"
+        assert _denominator_key("Duplicate entry IDs") == "entries"
+        assert _denominator_key("Duplicate sense IDs") == "senses"
+
+    def test_unrecognised_pos_code_has_no_key(self):
+        assert _denominator_key("Unrecognised part-of-speech code 'i'") is None
+        assert _denominator_key("Unrecognised part-of-speech code (empty)") is None
+
+    def test_unknown_title_has_no_key(self):
+        assert _denominator_key("Some future check nobody mapped yet") is None
+
+    def test_relations_key_sums_concept_and_sense_relations(self, tmp_path):
+        data = _parse(tmp_path, _GOOD)
+        data.concept_rels = [("a", "hypernym", "b")]
+        data.sense_rels = [("s1", "antonym", "s2")]
+        assert _denominator_value("relations", data, 0, {}) == 2
+
+    def test_examples_found_adds_back_the_failures(self, tmp_path):
+        data = _parse(tmp_path, _GOOD)
+        data.examples = [("one sentence", frozenset())]
+        assert _denominator_value("examples_found", data, 9, {}) == 10
+
+    def test_unknown_key_raises(self, tmp_path):
+        data = _parse(tmp_path, _GOOD)
+        with pytest.raises(ValueError):
+            _denominator_value("not-a-real-key", data, 0, {})
+
+    def test_lexeme_vs_concept_pos_uses_senses_not_entries(self):
+        """Regression: ancientgreek-grc showed 379% when this used 'entries' —
+        the check increments once per Sense link, not per LexicalEntry, so
+        senses (which can vastly outnumber entries) is the correct scope.
+        """
+        assert _denominator_key("POS mismatches: lexeme vs its concept") == "senses"
+
+    def test_hypernym_loops_uses_relation_graph_nodes_not_concepts(self):
+        """Regression: odwn-nl showed 10120% when this used len(data.concepts)
+        — cyclic-SCC membership ranges over concepts *referenced* by this
+        file's relations (mostly pre-existing cili.* concepts), not just the
+        <Concept> elements this file itself defines.
+        """
+        assert (
+            _denominator_key("Hypernym loops (cycles in the is-a hierarchy)")
+            == "relation_graph_nodes"
+        )
+
+    def test_relation_graph_nodes_counts_distinct_referenced_concepts(self, tmp_path):
+        data = _parse(tmp_path, _GOOD)
+        data.concept_rels = [("a", "hypernym", "b"), ("b", "hypernym", "c")]
+        assert _denominator_value("relation_graph_nodes", data, 0, {}) == 3
+
+    def test_concepts_from_cili_reads_converter_log(self, tmp_path):
+        data = _parse(tmp_path, _GOOD)
+        log = {"statistics": {"concepts": {"from_cili": 42}}}
+        assert _denominator_value("concepts_from_cili", data, 0, log) == 42
+
+    def test_concepts_from_cili_defaults_to_zero(self, tmp_path):
+        data = _parse(tmp_path, _GOOD)
+        assert _denominator_value("concepts_from_cili", data, 0, {}) == 0
+
+    def test_relations_attempted_sums_created_skipped_and_duplicates(self, tmp_path):
+        data = _parse(tmp_path, _GOOD)
+        log = {
+            "statistics": {"relations": {"concept_relations_created": 10}},
+            "relation_processing": {
+                "skipped_existing_relations": {"concept_relations": {"count": 3}},
+                "duplicates_removed": {"concept_relations": {"count": 2}},
+            },
+        }
+        assert _denominator_value("relations_attempted", data, 0, log) == 15
+
+    def test_synset_vs_cili_pos_mismatch_uses_from_cili(self):
+        assert (
+            _denominator_key("POS mismatches: synset vs CILI concept")
+            == "concepts_from_cili"
+        )
+
+    def test_concept_relations_covered_uses_relations_attempted(self):
+        assert (
+            _denominator_key("Concept relations already covered by another wordnet")
+            == "relations_attempted"
+        )

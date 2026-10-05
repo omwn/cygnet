@@ -21,12 +21,27 @@ from pathlib import Path
 
 from lxml import etree as ET
 
+from cyg.merge import INVERSE_CONCEPT_RELATIONS, INVERSE_SENSE_RELATIONS
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PRESYNTH_DIR = PROJECT_ROOT / "bin" / "cygnets_presynth"
 CONFLICTS_JSON = PROJECT_ROOT / "bin" / "relation_conflicts.json"
 
 HYPERNYM_TYPES = frozenset({"hypernym", "instance_hypernym"})
 
+# cyg.merge.INVERSE_CONCEPT_RELATIONS / INVERSE_SENSE_RELATIONS are the
+# single source of truth for which relation types Cygnet actually handles
+# (both the forward name and its auto-generated inverse) — merge.py's
+# _do_concept_relation()/_do_sense_relation() accept ANY relation_type
+# generically, so every name below IS correctly converted, merged and
+# stored regardless of whether it's listed here. This "standard" set is
+# used only by check_non_standard_relations()'s INFO-level note below.
+# It's unioned with a hand-picked baseline for relations merge.py doesn't
+# need special inverse-handling for (e.g. 'pertainym', which has no
+# auto-generated inverse) — a hand-picked list alone previously missed
+# real GWA relations that merge.py fully supports (e.g. 'agent', 'meronym',
+# 'subevent'), wrongly flagging them as "non-standard" in every wordnet
+# that used them.
 STANDARD_CONCEPT_RELATIONS = frozenset({
     "hypernym", "hyponym",
     "instance_hypernym", "instance_hyponym",
@@ -40,7 +55,7 @@ STANDARD_CONCEPT_RELATIONS = frozenset({
     "domain_region", "has_domain_region",
     "domain_usage", "has_domain_usage",
     "state",
-})
+}) | frozenset(INVERSE_CONCEPT_RELATIONS) | frozenset(INVERSE_CONCEPT_RELATIONS.values())
 
 STANDARD_SENSE_RELATIONS = frozenset({
     "antonym", "derivation", "pertainym", "participle",
@@ -49,10 +64,14 @@ STANDARD_SENSE_RELATIONS = frozenset({
     "domain_region", "has_domain_region",
     "domain_usage", "has_domain_usage",
     "exemplifies", "is_exemplified_by",
-})
+}) | frozenset(INVERSE_SENSE_RELATIONS) | frozenset(INVERSE_SENSE_RELATIONS.values())
 
-# Relation types where asserting A→B and B→A simultaneously is a contradiction.
-# (Symmetric relations like antonym, where both directions are identical, are excluded.)
+# Relation types where asserting A→B and B→A simultaneously is a contradiction
+# (symmetric relations, where forward == inverse, are excluded — both
+# directions are consistent for those, not conflicting). Derived the same
+# way as the standard-relations sets above, for the same reason: a
+# hand-picked list drifts out of sync with what cyg.merge actually treats
+# as an asymmetric pair.
 DIRECTED_RELATION_TYPES = frozenset({
     "hypernym", "hyponym",
     "instance_hypernym", "instance_hyponym",
@@ -61,7 +80,12 @@ DIRECTED_RELATION_TYPES = frozenset({
     "mero_substance", "holo_substance",
     "causes", "is_caused_by",
     "entails", "is_entailed_by",
-})
+}) | frozenset(
+    name
+    for forward, inverse in INVERSE_CONCEPT_RELATIONS.items()
+    if forward != inverse
+    for name in (forward, inverse)
+)
 
 MAX_EXAMPLES = 10
 
@@ -616,18 +640,29 @@ def load_json_log(xml_path: Path) -> dict:
         return json.load(f)
 
 
-def parse_conflicts_json(resource_id: str, xml_stem: str) -> tuple[list[dict], list[dict]]:
+def parse_conflicts_json(
+    resource_id: str, xml_stem: str
+) -> tuple[list[dict], list[dict], list[dict]]:
     """Load conflict records for this resource from the structured JSON conflict log.
+
+    Cycle records come from two distinct checks and are kept separate: a
+    per-file check (``check_and_remove_new_cycles``, runs right after this
+    file is merged) and a final whole-graph check
+    (``resolve_residual_cycles``, runs once after every file is merged) that
+    catches cross-resource cycles no single per-file check could see — see
+    that function's docstring in cyg/merge.py for why a per-file check alone
+    isn't sufficient.
 
     Args:
         resource_id: The wordnet's resource ID (e.g. ``'dn'``).
         xml_stem: The pre-synth filename stem (e.g. ``'dn-2025-07-03'``).
 
     Returns:
-        ``(reversed_rels, cycles)`` — lists of record dicts for this resource.
+        ``(reversed_rels, file_cycles, residual_cycles)`` — record dicts for
+        this resource, with cycles split by which check found them.
     """
     if not CONFLICTS_JSON.exists():
-        return [], []
+        return [], [], []
 
     with open(CONFLICTS_JSON, encoding='utf-8') as fh:
         data = json.load(fh)
@@ -636,16 +671,59 @@ def parse_conflicts_json(resource_id: str, xml_stem: str) -> tuple[list[dict], l
         r for r in data.get('reversed_relations', [])
         if r.get('resource_id') == resource_id
     ]
-    cycles = [
-        c for c in data.get('cycles', [])
-        if c.get('xml_stem') == xml_stem
+    all_cycles = data.get('cycles', [])
+    # Per-file cycles are logged under the pre-synth filename stem (with
+    # version, e.g. 'UzWordnet-uz-1.0') since that's what check_and_remove_
+    # new_cycles() is called with. Residual cycles are logged under the bare
+    # resource code (e.g. 'UzWordnet-uz', no version) since resolve_residual_
+    # cycles() attributes them via provenance lookup, not the source
+    # filename — so residual records must be matched against resource_id,
+    # not xml_stem, or they never attach to any wordnet's report.
+    file_cycles = [
+        c for c in all_cycles
+        if not c.get('residual') and c.get('xml_stem') == xml_stem
     ]
-    return reversed_rels, cycles
+    residual_cycles = [
+        c for c in all_cycles
+        if c.get('residual') and c.get('xml_stem') == resource_id
+    ]
+    return reversed_rels, file_cycles, residual_cycles
 
 
 # ---------------------------------------------------------------------------
 # Checks derived from log files
 # ---------------------------------------------------------------------------
+
+def _diversify(entries: list[dict], limit: int) -> list[dict]:
+    """Pick up to *limit* entries, spread across distinct candidate-wordform
+    groups (a proxy for "distinct concept") round-robin, rather than taking
+    the first *limit* in file order.
+
+    failed_matches records don't carry a concept/synset id, but entries for
+    the same concept share the same candidate_wordforms list, so grouping on
+    that is the closest available proxy. Without this, a concept whose
+    examples happen to appear first in the source file (e.g. a common word
+    with many corpus examples that all fail morphological matching) fills
+    the whole sample and looks like a single dominant bug rather than one
+    concept among many.
+    """
+    groups: dict[tuple, list[dict]] = defaultdict(list)
+    for entry in entries:
+        groups[tuple(entry.get("candidate_wordforms", []))].append(entry)
+
+    picked: list[dict] = []
+    group_iters = [iter(g) for g in groups.values()]
+    while len(picked) < limit and group_iters:
+        for it in list(group_iters):
+            try:
+                picked.append(next(it))
+            except StopIteration:
+                group_iters.remove(it)
+                continue
+            if len(picked) >= limit:
+                break
+    return picked
+
 
 def issues_from_json_log(log: dict, log_path: Path | None = None) -> list[Issue]:
     """Turn converter-log entries into Issue objects."""
@@ -708,6 +786,32 @@ def issues_from_json_log(log: dict, log_path: Path | None = None) -> list[Issue]
                 f"{log_path.name} (lexeme_concept_pos_mismatches.by_pos_pair)"
                 if log_path else ""
             ),
+        ))
+
+    # POS codes with no mapping to a standard WN-LMF category. Each was
+    # silently coerced to UNK during conversion, so its real part of speech
+    # is lost. One Issue per distinct code (not lumped together) so the
+    # cross-wordnet --summary groups matching codes (e.g. two wordnets both
+    # using an empty string) under the same title.
+    invalid_pos = log.get("invalid_pos_values", {})
+    for code, count in sorted(invalid_pos.items(), key=lambda kv: -kv[1]):
+        label = repr(code) if code else "(empty)"
+        _add(Issue(
+            severity="CRITICAL",
+            title=f"Unrecognised part-of-speech code {label}",
+            total=count,
+            explanation=(
+                f"{count:,} concept(s) used the part-of-speech code {label}, which "
+                "Cygnet does not recognise (valid codes: n, v, a, r, s, c, p, x, u). "
+                "Each was silently coerced to UNK, so its real part of speech is lost."
+            ),
+            recommendation=(
+                f"Check your source data for the {label} code and either map it to a "
+                "standard WN-LMF part-of-speech before conversion, or report it "
+                "upstream if it indicates a missing or incorrect partOfSpeech attribute."
+            ),
+            items=[],
+            source_hint=f"{log_path.name} (invalid_pos_values)" if log_path else "",
         ))
 
     # Relations dropped because the same relation was already established by another wordnet
@@ -795,7 +899,7 @@ def issues_from_json_log(log: dict, log_path: Path | None = None) -> list[Issue]
     if ex_skipped:
         failed = ex_stats.get("failed_matches", [])
         items = []
-        for entry in failed[:MAX_EXAMPLES]:
+        for entry in _diversify(failed, MAX_EXAMPLES):
             text = entry.get("text", "")[:70]
             forms = entry.get("candidate_wordforms", [])
             if forms:
@@ -835,7 +939,11 @@ def issues_from_json_log(log: dict, log_path: Path | None = None) -> list[Issue]
 
 
 def issues_from_conflicts_log(
-    reversed_rels: list[dict], cycles: list[dict], data: WordnetData, xml_stem: str = ""
+    reversed_rels: list[dict],
+    file_cycles: list[dict],
+    residual_cycles: list[dict],
+    data: WordnetData,
+    xml_stem: str = "",
 ) -> list[Issue]:
     """Build Issue objects from structured conflict records."""
     issues: list[Issue] = []
@@ -872,7 +980,7 @@ def issues_from_conflicts_log(
             source_hint=f"{CONFLICTS_JSON.name} (reversed_relations, resource_id={data.resource_id})",
         ))
 
-    if cycles:
+    def _cycle_items(cycles: list[dict]) -> list[str]:
         items = []
         for rec in cycles[:MAX_EXAMPLES]:
             src, rel, tgt = rec['src'], rec['rel'], rec['tgt']
@@ -882,23 +990,54 @@ def issues_from_conflicts_log(
                 f"{label_concept(src, data)} {rel} {label_concept(tgt, data)}"
                 f"  (chain: {labelled_chain})"
             )
+        return items
+
+    if file_cycles:
         issues.append(Issue(
             severity="CRITICAL",
             title="Hypernym cycles spanning multiple wordnets",
-            total=len(cycles),
+            total=len(file_cycles),
             explanation=(
-                f"Cygnet removed {len(cycles):,} hypernym relation(s) from this wordnet "
-                "because, together with relations from other wordnets already in the "
-                "database, they formed a cycle in the IS-A hierarchy. "
-                "The 'existing chain' shows the path that was already present."
+                f"Cygnet removed {len(file_cycles):,} hypernym relation(s) from this "
+                "wordnet because, together with relations from other wordnets already "
+                "in the database at the time this file was merged, they formed a cycle "
+                "in the IS-A hierarchy. The 'existing chain' shows the path that was "
+                "already present."
             ),
             recommendation=(
                 "For each entry below, the relation on the left was removed. "
                 "Check whether the hypernym direction is correct. "
                 "If the other wordnet's chain is wrong, report it there."
             ),
-            items=items,
+            items=_cycle_items(file_cycles),
             source_hint=f"{CONFLICTS_JSON.name} (cycles, xml_stem={xml_stem or data.resource_id})",
+        ))
+
+    if residual_cycles:
+        issues.append(Issue(
+            severity="CRITICAL",
+            title="Hypernym cycles found only after the full build (residual)",
+            total=len(residual_cycles),
+            explanation=(
+                f"Cygnet removed {len(residual_cycles):,} more hypernym relation(s) from "
+                "this wordnet during a final whole-graph check that runs once every "
+                "wordnet has been merged. These cycles involve resources merged both "
+                "before AND after this file, so no single per-file check — including "
+                "the one that produces the 'Hypernym cycles spanning multiple wordnets' "
+                "section above — could have caught them earlier. This wordnet's relation "
+                "was judged the more likely error (see cyg.merge.LOW_TRUST_RESOURCES) "
+                "and removed to keep the merged hierarchy acyclic."
+            ),
+            recommendation=(
+                "Check the hypernym direction for the relation on the left of each entry "
+                "below. If this wordnet is right and the chain is wrong, report it to the "
+                "other wordnet's maintainers instead."
+            ),
+            items=_cycle_items(residual_cycles),
+            source_hint=(
+                f"{CONFLICTS_JSON.name} (cycles, xml_stem={xml_stem or data.resource_id}, "
+                "residual=true)"
+            ),
         ))
 
     return issues
@@ -992,19 +1131,22 @@ def format_report(
     return "\n".join(lines)
 
 
-def report_file(path: Path, markdown: bool = False) -> None:
-    """Parse, check, and print a report for one XML file.
+def collect_issues(path: Path) -> tuple[WordnetData, list[Issue], dict] | None:
+    """Parse one pre-synth file and run every check against it.
 
-    Returns without printing anything for the CILI file, which is an
-    infrastructure resource rather than a wordnet.
+    Returns None for the CILI file, which is an infrastructure resource
+    rather than a wordnet. The third element is the raw converter log dict
+    (``{}`` if none exists) — some denominators for format_summary's %
+    column need the original pre-dedup/pre-merge totals it records, which
+    WordnetData (parsed from the post-processing pre-synth XML) can't
+    reconstruct on its own.
     """
     data = parse_xml(path)
     if data.resource_id == "cili":
-        return
-    xml_issues = run_checks(data)
-    for issue in xml_issues:
+        return None
+    issues = run_checks(data)
+    for issue in issues:
         issue.source_hint = path.name
-    issues = xml_issues
 
     # Augment with converter log (created at pre-synth time)
     log_path = path.with_name(path.stem + "_log.json")
@@ -1012,10 +1154,210 @@ def report_file(path: Path, markdown: bool = False) -> None:
     issues.extend(issues_from_json_log(json_log, log_path if log_path.exists() else None))
 
     # Augment with merge-time relation conflicts log
-    reversed_rels, cycles = parse_conflicts_json(data.resource_id, path.stem)
-    issues.extend(issues_from_conflicts_log(reversed_rels, cycles, data, xml_stem=path.stem))
+    reversed_rels, file_cycles, residual_cycles = parse_conflicts_json(
+        data.resource_id, path.stem
+    )
+    issues.extend(issues_from_conflicts_log(
+        reversed_rels, file_cycles, residual_cycles, data, xml_stem=path.stem
+    ))
 
+    return data, issues, json_log
+
+
+def report_file(path: Path, markdown: bool = False) -> None:
+    """Parse, check, and print a report for one XML file."""
+    result = collect_issues(path)
+    if result is None:
+        return
+    data, issues, _json_log = result
     print(format_report(path, data, issues, markdown))
+
+
+# Maps an issue title to the kind of denominator that makes its count
+# meaningful as a proportion (e.g. "372 concepts without definitions" means
+# little without knowing the wordnet has 400 concepts total). Titles not
+# listed here get no percentage rather than a guessed-wrong one.
+_DENOMINATOR_KEY_FOR_TITLE = {
+    "Concepts without definitions": "concepts",
+    "Synsets without a CILI mapping": "concepts",
+    "Defined concepts with no senses in this file": "concepts",
+    "Word entries with no wordforms": "entries",
+    "Senses referencing undeclared entries": "senses",
+    "Senses with unresolvable synset (conversion time)": "senses",
+    "POS mismatches: lexeme vs its concept": "senses",
+    "Example sentences with no matching sense annotations": "examples",
+    "Example sentences not matched to a sense (conversion time)": "examples_found",
+    # A cyclic SCC's node count is bounded by how many distinct concepts this
+    # file's relations *reference* (mostly cili.* concepts it doesn't define
+    # locally), not by how many <Concept> elements it defines — len(concepts)
+    # undercounts badly for wordnets that mostly link into existing CILI
+    # concepts rather than creating new ones (e.g. odwn-nl).
+    "Hypernym loops (cycles in the is-a hierarchy)": "relation_graph_nodes",
+    "Hypernym cycles spanning multiple wordnets": "relations",
+    "Hypernym cycles found only after the full build (residual)": "relations",
+    "Relations reversed relative to another wordnet": "relations",
+    "Contradictory relation directions within this file": "relations",
+    "Self-referential relations": "relations",
+    "Non-standard relation types": "relations",
+    # These two are counted at conversion time over the full processed
+    # population (CILI-mapped concepts / relations attempted before
+    # dedup+skip), which the post-hoc pre-synth XML doesn't fully retain —
+    # only the converter log's own totals match the numerator's scope.
+    "POS mismatches: synset vs CILI concept": "concepts_from_cili",
+    "Concept relations already covered by another wordnet": "relations_attempted",
+    "Relations with incompatible POS categories": "relations_attempted",
+}
+
+_DENOMINATOR_LABEL = {
+    "concepts": "concepts",
+    "entries": "entries",
+    "senses": "senses",
+    "relations": "relations",
+    "examples": "examples in this file",
+    "examples_found": "examples found before conversion",
+    "relation_graph_nodes": "concepts referenced by this file's relations",
+    "concepts_from_cili": "concepts mapped to an existing CILI entry",
+    "relations_attempted": "concept relations attempted at conversion time",
+}
+
+
+def _denominator_key(title: str) -> str | None:
+    """The kind of size denominator *title* should be shown as a % of, if any."""
+    if title.startswith("Duplicate ") and title.endswith(" IDs"):
+        kind = title[len("Duplicate "):-len(" IDs")]
+        return {"concept": "concepts", "entry": "entries", "sense": "senses"}.get(kind)
+    # "Unrecognised part-of-speech code" has no denominator: it's counted once
+    # per raw pre-dedup Synset/LexicalEntry in the converter, but WordnetData's
+    # concept/entry counts are post-dedup — the count can exceed both, so any
+    # percentage against them would be misleading (occasionally over 100%).
+    return _DENOMINATOR_KEY_FOR_TITLE.get(title)
+
+
+def _relation_graph_node_count(data: WordnetData) -> int:
+    """Distinct concept IDs referenced by this file's own concept relations."""
+    return len({n for src, _rel, tgt in data.concept_rels for n in (src, tgt)})
+
+
+def _denominator_value(key: str, data: WordnetData, issue_total: int, log: dict) -> int:
+    """The actual size for *key* on this wordnet's data (and converter log)."""
+    if key == "concepts":
+        return len(data.concepts)
+    if key == "entries":
+        return len(data.entries)
+    if key == "senses":
+        return len(data.senses)
+    if key == "relations":
+        return len(data.concept_rels) + len(data.sense_rels)
+    if key == "examples":
+        return len(data.examples)
+    if key == "examples_found":
+        # Examples that failed conversion-time matching never made it into
+        # the pre-synth file, so add the failure count back to recover the
+        # original total.
+        return len(data.examples) + issue_total
+    if key == "relation_graph_nodes":
+        return _relation_graph_node_count(data)
+    if key == "concepts_from_cili":
+        return log.get("statistics", {}).get("concepts", {}).get("from_cili", 0)
+    if key == "relations_attempted":
+        rp = log.get("relation_processing", {})
+        created = log.get("statistics", {}).get("relations", {}).get(
+            "concept_relations_created", 0
+        )
+        skipped = rp.get("skipped_existing_relations", {}).get(
+            "concept_relations", {}
+        ).get("count", 0)
+        duplicates = rp.get("duplicates_removed", {}).get(
+            "concept_relations", {}
+        ).get("count", 0)
+        return created + skipped + duplicates
+    raise ValueError(f"unknown denominator key: {key}")
+
+
+def format_summary(paths: list[Path], markdown: bool) -> str:
+    """Aggregate issue counts across many wordnets, grouped by issue type.
+
+    For each issue title (e.g. "Concepts without definitions"), lists every
+    wordnet that has it, how many, and — where a sensible denominator exists
+    — what proportion of the wordnet's own concepts/entries/senses/relations
+    that represents, so a small wordnet's 50 mismatches (25% of it) doesn't
+    get lost under a large wordnet's 5,000 (0.5% of it).
+    """
+    by_title: dict[str, dict[str, int]] = defaultdict(dict)
+    severity_of: dict[str, str] = {}
+    data_by_resource: dict[str, WordnetData] = {}
+    log_by_resource: dict[str, dict] = {}
+
+    for path in paths:
+        if not path.exists():
+            print(f"File not found: {path}", file=sys.stderr)
+            continue
+        result = collect_issues(path)
+        if result is None:
+            continue
+        data, issues, json_log = result
+        data_by_resource[data.resource_id] = data
+        log_by_resource[data.resource_id] = json_log
+        for issue in issues:
+            by_title[issue.title][data.resource_id] = issue.total
+            severity_of[issue.title] = issue.severity
+
+    lines: list[str] = []
+    if markdown:
+        lines.append("# Cross-Wordnet Issue Summary")
+    else:
+        lines += ["CROSS-WORDNET ISSUE SUMMARY", "=" * 27]
+
+    for sev in ("CRITICAL", "WARNING", "INFO"):
+        titles = sorted(
+            (t for t, s in severity_of.items() if s == sev),
+            key=lambda t: -sum(by_title[t].values()),
+        )
+        if not titles:
+            continue
+        lines.append(f"\n## {sev}" if markdown else f"\n{sev}\n{'-' * len(sev)}")
+
+        for title in titles:
+            counts = by_title[title]
+            total = sum(counts.values())
+            ranked = sorted(counts.items(), key=lambda kv: -kv[1])
+            denom_key = _denominator_key(title)
+            denom_label = _DENOMINATOR_LABEL.get(denom_key, "") if denom_key else ""
+
+            def pct(wn: str, n: int, denom_key: str | None = denom_key) -> str:
+                data = data_by_resource.get(wn)
+                if denom_key is None or data is None:
+                    return ""
+                size = _denominator_value(denom_key, data, n, log_by_resource.get(wn, {}))
+                return f"{100 * n / size:.1f}%" if size else "—"
+
+            if markdown:
+                lines.append(
+                    f"\n### {title} — {_fmt(total)} total across "
+                    f"{len(counts)} wordnet(s)"
+                )
+                if denom_key:
+                    lines.append(f"\n| Wordnet | Count | % of {denom_label} |")
+                    lines.append("|---|---:|---:|")
+                    lines += [f"| {wn} | {_fmt(n)} | {pct(wn, n)} |" for wn, n in ranked]
+                else:
+                    lines.append("\n| Wordnet | Count |")
+                    lines.append("|---|---:|")
+                    lines += [f"| {wn} | {_fmt(n)} |" for wn, n in ranked]
+            else:
+                lines.append(
+                    f"\n  {title} — {_fmt(total)} total across "
+                    f"{len(counts)} wordnet(s)"
+                )
+                if denom_key:
+                    lines += [
+                        f"    {wn:24s} {_fmt(n):>10s}  ({pct(wn, n)} of {denom_label})"
+                        for wn, n in ranked
+                    ]
+                else:
+                    lines += [f"    {wn:24s} {_fmt(n):>10s}" for wn, n in ranked]
+
+    return "\n".join(lines)
 
 
 def main() -> None:
@@ -1026,15 +1368,23 @@ def main() -> None:
     parser.add_argument("--all", action="store_true",
                         help=f"Check all *.xml files in {PRESYNTH_DIR}")
     parser.add_argument("--md", action="store_true", help="Output in Markdown format")
+    parser.add_argument("--summary", action="store_true",
+                        help="Print one cross-wordnet count per issue type "
+                             "instead of a per-file report (implies --all "
+                             "when no files are given)")
     args = parser.parse_args()
 
     paths: list[Path] = list(args.files)
-    if args.all:
+    if args.all or (args.summary and not paths):
         paths = sorted(PRESYNTH_DIR.glob("*.xml"))
 
     if not paths:
         parser.print_help()
         sys.exit(0)
+
+    if args.summary:
+        print(format_summary(paths, args.md))
+        return
 
     for i, p in enumerate(paths):
         if not p.exists():

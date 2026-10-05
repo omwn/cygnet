@@ -154,8 +154,11 @@ CREATE INDEX idx_senses_synset    ON senses(synset_rowid);
 CREATE INDEX idx_definitions_synset        ON definitions(synset_rowid);
 CREATE INDEX idx_synset_relations_source   ON synset_relations(source_rowid);
 CREATE INDEX idx_sense_relations_source    ON sense_relations(source_rowid);
+CREATE INDEX idx_sense_relations_target    ON sense_relations(target_rowid);
 CREATE INDEX idx_sense_examples_sense      ON sense_examples(sense_rowid);
 CREATE INDEX idx_example_annotations_example ON example_annotations(example_rowid);
+CREATE INDEX idx_example_annotations_sense ON example_annotations(sense_rowid);
+CREATE INDEX idx_definition_annotations_sense ON definition_annotations(sense_rowid);
 CREATE INDEX idx_arasaac_synset ON arasaac(synset_rowid);
 CREATE INDEX idx_core_synsets ON core_synsets(synset_rowid);
 """
@@ -210,6 +213,24 @@ INVERSE_SENSE_RELATIONS: dict[str, str] = {
     'metaphor':          'has_metaphor',
     'metonym':           'has_metonym',
 }
+
+# Resources with a documented, systematic hypernym-direction bug in their
+# source data (upstream bug reports pending/filed), ordered WORST FIRST.
+# Per-file cycle removal already catches most of these when the reversed
+# edge closes a cycle against relations from files merged before it; this
+# list only affects resolve_residual_cycles()'s tie-break, for the cases
+# that only become cyclic once a later file supplies the correct-direction
+# edge for the same concept pair.
+#
+# This list is curated by hand, not derived automatically: a resource's
+# raw cycle/conflict count is not a reliable trust signal on its own, since
+# a resource can rack up a high count simply by frequently intersecting
+# with one genuinely bad resource (see scripts/trust_report.py's
+# module docstring for a worked example of this trap). Add an entry only
+# after reviewing that script's report across multiple builds and manually
+# confirming the direction error via the per-SCC edge dump, not from the
+# aggregate rate table alone.
+LOW_TRUST_RESOURCES: tuple[str, ...] = ('UzWordnet-uz', 'own-pt')
 
 INVERSE_CONCEPT_RELATIONS: dict[str, str] = {
     'hypernym':          'hyponym',
@@ -1392,6 +1413,198 @@ class MergeBuilder:
                             )
                     removed += 1
                     self.n_synset_rels -= 2
+        return removed
+
+    @staticmethod
+    def _reachable(start: int, goal: int, graph: dict[int, set[int]]) -> bool:
+        """True if goal is reachable from start following graph's edges."""
+        if start == goal:
+            return True
+        stack = [start]
+        seen = {start}
+        while stack:
+            n = stack.pop()
+            for nxt in graph.get(n, ()):
+                if nxt == goal:
+                    return True
+                if nxt not in seen:
+                    seen.add(nxt)
+                    stack.append(nxt)
+        return False
+
+    def _feedback_edges(self, scc_set: set[int],
+                         edge_info: dict[tuple[int, int], tuple[int, int]]
+                         ) -> list[tuple[int, int]]:
+        """Pick edges to remove so the subgraph induced by scc_set is acyclic.
+
+        Greedily keeps each edge unless it would close a cycle with
+        already-kept edges, so the first-processed of two conflicting
+        edges always wins — consistent with check_and_remove_new_cycles()
+        (single-file cycles), generalised to the whole graph. Edges are
+        processed in LOW_TRUST_RESOURCES order last (worst resource last
+        of all), regardless of rowid, then by ascending rowid. Raw
+        insertion order alone isn't a reliable trust signal (it can be an
+        accident of alphabetical filename sort, e.g. 'UzWordnet' sorts
+        before 'odwn-nl' by case rather than any property of the data) —
+        and this applies just as much *within* the low-trust group, so a
+        second, milder low-trust entry must not be able to out-rank a
+        worse one purely because it happened to merge later. An explicit,
+        ranked resource list is used instead — see LOW_TRUST_RESOURCES.
+        """
+        n_low_trust = len(LOW_TRUST_RESOURCES)
+
+        def trust_rank(code: str) -> int:
+            # 0 = default (most trusted); worst entry in LOW_TRUST_RESOURCES
+            # gets the highest rank, so it's evaluated dead last regardless
+            # of any other low-trust resource's merge-order rowid.
+            try:
+                return n_low_trust - LOW_TRUST_RESOURCES.index(code)
+            except ValueError:
+                return 0
+
+        def sort_key(item: tuple[int, int, int]) -> tuple[int, int]:
+            rowid, _src, _tgt = item
+            resource = self._edge_resource_label(rowid)
+            rank = max(trust_rank(r) for r in resource.split(','))
+            return (rank, rowid)
+
+        scc_edges = sorted(
+            (
+                (rowid, src, tgt)
+                for (src, tgt), (rowid, _tr) in edge_info.items()
+                if src in scc_set and tgt in scc_set
+            ),
+            key=sort_key,
+        )
+        kept: dict[int, set[int]] = {n: set() for n in scc_set}
+        to_remove: list[tuple[int, int]] = []
+        for _rowid, src, tgt in scc_edges:
+            if self._reachable(tgt, src, kept):
+                to_remove.append((src, tgt))
+            else:
+                kept[src].add(tgt)
+        return to_remove
+
+    def _edge_resource_label(self, synset_relation_rowid: int) -> str:
+        """Best-effort resource code(s) that contributed a synset_relation row."""
+        table_rowid = self._prov_table_rowid('synset_relations')
+        rows = self.prov_cur.execute(
+            'SELECT resource_rowid FROM provenance '
+            'WHERE table_rowid = ? AND item_rowid = ?',
+            (table_rowid, synset_relation_rowid),
+        ).fetchall()
+        if not rows:
+            return '?'
+        codes = [r[0] for r in self.prov_cur.execute(
+            f"SELECT code FROM prov_resources WHERE rowid IN "
+            f"({','.join('?' * len(rows))})",
+            [row[0] for row in rows],
+        ).fetchall()]
+        return ','.join(codes) if codes else '?'
+
+    def resolve_residual_cycles(self) -> int:
+        """Break cycles that only close once multiple resources are combined.
+
+        check_and_remove_new_cycles() runs per-file and only catches cycles
+        the file being merged itself closes. It cannot catch a cycle where
+        an earlier file's edge only becomes cyclic once a *later* file adds
+        the matching return path — e.g. resource A adds a (mistakenly
+        reversed) hypernym edge that isn't cyclic against anything merged
+        so far, then resource B, merged afterwards, adds the correct-
+        direction edge for the same concept pair, closing the loop.
+
+        Call this once after all files are merged. Removes a feedback edge
+        set (see _feedback_edges()) from each residual cyclic SCC, so the
+        result is guaranteed acyclic — verify with detect_cycles().
+
+        Returns:
+            Number of cycle-causing edges removed.
+        """
+        hypernym_types = {r[0]: r[1] for r in self.cur.execute(
+            "SELECT rowid, type FROM relation_types "
+            "WHERE type IN ('hypernym', 'instance_hypernym')"
+        ).fetchall()}
+        if not hypernym_types:
+            return 0
+
+        ph = ','.join('?' * len(hypernym_types))
+        rows = self.cur.execute(
+            f"SELECT rowid, source_rowid, target_rowid, type_rowid "
+            f"FROM synset_relations WHERE type_rowid IN ({ph})",
+            list(hypernym_types),
+        ).fetchall()
+        if not rows:
+            return 0
+
+        children: dict[int, list[int]] = {}
+        nodes: set[int] = set()
+        edge_info: dict[tuple[int, int], tuple[int, int]] = {}
+        for rowid, src, tgt, tr in rows:
+            children.setdefault(src, []).append(tgt)
+            nodes.add(src)
+            nodes.add(tgt)
+            edge_info[(src, tgt)] = (rowid, tr)
+
+        cyclic_sccs = self._tarjan_cyclic_sccs(nodes, children)
+        if not cyclic_sccs:
+            return 0
+
+        removed = 0
+        for scc in cyclic_sccs:
+            scc_set = set(scc)
+            for src, tgt in self._feedback_edges(scc_set, edge_info):
+                edge_rowid, type_rowid = edge_info.get((src, tgt), (None, None))
+                if edge_rowid is None:
+                    continue
+                rel_type = hypernym_types[type_rowid]
+                src_ili = self._synset_rowid_to_ili.get(src, f'#{src}')
+                tgt_ili = self._synset_rowid_to_ili.get(tgt, f'#{tgt}')
+                chain = self._bfs_path(tgt, src, scc_set, children, (src, tgt))
+                chain_str = ' → '.join(
+                    self._synset_rowid_to_ili.get(n) or f'#{n}' for n in chain
+                )
+                resource = self._edge_resource_label(edge_rowid)
+                logger.warning(
+                    'Residual cycle broken [%s]: %s %s %s '
+                    '(existing chain: %s → %s)',
+                    resource, src_ili, rel_type, tgt_ili,
+                    chain_str, src_ili,
+                )
+                self._conflicts['cycles'].append({
+                    'xml_stem': resource,
+                    'src': src_ili,
+                    'rel': rel_type,
+                    'tgt': tgt_ili,
+                    'chain': [
+                        self._synset_rowid_to_ili.get(n) or f'#{n}'
+                        for n in chain
+                    ],
+                    'residual': True,
+                })
+                self.cur.execute(
+                    'DELETE FROM synset_relations WHERE rowid = ?',
+                    (edge_rowid,),
+                )
+                self._synset_rel_keys.pop((src, tgt, type_rowid), None)
+                inv_name = INVERSE_CONCEPT_RELATIONS.get(rel_type)
+                if inv_name:
+                    inv_rows = self.cur.execute(
+                        'SELECT rowid FROM relation_types WHERE type = ?',
+                        (inv_name,),
+                    ).fetchone()
+                    if inv_rows:
+                        inv_type_rowid = inv_rows[0]
+                        self.cur.execute(
+                            'DELETE FROM synset_relations '
+                            'WHERE source_rowid = ? AND target_rowid = ? '
+                            'AND type_rowid = ?',
+                            (tgt, src, inv_type_rowid),
+                        )
+                        self._synset_rel_keys.pop(
+                            (tgt, src, inv_type_rowid), None
+                        )
+                removed += 1
+                self.n_synset_rels -= 2
         return removed
 
     def write_conflicts_json(self, path: Path) -> None:

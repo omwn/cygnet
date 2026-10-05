@@ -24,6 +24,12 @@
 #                      (requires xmlstarlet; slow — 678 MB output)
 #   --download-only    Download data without running the build
 #   --build-only       Run the build without downloading (assumes data exists)
+#   --translate-only   Run only through Step 5 (translate definitions) and
+#                      stop — implies --with-translate. Used by
+#                      scripts/upload_translations.sh to produce
+#                      bin/cygnets_presynth/mtg-1.0.xml for local, manual
+#                      publishing (translation takes hours, so it isn't run
+#                      in CI — see .github/workflows/check-wordnets.yml).
 #   --skip-tests       Skip the test suite
 #
 set -euo pipefail
@@ -39,6 +45,7 @@ WITH_XML=false
 DO_DOWNLOAD=true
 DO_BUILD=true
 DO_TESTS=true
+TRANSLATE_ONLY=false
 WORK_DIR=""
 
 while [[ $# -gt 0 ]]; do
@@ -57,6 +64,7 @@ while [[ $# -gt 0 ]]; do
         --with-xml)       WITH_XML=true;        shift ;;
         --download-only)  DO_BUILD=false;       shift ;;
         --build-only)     DO_DOWNLOAD=false;    shift ;;
+        --translate-only) TRANSLATE_ONLY=true; WITH_TRANSLATE=true; shift ;;
         --skip-tests)     DO_TESTS=false;       shift ;;
         --help|-h)
             sed -n '3,/^$/{ s/^# \?//; p }' "$0"
@@ -84,7 +92,7 @@ if [[ -n "$WORK_DIR" ]]; then
         cp "$PROJECT_DIR/wordnets.toml" "$DATA_DIR/wordnets.toml"
     fi
     # 7_validate_and_export.py reads cygnet.xsd from cwd; copy it into DATA_DIR.
-    cp "$PROJECT_DIR/cygnet.xsd" "$DATA_DIR/cygnet.xsd"
+    cp "$PROJECT_DIR/cyg/cygnet.xsd" "$DATA_DIR/cygnet.xsd"
     # 11_add_arasaac.py uses the pre-built ILI mapping from the cygnet repo
     # rather than re-downloading and re-building it from scratch.
     if [[ -f "$PROJECT_DIR/data/araasac-ili.json" ]]; then
@@ -107,6 +115,12 @@ run_pipeline() {
 download_standalone() {
     local name="$1" url="$2"
     (
+        # This subshell is invoked as `if ! download_standalone ...; then`,
+        # which suspends `set -e` for everything inside it (a well-known
+        # bash gotcha: errexit is disabled for the whole compound command
+        # under test, including nested subshells). Each step below must
+        # therefore check its own exit status explicitly with `|| exit 1`
+        # rather than relying on inherited errexit.
         local tmpdir
         tmpdir=$(mktemp -d)
         trap 'rm -rf "$tmpdir"' EXIT
@@ -114,18 +128,20 @@ download_standalone() {
             local local_path="${url#file://}"
             [[ "$local_path" != /* ]] && local_path="$DATA_DIR/$local_path"
             echo "  Copying $name..."
-            cp "$local_path" "$tmpdir/archive"
+            cp "$local_path" "$tmpdir/archive" || exit 1
         else
             echo "  Downloading $name..."
-            curl -fSL -o "$tmpdir/archive" "$url"
+            curl -fSL -o "$tmpdir/archive" "$url" || exit 1
         fi
-        if [[ "$url" == *.zip ]]; then
-            unzip -q "$tmpdir/archive" -d "$tmpdir/"
+        # Detect archive type from file content — some hosts (e.g. DSpace
+        # repositories) serve zip files behind extensionless /download URLs.
+        if file -b "$tmpdir/archive" | grep -qi "Zip archive"; then
+            unzip -q "$tmpdir/archive" -d "$tmpdir/" || exit 1
         else
-            tar xf "$tmpdir/archive" -C "$tmpdir/"
+            tar xf "$tmpdir/archive" -C "$tmpdir/" || exit 1
         fi
         find "$tmpdir" \( -name '*.xml' -o -name '*.xml.gz' -o -name '*.xml.xz' \) \
-            -exec cp -n {} "$DATA_DIR/bin/raw_wns/" \;
+            -exec cp --update=none {} "$DATA_DIR/bin/raw_wns/" \;
     )
 }
 
@@ -137,14 +153,14 @@ import re, sys
 content = open(sys.argv[1]).read()
 
 def stem(url):
-    name = url.rstrip("/").split("/")[-1]
-    for ext in [".tar.xz", ".tar.gz", ".tar.bz2", ".xz", ".gz"]:
+    name = url.split("?")[0].rstrip("/").split("/")[-1]
+    for ext in [".tar.xz", ".tar.gz", ".tar.bz2", ".zip", ".xz", ".gz"]:
         if name.endswith(ext):
             name = name[:-len(ext)]
             break
     if name.endswith(".xml"):
         name = name[:-4]
-    return re.sub(r"-\d[\d.]*$", "", name)
+    return re.sub(r"[-_]\d[\d.]*$", "", name)
 
 for m in re.finditer(r"^\s*[\w-]+\s*=\s*(\[.*?\])", content, re.MULTILINE | re.DOTALL):
     for url in re.findall(r'"([^"]*)"', m.group(1)):
@@ -191,10 +207,12 @@ with open(f'{d}/cili_defs.tsv') as fin, open(f'{d}/cili.tsv', 'w', newline='') a
 
     # Wordnets (from wordnets.toml)
     echo "  Downloading wordnets from wordnets.toml..."
+    FAILED_DOWNLOADS=()
     while IFS=$'\t' read -r stem url; do
-        if [[ "$url" == *.xml.gz ]] || [[ "$url" == *.xml.xz ]] || [[ "$url" == *.xml ]]; then
+        url_path="${url%%\?*}"  # strip query string for extension/filename checks
+        if [[ "$url_path" == *.xml.gz ]] || [[ "$url_path" == *.xml.xz ]] || [[ "$url_path" == *.xml ]]; then
             # Direct XML (possibly compressed) — download or copy to bin/raw_wns/
-            fname="$DATA_DIR/bin/raw_wns/$(basename "$url")"
+            fname="$DATA_DIR/bin/raw_wns/$(basename "$url_path")"
             if [ ! -f "$fname" ]; then
                 if [[ "$url" == file://* ]]; then
                     local_path="${url#file://}"
@@ -203,7 +221,11 @@ with open(f'{d}/cili_defs.tsv') as fin, open(f'{d}/cili.tsv', 'w', newline='') a
                     cp "$local_path" "$fname"
                 else
                     echo "  Downloading $(basename "$url")..."
-                    curl -fSL -o "$fname" "$url"
+                    if ! curl -fSL -o "$fname" "$url"; then
+                        echo "  WARNING: failed to download $url (skipping)" >&2
+                        rm -f "$fname"
+                        FAILED_DOWNLOADS+=("$stem: $url")
+                    fi
                 fi
             else
                 echo "  $(basename "$url") already present, skipping."
@@ -212,7 +234,10 @@ with open(f'{d}/cili_defs.tsv') as fin, open(f'{d}/cili.tsv', 'w', newline='') a
             # Archive — extract and copy XMLs flat into bin/raw_wns/
             if ! compgen -G "$DATA_DIR/bin/raw_wns/${stem}*.xml" > /dev/null 2>&1 && \
                ! compgen -G "$DATA_DIR/bin/raw_wns/*/${stem}*/*.xml" > /dev/null 2>&1; then
-                download_standalone "$stem" "$url"
+                if ! download_standalone "$stem" "$url"; then
+                    echo "  WARNING: failed to fetch $stem from $url (skipping)" >&2
+                    FAILED_DOWNLOADS+=("$stem: $url")
+                fi
             else
                 echo "  $stem already present, skipping."
             fi
@@ -225,6 +250,10 @@ with open(f'{d}/cili_defs.tsv') as fin, open(f'{d}/cili.tsv', 'w', newline='') a
         mv "$DATA_DIR/bin/raw_wns/deWordNet.xml" "$DATA_DIR/bin/raw_wns/odenet.xml" || true
 
     echo "  Downloads complete."
+    if [[ ${#FAILED_DOWNLOADS[@]} -gt 0 ]]; then
+        echo "  WARNING: ${#FAILED_DOWNLOADS[@]} wordnet source(s) could not be fetched and were skipped:"
+        printf '    - %s\n' "${FAILED_DOWNLOADS[@]}"
+    fi
     echo
 fi
 
@@ -273,6 +302,12 @@ if $DO_BUILD; then
         echo "=== Step 5: Translate definitions ==="
         run_pipeline 5_translate_defns.py
         echo
+    fi
+
+    if $TRANSLATE_ONLY; then
+        echo "=== Translate-only mode: stopping after Step 5 ==="
+        echo "Output: $DATA_DIR/bin/cygnets_presynth/mtg-1.0.xml"
+        exit 0
     fi
 
     echo "=== Step 6: Synthesise ==="

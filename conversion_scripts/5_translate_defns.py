@@ -3,10 +3,31 @@ from pathlib import Path
 import argostranslate.package
 import argostranslate.translate
 import json
+import sys
 from collections import defaultdict
 import time
 
 N_ITER = 100
+RETRY_ATTEMPTS = 3
+RETRY_BASE_DELAY = 5  # seconds; doubles each retry
+
+
+def _retry_network_call(fn, description):
+    """Run fn(), retrying on failure with exponential backoff.
+
+    CI runners see occasional transient network blips; without this a single
+    flaky request would abort the whole (multi-hour) translation run.
+    """
+    for attempt in range(1, RETRY_ATTEMPTS + 1):
+        try:
+            return fn()
+        except Exception as e:
+            if attempt == RETRY_ATTEMPTS:
+                raise
+            delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
+            print(f"  Warning: {description} failed ({e}); "
+                  f"retrying in {delay}s (attempt {attempt}/{RETRY_ATTEMPTS})")
+            time.sleep(delay)
 
 def extract_glosses():
     """Extract non-English glosses from XML files and cache them."""
@@ -78,8 +99,12 @@ def get_already_translated():
             for line in f:
                 if line.strip():
                     record = json.loads(line)
-                    # Create unique key from definiendum_id and language
-                    translated_ids.add((record['definiendum_id'], record['source_language']))
+                    # A concept can have more than one Definition in the same
+                    # language (e.g. Latvian tezaurs), so definiendum_id+language
+                    # alone isn't a unique key — include the source text too.
+                    translated_ids.add(
+                        (record['definiendum_id'], record['source_language'], record['source_text'])
+                    )
         print(f"Found {len(translated_ids)} already translated glosses")
 
     return translated_ids
@@ -87,7 +112,10 @@ def get_already_translated():
 
 def filter_pending_glosses(glosses, translated_ids):
     """Filter out already translated glosses."""
-    pending = [g for g in glosses if (g['definiendum_id'], g['language']) not in translated_ids]
+    pending = [
+        g for g in glosses
+        if (g['definiendum_id'], g['language'], g['definition']) not in translated_ids
+    ]
     print(f"Remaining glosses to translate: {len(pending)}")
     return pending
 
@@ -108,7 +136,15 @@ def translate_language_batch(language_code, glosses, output_file):
 
     # Download and install translation model for this language
     print(f"Installing translation model: {language_code} -> en")
-    argostranslate.package.update_package_index()
+    try:
+        _retry_network_call(
+            argostranslate.package.update_package_index, "updating package index"
+        )
+    except Exception as e:
+        print(f"Warning: could not update package index after {RETRY_ATTEMPTS} attempts ({e})")
+        print(f"Skipping {len(glosses)} glosses in {language_code}")
+        return
+
     available_packages = argostranslate.package.get_available_packages()
     pkg = next((p for p in available_packages if p.from_code == language_code and p.to_code == 'en'), None)
 
@@ -117,7 +153,14 @@ def translate_language_batch(language_code, glosses, output_file):
         print(f"Skipping {len(glosses)} glosses in {language_code}")
         return
 
-    argostranslate.package.install_from_path(pkg.download())
+    try:
+        pkg_path = _retry_network_call(pkg.download, f"downloading {language_code} model")
+        argostranslate.package.install_from_path(pkg_path)
+    except Exception as e:
+        print(f"Warning: could not download/install {language_code} model "
+              f"after {RETRY_ATTEMPTS} attempts ({e})")
+        print(f"Skipping {len(glosses)} glosses in {language_code}")
+        return
 
     # Get translator for this language
     installed = argostranslate.translate.get_installed_languages()
@@ -160,7 +203,8 @@ def translate_language_batch(language_code, glosses, output_file):
             record = {
                 'translated_definition': translated_text,
                 'definiendum_id': gloss['definiendum_id'],
-                'source_language': language_code
+                'source_language': language_code,
+                'source_text': gloss['definition']
             }
 
             # Write as single line JSON
@@ -218,9 +262,10 @@ def create_xml_from_translations():
 
 
 def main():
+    sys.stdout.reconfigure(line_buffering=True)
+
     # Step 1: Extract or load glosses
     all_glosses = extract_glosses()
-    assert len({g['definiendum_id'] for g in all_glosses}) == len(all_glosses)
 
     languages = {g['language'] for g in all_glosses}
     print(f"\nFound {len(languages)} unique languages: {sorted(languages)}")
@@ -245,7 +290,17 @@ def main():
         print(f"\nProcessing {len(by_language)} languages...")
         for i, (lang_code, lang_glosses) in enumerate(sorted(by_language.items()), 1):
             print(f"\n[{i}/{len(by_language)}] ", end='')
-            translate_language_batch(lang_code, lang_glosses, output_file)
+            try:
+                translate_language_batch(lang_code, lang_glosses, output_file)
+            except Exception as e:
+                # A single language's MT pipeline misbehaving (e.g. a stale
+                # or incompatible stanza resource index) must not abort every
+                # other language in what's otherwise a multi-hour run. Any
+                # glosses already written for this language before the
+                # failure are preserved (translate_language_batch appends
+                # incrementally); the rest are simply retried on a future run.
+                print(f"Warning: {lang_code} failed unexpectedly ({e}); "
+                      f"skipping remaining glosses in {lang_code}")
 
         print("\n" + "=" * 60)
         print("✓ Translation complete!")

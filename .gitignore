@@ -6,6 +6,7 @@ cygnet_log.json
 cygnet_small.xml
 web/*.db
 web/*.db.gz
+reports/
 
 # Editor backup files
 *~

@@ -1,0 +1,81 @@
+name: Check for untranslated wordnets
+
+# Lightweight daily check: does wordnets.toml reference any resource URL
+# that hasn't been through a local translation run yet? If so, open (or
+# update) a tracking issue rather than attempting the multi-hour
+# translation itself in CI.
+#
+# Translation is done locally with scripts/upload_translations.sh, which
+# publishes its output to the rolling "translated-glosses" GitHub Release
+# that release.yml reads from. This workflow never runs translation itself
+# — it only compares URL sets and notifies.
+#
+# Comparing URL *sets* (not "did wordnets.toml change") means removing a
+# wordnet never triggers a false "something new" alert — only a URL that's
+# present now but wasn't in the last-translated baseline counts as new.
+
+on:
+  schedule:
+    - cron: '0 3 * * *'  # daily
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Compute current wordnet URLs
+        run: uv run python scripts/wordnet_urls.py > current_urls.txt
+
+      - name: Fetch last-translated baseline
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release download translated-glosses \
+               --pattern translated_wordnets_baseline.txt \
+               --output baseline_urls.txt; then
+            echo "Restored baseline from the translated-glosses release"
+          else
+            echo "No baseline found (first run?) — treating everything as new"
+            touch baseline_urls.txt
+          fi
+
+      - name: Diff and report
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ISSUE_TITLE="New wordnet(s) need local translation"
+          EXISTING=$(gh issue list --state open --search "in:title \"$ISSUE_TITLE\"" \
+                       --json number --jq '.[0].number // empty')
+
+          # LC_ALL=C: comm's notion of "sorted" is locale-collation-dependent
+          # and can disagree with Python's codepoint-based sorted(), which is
+          # what generated both these files — force byte-order comparison to
+          # match, or comm emits spurious "not in sorted order" warnings.
+          NEW_URLS=$(LC_ALL=C comm -23 current_urls.txt baseline_urls.txt)
+          if [ -z "$NEW_URLS" ]; then
+            echo "Nothing new to translate."
+            if [ -n "$EXISTING" ]; then
+              gh issue close "$EXISTING" --comment \
+                "wordnets.toml no longer has untranslated resources — either they were removed, or a local translation run has since caught up."
+            fi
+            exit 0
+          fi
+
+          BODY=$(printf '%s\n\n%s\n\n%s' \
+            "The following resource URL(s) in wordnets.toml have not been through a local translation run yet:" \
+            "$(sed 's/^/- /' <<< "$NEW_URLS")" \
+            "Run \`./scripts/upload_translations.sh\` locally, then this issue will auto-close on the next daily check.")
+
+          if [ -n "$EXISTING" ]; then
+            gh issue edit "$EXISTING" --body "$BODY"
+          else
+            gh issue create --title "$ISSUE_TITLE" --body "$BODY"
+          fi

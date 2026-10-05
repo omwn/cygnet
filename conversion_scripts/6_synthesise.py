@@ -32,8 +32,15 @@ def main() -> None:
     all_files = sorted(input_dir.glob('*.xml'))
     cili_files = [f for f in all_files if 'cili' in f.stem]
     oewn_files = [f for f in all_files if 'oewn' in f.stem]
-    other_files = [f for f in all_files if 'cili' not in f.stem and 'oewn' not in f.stem]
-    xml_files = cili_files + oewn_files + other_files
+    # Machine-translated glosses (mtg) reference definiendum concepts from
+    # every other resource — _do_gloss() silently drops a Gloss if its
+    # concept isn't registered yet, so mtg must be processed last.
+    mtg_files = [f for f in all_files if 'mtg' in f.stem]
+    other_files = [
+        f for f in all_files
+        if f not in cili_files and f not in oewn_files and f not in mtg_files
+    ]
+    xml_files = cili_files + oewn_files + other_files + mtg_files
     print(f'Found {len(xml_files)} pre-synth files to merge')
 
     builder = MergeBuilder(db_path, prov_db_path)
@@ -71,12 +78,19 @@ def main() -> None:
     print('\nCreating indexes...')
     builder.create_indexes()
 
-    print('\nPhase 1b: Validating no cycles remain...')
+    print('\nPhase 1b: Resolving residual cycles...')
+    n_resolved = builder.resolve_residual_cycles()
+    if n_resolved:
+        print(f'  Removed {n_resolved:,} residual cycle-causing relation(s)'
+              f' (see {conflicts_path})')
+
     n_cycles = builder.detect_cycles()
     if n_cycles:
-        print(f'  WARNING: {n_cycles:,} residual cycle(s) found')
-    else:
-        print('  OK — no cycles.')
+        print(f'  ERROR: {n_cycles:,} cycle(s) remain after resolution — '
+              f'refusing to build a release with a cyclic hypernym hierarchy')
+        builder.write_conflicts_json(conflicts_path)
+        sys.exit(1)
+    print('  OK — no cycles.')
 
     print(f'\nWriting conflict log to {conflicts_path}...')
     builder.write_conflicts_json(conflicts_path)

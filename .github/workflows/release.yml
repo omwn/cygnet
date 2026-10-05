@@ -35,6 +35,15 @@ jobs:
       - name: Download wordnet data
         run: bash build.sh --download-only
 
+      - name: Fetch pre-translated glosses (best-effort)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p bin/cygnets_presynth
+          gh release download translated-glosses \
+            --pattern mtg-1.0.xml --dir bin/cygnets_presynth/ \
+            || echo "No translated-glosses release found; continuing without translations"
+
       - name: Build databases
         run: bash build.sh --build-only --skip-tests
 
