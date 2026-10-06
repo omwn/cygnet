@@ -585,3 +585,93 @@ class TestResolveResidualCyclesTrustOrder:
         builder.resolve_residual_cycles()
 
         assert _has_hypernym(builder, 'cili.a2', 'cili.a3')
+
+
+# ---------------------------------------------------------------------------
+# translated_from on machine-translated glosses
+# ---------------------------------------------------------------------------
+
+def _translated_from(builder, concept_id: str) -> str | None:
+    """The language code a concept's English definition was translated from,
+    or None (including when there is no English definition at all)."""
+    row = builder.cur.execute(
+        """
+        SELECT l.code FROM definitions d
+        JOIN synsets s ON s.rowid = d.synset_rowid
+        JOIN languages el ON el.rowid = d.language_rowid AND el.code = 'en'
+        LEFT JOIN languages l ON l.rowid = d.translated_from_rowid
+        WHERE s.ili = ?
+        """,
+        (concept_id.replace('cili.', ''),),
+    ).fetchone()
+    return row[0] if row else None
+
+
+class TestTranslatedFromGloss:
+    """A machine-translated gloss records which language it came from."""
+
+    def test_translated_from_attribute_stored(self, builder, tmp_path):
+        body = """\
+<Concept id="cili.i1" ontological_category="NOUN" status="1">
+  <Provenance resource="wn-a" version="1.0"/>
+</Concept>
+<Gloss definiendum="cili.i1" language="en" translated_from="hu">
+  <AnnotatedSentence>a dog</AnnotatedSentence>
+  <Provenance resource="mtg" version="1.0"/>
+</Gloss>
+"""
+        (tmp_path / 'wn.xml').write_text(wn_xml('wn-a', body))
+        builder.process_file(tmp_path / 'wn.xml')
+
+        assert _translated_from(builder, 'cili.i1') == 'hu'
+
+    def test_native_gloss_has_no_translated_from(self, builder, tmp_path):
+        body = """\
+<Concept id="cili.i1" ontological_category="NOUN" status="1">
+  <Provenance resource="wn-a" version="1.0"/>
+</Concept>
+<Gloss definiendum="cili.i1" language="en">
+  <AnnotatedSentence>a dog</AnnotatedSentence>
+  <Provenance resource="wn-a" version="1.0"/>
+</Gloss>
+"""
+        (tmp_path / 'wn.xml').write_text(wn_xml('wn-a', body))
+        builder.process_file(tmp_path / 'wn.xml')
+
+        assert _translated_from(builder, 'cili.i1') is None
+
+
+# ---------------------------------------------------------------------------
+# _lang_rowid
+# ---------------------------------------------------------------------------
+
+class TestLangRowid:
+    """langcodes doesn't raise for a code it can't resolve — it returns a
+    descriptive placeholder string ("Unknown language [xx]") instead, which
+    must not be stored as if it were a real name (see cyg.merge._lang_rowid).
+    """
+
+    def test_valid_code_gets_real_name(self, builder):
+        rowid = builder._lang_rowid('uk')
+        name = builder.cur.execute(
+            'SELECT name FROM languages WHERE rowid = ?', (rowid,)
+        ).fetchone()[0]
+        assert name == 'Ukrainian'
+
+    def test_invalid_code_stores_null_not_placeholder(self, builder):
+        """'ua' is not a real ISO 639 code (it's Ukraine's country code) —
+        the exact case that motivated this hardening.
+        """
+        rowid = builder._lang_rowid('ua')
+        name = builder.cur.execute(
+            'SELECT name FROM languages WHERE rowid = ?', (rowid,)
+        ).fetchone()[0]
+        assert name is None
+
+    def test_invalid_code_is_cached_as_null(self, builder):
+        """A second call for the same bad code must reuse the cached rowid,
+        not re-insert — and still resolve to the same (null-named) row.
+        """
+        first = builder._lang_rowid('ua')
+        second = builder._lang_rowid('ua')
+        assert first == second

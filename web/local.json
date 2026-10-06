@@ -29,7 +29,7 @@
   "about": {
     "intro": "<p>OMW Cygnet is an experimental reformulation of Wordnet that is designed to eliminate conflicting records and improve modularity. It extends the idea of the <a href='https://omwn.org/' style='text-decoration:underline'>Open Multilingual Wordnet</a> and puts concepts at the core of the structure.</p><p>Developed by Rowan Hall Maudslay and Francis Bond. Source code is available on <a href='https://github.com/omwn/cygnet' style='text-decoration:underline'>GitHub</a>.</p>",
     "citation": "If you use Cygnet, please cite <a href='https://aclanthology.org/' style='text-decoration:underline'>Maudslay &amp; Bond (2026)</a> for Cygnet and <a href='https://aclanthology.org/P13-1133/' style='text-decoration:underline'>Bond &amp; Foster (2013)</a> for the underlying Open Multilingual Wordnet, as well as the individual wordnets whose data you use — see the Publications tab.",
-    "languageData": "The lexical data in Cygnet is drawn from a collection of open wordnets covering many languages — see the Wordnets tab for the full list of contributing projects and their licences. We are deeply grateful to every team that has worked to build and freely share these resources."
+    "languageData": "The lexical data in Cygnet is drawn from a collection of open wordnets covering many languages — see the Wordnets tab for the full list of contributing projects and their licences. We are deeply grateful to every team that has worked to build and freely share these resources. Where a concept has no English definition in any source wordnet, we add one via machine translation from another language; such definitions are marked with a small \"(from &lt;language&gt;)\" note."
   },
 
   "footer": {

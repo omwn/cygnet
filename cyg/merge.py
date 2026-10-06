@@ -61,10 +61,11 @@ CREATE TABLE senses (
     sense_index  INTEGER DEFAULT 1
 );
 CREATE TABLE definitions (
-    rowid          INTEGER PRIMARY KEY,
-    synset_rowid   INTEGER NOT NULL REFERENCES synsets(rowid),
-    definition     TEXT,
-    language_rowid INTEGER REFERENCES languages(rowid)
+    rowid                 INTEGER PRIMARY KEY,
+    synset_rowid          INTEGER NOT NULL REFERENCES synsets(rowid),
+    definition            TEXT,
+    language_rowid        INTEGER REFERENCES languages(rowid),
+    translated_from_rowid INTEGER REFERENCES languages(rowid)
 );
 CREATE TABLE synset_relations (
     rowid        INTEGER PRIMARY KEY,
@@ -479,6 +480,15 @@ class MergeBuilder:
         if code not in self._lang_cache:
             try:
                 name = langcodes.Language.get(code).display_name()
+                # langcodes doesn't raise for a code it can't resolve — it
+                # returns a descriptive placeholder string instead (e.g.
+                # "Unknown language [ua]"). Treat that the same as an
+                # exception rather than storing it as if it were a real
+                # name: a source using an invalid/non-standard code (e.g.
+                # 'ua' instead of ISO 639-1 'uk' for Ukrainian) would
+                # otherwise have that placeholder displayed everywhere.
+                if name == f'Unknown language [{code}]':
+                    name = None
             except Exception:
                 name = None
             self.cur.execute(
@@ -689,7 +699,11 @@ class MergeBuilder:
         def_rowid = self._next_def_id
         self._next_def_id += 1
         self._gloss_keys[key] = def_rowid
-        self._defs_buf.append((def_rowid, synset_rowid, text, lang_rowid))
+        translated_from = elem.get('translated_from')
+        translated_from_rowid = self._lang_rowid(translated_from) if translated_from else None
+        self._defs_buf.append(
+            (def_rowid, synset_rowid, text, lang_rowid, translated_from_rowid)
+        )
         self.n_prov += self._insert_prov(
             'definitions', def_rowid, elem.findall('Provenance')
         )
@@ -888,7 +902,8 @@ class MergeBuilder:
         if self._defs_buf:
             self.cur.executemany(
                 'INSERT INTO definitions '
-                '(rowid, synset_rowid, definition, language_rowid) VALUES (?, ?, ?, ?)',
+                '(rowid, synset_rowid, definition, language_rowid, translated_from_rowid) '
+                'VALUES (?, ?, ?, ?, ?)',
                 self._defs_buf,
             )
             self._defs_buf.clear()

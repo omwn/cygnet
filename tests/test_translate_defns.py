@@ -1,7 +1,9 @@
 """Unit tests for conversion_scripts/5_translate_defns.py."""
 
 import importlib.util
+import json
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 # Load module from numerically-prefixed filename
@@ -12,6 +14,7 @@ sys.modules['translate_defns'] = _mod
 _spec.loader.exec_module(_mod)
 
 main = _mod.main
+create_xml_from_translations = _mod.create_xml_from_translations
 
 
 def _stub_pipeline(monkeypatch, glosses, by_language):
@@ -82,3 +85,52 @@ class TestMainLanguageIsolation:
         main()
 
         assert called == []
+
+
+class TestCreateXmlFromTranslations:
+    """The output Gloss must record which language it was translated from,
+    so cyg.merge can carry that through to the definitions table — see
+    tests/test_pipeline.py::TestTranslatedFromGloss for the merge side.
+    """
+
+    def _write_jsonl(self, tmp_path, monkeypatch, records):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / 'bin' / 'cygnets_presynth').mkdir(parents=True)
+        jsonl = tmp_path / 'bin' / 'translated_glosses.jsonl'
+        jsonl.write_text('\n'.join(json.dumps(r) for r in records) + '\n')
+
+    def test_gloss_has_translated_from_and_provenance(self, tmp_path, monkeypatch):
+        self._write_jsonl(tmp_path, monkeypatch, [{
+            'translated_definition': 'a dog',
+            'definiendum_id': 'cili.i1',
+            'source_language': 'hu',
+            'source_text': 'kutya',
+        }])
+
+        create_xml_from_translations()
+
+        root = ET.parse(tmp_path / 'bin' / 'cygnets_presynth' / 'mtg-1.0.xml').getroot()
+        gloss = root.find('.//Gloss')
+        assert gloss.get('definiendum') == 'cili.i1'
+        assert gloss.get('language') == 'en'
+        assert gloss.get('translated_from') == 'hu'
+
+        prov = gloss.find('Provenance')
+        assert prov is not None
+        assert prov.get('resource') == 'mtg'
+        assert prov.get('version') == '1.0'
+
+    def test_different_source_languages_recorded_independently(self, tmp_path, monkeypatch):
+        self._write_jsonl(tmp_path, monkeypatch, [
+            {'translated_definition': 'a dog', 'definiendum_id': 'cili.i1',
+             'source_language': 'hu', 'source_text': 'kutya'},
+            {'translated_definition': 'a cat', 'definiendum_id': 'cili.i2',
+             'source_language': 'ru', 'source_text': 'kot'},
+        ])
+
+        create_xml_from_translations()
+
+        root = ET.parse(tmp_path / 'bin' / 'cygnets_presynth' / 'mtg-1.0.xml').getroot()
+        by_definiendum = {g.get('definiendum'): g.get('translated_from')
+                           for g in root.findall('.//Gloss')}
+        assert by_definiendum == {'cili.i1': 'hu', 'cili.i2': 'ru'}

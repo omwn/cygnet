@@ -18,6 +18,11 @@
   Sense relations:
     gleaming antonym glowing   — tests sense-level relation display
 
+  Machine-translated gloss:
+    mouse (i9) — English gloss is tagged translated_from="fr" with a
+    Provenance resource="mtg", mirroring what 5_translate_defns.py
+    produces; tests the UI's "(from French)" badge.
+
   Note: ILI IDs (i1–i8) are test fixtures; i3 is referenced by wn-fr.xml
   and wn-bad.xml, so those three must not be renumbered.
 -->
@@ -47,6 +52,9 @@
   </Concept>
   <Concept id="cili.i8" ontological_category="ADJ" status="1">
     <Provenance resource="wn-en" version="1.0" original_id="oewn-glowing-a"/>
+  </Concept>
+  <Concept id="cili.i9" ontological_category="NOUN" status="1">
+    <Provenance resource="wn-en" version="1.0" original_id="oewn-mouse-n"/>
   </Concept>
 
   <!-- English definitions (from OEWN / Princeton WordNet) -->
@@ -82,6 +90,11 @@
     <AnnotatedSentence>emitting or reflecting light steadily and softly</AnnotatedSentence>
     <Provenance resource="wn-en" version="1.0"/>
   </Gloss>
+  <!-- Machine-translated gloss (mirrors 5_translate_defns.py's output shape) -->
+  <Gloss definiendum="cili.i9" language="en" translated_from="fr">
+    <AnnotatedSentence>a small rodent with a pointed snout and a long tail</AnnotatedSentence>
+    <Provenance resource="mtg" version="1.0"/>
+  </Gloss>
 
   <!-- English lexemes -->
   <Lexeme id="lex.en.entity" language="en" grammatical_category="NOUN">
@@ -104,6 +117,10 @@
   <Lexeme id="lex.en.dogfish" language="en" grammatical_category="NOUN">
     <Wordform form="dogfish"/>
     <Provenance resource="wn-en" version="1.0" original_id="oewn-dogfish-n"/>
+  </Lexeme>
+  <Lexeme id="lex.en.mouse" language="en" grammatical_category="NOUN">
+    <Wordform form="mouse"/>
+    <Provenance resource="wn-en" version="1.0" original_id="oewn-mouse-n"/>
   </Lexeme>
   <Lexeme id="lex.en.bright" language="en" grammatical_category="ADJ">
     <Wordform form="bright"/>
@@ -132,6 +149,9 @@
     <Provenance resource="wn-en" version="1.0"/>
   </Sense>
   <Sense id="sense.dogfish" signifier="lex.en.dogfish" signified="cili.i5">
+    <Provenance resource="wn-en" version="1.0"/>
+  </Sense>
+  <Sense id="sense.mouse" signifier="lex.en.mouse" signified="cili.i9">
     <Provenance resource="wn-en" version="1.0"/>
   </Sense>
   <Sense id="sense.bright" signifier="lex.en.bright" signified="cili.i6">

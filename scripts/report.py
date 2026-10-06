@@ -1274,6 +1274,63 @@ def _denominator_value(key: str, data: WordnetData, issue_total: int, log: dict)
     raise ValueError(f"unknown denominator key: {key}")
 
 
+def fetch_senses_per_lemma_ranking(
+    data_by_resource: dict[str, WordnetData],
+) -> list[tuple[str, int, int, float]]:
+    """(resource_id, senses, entries, senses_per_entry), ratio descending.
+
+    A wordnet with an unusually high senses-per-lemma ratio (dozens or more,
+    versus a healthy wordnet's low single digits) is often a sign of a
+    conversion bug — e.g. one lemma being linked to every candidate synset
+    from a bilingual dictionary instead of just the correct sense (this is
+    exactly what was found for ancientgreek-grc: ~37.5 senses/lemma, traced
+    to the upstream converter not filtering candidates by POS).
+    """
+    rows = []
+    for resource_id, data in data_by_resource.items():
+        n_entries = len(data.entries)
+        n_senses = len(data.senses)
+        if n_entries == 0:
+            continue
+        rows.append((resource_id, n_senses, n_entries, n_senses / n_entries))
+    rows.sort(key=lambda r: -r[3])
+    return rows
+
+
+def _senses_per_lemma_section(
+    data_by_resource: dict[str, WordnetData], markdown: bool
+) -> list[str]:
+    ranking = fetch_senses_per_lemma_ranking(data_by_resource)
+    if not ranking:
+        return []
+
+    lines = []
+    title = "Senses per lemma, by wordnet (highest first)"
+    lines.append(f"\n## {title}" if markdown else f"\n{title}\n{'-' * len(title)}")
+    note = (
+        "A ratio of dozens or more usually indicates a conversion bug "
+        "(e.g. a lemma linked to every dictionary-candidate synset instead "
+        "of just its correct sense) rather than genuine polysemy."
+    )
+    lines.append(f"\n{note}" if markdown else note)
+
+    if markdown:
+        lines.append("\n| Wordnet | Senses | Lemmas (entries) | Senses/lemma |")
+        lines.append("|---|---:|---:|---:|")
+        lines += [
+            f"| {rid} | {_fmt(senses)} | {_fmt(entries)} | {ratio:.1f} |"
+            for rid, senses, entries, ratio in ranking
+        ]
+    else:
+        lines.append("")
+        lines += [
+            f"    {rid:24s} {_fmt(senses):>10s} senses  "
+            f"{_fmt(entries):>10s} lemmas  {ratio:6.1f}/lemma"
+            for rid, senses, entries, ratio in ranking
+        ]
+    return lines
+
+
 def format_summary(paths: list[Path], markdown: bool) -> str:
     """Aggregate issue counts across many wordnets, grouped by issue type.
 
@@ -1307,6 +1364,8 @@ def format_summary(paths: list[Path], markdown: bool) -> str:
         lines.append("# Cross-Wordnet Issue Summary")
     else:
         lines += ["CROSS-WORDNET ISSUE SUMMARY", "=" * 27]
+
+    lines += _senses_per_lemma_section(data_by_resource, markdown)
 
     for sev in ("CRITICAL", "WARNING", "INFO"):
         titles = sorted(

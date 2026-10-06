@@ -33,6 +33,7 @@ format_summary = _mod.format_summary
 _diversify = _mod._diversify
 _denominator_key = _mod._denominator_key
 _denominator_value = _mod._denominator_value
+fetch_senses_per_lemma_ranking = _mod.fetch_senses_per_lemma_ranking
 load_json_log = _mod.load_json_log
 parse_conflicts_json = _mod.parse_conflicts_json
 issues_from_json_log = _mod.issues_from_json_log
@@ -1184,6 +1185,16 @@ class TestFormatSummary:
         summary = format_summary(paths, markdown=False)
         assert summary.index("CRITICAL") < summary.index("Concepts without definitions")
 
+    def test_senses_per_lemma_section_present(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(_mod, "CONFLICTS_JSON", tmp_path / "nonexistent.json")
+        paths = [_write_xml(tmp_path, _GOOD, wn_id="wn-a")]
+        summary = format_summary(paths, markdown=True)
+        assert "Senses per lemma, by wordnet" in summary
+        # _GOOD has exactly one entry and one sense -> ratio 1.0
+        assert "| wn-a | 1 | 1 | 1.0 |" in summary
+        # The ranking section must render right after the report title.
+        assert summary.index("Senses per lemma") < summary.index("Cross-Wordnet Issue Summary") + 50
+
     def test_same_invalid_pos_code_grouped_across_wordnets(self, tmp_path, monkeypatch):
         """Two wordnets both hitting an empty POS code show up under one title."""
         monkeypatch.setattr(_mod, "CONFLICTS_JSON", tmp_path / "nonexistent.json")
@@ -1304,3 +1315,38 @@ class TestDenominator:
             _denominator_key("Concept relations already covered by another wordnet")
             == "relations_attempted"
         )
+
+
+# ---------------------------------------------------------------------------
+# fetch_senses_per_lemma_ranking
+# ---------------------------------------------------------------------------
+
+def _data_with(n_entries: int, n_senses: int):
+    data = _mod.WordnetData()
+    data.entries = {f"e{i}": "en" for i in range(n_entries)}
+    data.senses = {f"s{i}": (f"e{i % max(n_entries, 1)}", "cili.i1") for i in range(n_senses)}
+    return data
+
+
+class TestFetchSensesPerLemmaRanking:
+    def test_ranked_ratio_descending(self):
+        data_by_resource = {
+            "low": _data_with(n_entries=10, n_senses=12),
+            "high": _data_with(n_entries=10, n_senses=400),
+        }
+        ranking = fetch_senses_per_lemma_ranking(data_by_resource)
+        assert [r[0] for r in ranking] == ["high", "low"]
+
+    def test_ratio_computed_correctly(self):
+        data_by_resource = {"wn": _data_with(n_entries=100, n_senses=250)}
+        ranking = fetch_senses_per_lemma_ranking(data_by_resource)
+        resource_id, senses, entries, ratio = ranking[0]
+        assert (resource_id, senses, entries) == ("wn", 250, 100)
+        assert ratio == 2.5
+
+    def test_zero_entries_excluded_not_divide_by_zero(self):
+        data_by_resource = {"empty": _data_with(n_entries=0, n_senses=5)}
+        assert fetch_senses_per_lemma_ranking(data_by_resource) == []
+
+    def test_empty_input_returns_empty(self):
+        assert fetch_senses_per_lemma_ranking({}) == []

@@ -244,10 +244,15 @@ def create_xml_from_translations():
         gloss = ET.SubElement(gloss_layer, 'Gloss')
         gloss.set('definiendum', trans['definiendum_id'])
         gloss.set('language', 'en')  # All translations are to English
+        gloss.set('translated_from', trans['source_language'])
 
         # Create AnnotatedSentence with translated text
         annotated_sentence = ET.SubElement(gloss, 'AnnotatedSentence')
         annotated_sentence.text = trans['translated_definition']
+
+        prov = ET.SubElement(gloss, 'Provenance')
+        prov.set('resource', 'mtg')
+        prov.set('version', '1.0')
 
     # Write to XML file with proper formatting
     tree = ET.ElementTree(root)
