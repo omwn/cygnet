@@ -3,7 +3,12 @@
 # To add a language, append an entry here and re-run build.sh.
 
 # English — Open English WordNet
-en = ["https://en-word.net/static/english-wordnet-2025.xml.gz",
+# Using the "2025+" edition, not the base "2025" edition: OEWN split proper
+# nouns (incl. taxonomic names like "Canidae") out into a separate resource
+# this year, and "2025" alone no longer includes them — "2025+" restores
+# that coverage, matching previous OEWN releases. See
+# https://github.com/globalwordnet/english-wordnet/releases/tag/2025-edition
+en = ["https://en-word.net/static/english-wordnet-2025-plus.xml.gz",
 "https://github.com/omwn/tufs/releases/download/v2026.04.06/tufs-en-2026.04.06.tar.xz"]
 
 # Arabic — OMW Arabic
