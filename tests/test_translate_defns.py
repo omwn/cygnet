@@ -6,6 +6,15 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+import pytest
+
+# 5_translate_defns.py imports argostranslate at module level, which is an
+# optional dependency (the "translate" extra — see pyproject.toml) only
+# installed when a build explicitly requests it. Skip this whole module
+# rather than erroring out the entire test session's collection when it's
+# absent, which is the default for a plain `build.sh` run.
+pytest.importorskip('argostranslate')
+
 # Load module from numerically-prefixed filename
 _script = Path(__file__).parent.parent / 'conversion_scripts' / '5_translate_defns.py'
 _spec = importlib.util.spec_from_file_location('translate_defns', _script)
