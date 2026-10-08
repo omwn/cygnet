@@ -1121,14 +1121,25 @@
             // from the preferred one, e.g. [fr].  Pass ml='ml-1' or 'ml-0.5'.
             const LangBadge = ({ lang, currentLang, ml = 'ml-1' }) =>
                 lang && lang !== currentLang
-                    ? <span className={`text-xs text-gray-400 ${ml}`}>[{lang}]</span>
+                    ? <span className={`text-xs text-gray-500 ${ml}`}>[{lang}]</span>
                     : null;
 
             // Unobtrusive note on a machine-translated definition, e.g. "(from Hungarian)".
             const TranslatedBadge = ({ fromLang, ml = 'ml-1' }) =>
                 fromLang
-                    ? <span className={`text-xs text-gray-400 ${ml}`} title="Machine-translated definition">(from {getLangName(fromLang)})</span>
+                    ? <span className={`text-xs text-gray-500 ${ml}`} title="Machine-translated definition">(from {getLangName(fromLang)})</span>
                     : null;
+
+            // The help/ⓘ button's icon — shared so inline prose mentioning
+            // "the ⓘ button" renders the same glyph instead of a stale "?".
+            const InfoIcon = ({ className = 'w-5 h-5' }) => (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"
+                    className={`inline-block align-[-0.2em] ${className}`}>
+                    <circle cx="12" cy="12" r="9" />
+                    <line x1="12" y1="11" x2="12" y2="16.5" />
+                    <circle cx="12" cy="7.75" r="0.9" fill="currentColor" stroke="none" />
+                </svg>
+            );
 
             // Renders a comma-separated list of clickable wordforms.
             const renderWordformList = (items, onClick) => items.map((item, i) => (
@@ -1659,7 +1670,7 @@
                 const rows = queryProvenance(tableName, itemRowid);
                 if (rows.length === 0) return null;
                 return (
-                    <span className="text-xs text-gray-400 ml-1">
+                    <span className="text-xs text-gray-500 ml-1">
                         ({rows.map((s, i) => (
                             <span key={s.code + (s.version || '')}>
                                 {i > 0 && ', '}
@@ -1680,7 +1691,7 @@
                 const first = rows[0];
                 const rest = rows.slice(1);
                 return (
-                    <span className="relative inline-block group text-xs text-gray-400 ml-1 cursor-default">
+                    <span className="relative inline-block group text-xs text-gray-500 ml-1 cursor-default">
                         (<button onClick={() => { setSelectedWordnet(first.code); setActiveTab('wordnets'); }}
                             className="hover:text-blue-500 hover:underline">
                             {first.code}{first.version ? `:${first.version}` : ''}
@@ -2117,31 +2128,32 @@
                                         : null
                                 )}
                             </div>
-                            <nav className="flex items-end gap-3 mt-3 -mb-3 flex-wrap">
-                                {[['browser','Browse'],['about','About'],['publications','Publications'],['wordnets','Wordnets']].map(([tab, label]) => (
-                                    <button key={tab}
-                                        onClick={() => { setActiveTab(tab); if (tab === 'wordnets') setSelectedWordnet(null); }}
-                                        className={`px-4 py-2 rounded-t-lg border-b-2 transition-colors ${
-                                            activeTab === tab
-                                                ? 'bg-gray-50 border-blue-500 text-blue-700 font-medium'
-                                                : 'border-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-                                        }`}
-                                    >{label}</button>
-                                ))}
-                                <div className="flex items-center gap-1.5 flex-grow min-w-48 pb-0.5">
+                            <nav className="flex flex-col md:flex-row md:items-center gap-3 mt-3 -mb-px">
+                                <div className="flex gap-1 flex-wrap">
+                                    {[['browser','Browse'],['about','About'],['publications','Publications'],['wordnets','Wordnets']].map(([tab, label]) => (
+                                        <button key={tab}
+                                            onClick={() => { setActiveTab(tab); if (tab === 'wordnets') setSelectedWordnet(null); }}
+                                            className={`px-4 py-2 rounded-t-lg border-b-2 transition-colors ${
+                                                activeTab === tab
+                                                    ? 'bg-gray-50 border-blue-500 text-blue-700 font-medium'
+                                                    : 'border-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                                            }`}
+                                        >{label}</button>
+                                    ))}
+                                </div>
+                                <div className="flex items-center gap-2 flex-grow md:justify-end">
                                     <input type="text" value={searchTerm}
                                         onChange={(e) => setSearchTerm(e.target.value)}
                                         onKeyPress={handleKeyPress}
                                         placeholder={dbReady ? "word, hot*, *ness, i1234, def:bright" : "Loading…"}
                                         disabled={!dbReady}
-                                        className="flex-grow min-w-0 px-3 py-1.5 text-sm border border-gray-300 rounded disabled:opacity-50"
+                                        className="flex-grow min-w-0 md:w-80 h-11 px-4 text-sm rounded-xl border border-gray-300 bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors disabled:opacity-50"
                                     />
-                                </div>
-                                <div className="relative pb-0 group" ref={helpRef}>
+                                <div className="relative group" ref={helpRef}>
                                     <button onClick={() => setHelpOpen(o => !o)}
-                                        title="Help"
-                                        className={`px-3 py-2 rounded-t-lg border-b-2 transition-colors ${helpOpen ? 'bg-gray-50 border-blue-500 text-blue-700' : 'border-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-50'}`}>
-                                        ⓘ
+                                        title="Help" aria-label="Help"
+                                        className={`h-11 w-11 flex items-center justify-center rounded-xl border transition-colors ${helpOpen ? 'bg-blue-50 border-blue-300 text-blue-700' : 'border-gray-300 text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`}>
+                                        <InfoIcon className="w-5 h-5" />
                                     </button>
                                     {!helpOpen && (
                                         <div onClick={() => setHelpOpen(true)} className="absolute right-0 top-full mt-1 hidden group-hover:block bg-white border border-gray-200 rounded shadow-lg p-3 text-xs text-gray-700 z-30 w-64 space-y-1.5 cursor-pointer">
@@ -2149,7 +2161,7 @@
                                             <div><span className="font-mono font-semibold">hot*</span> or <span className="font-mono font-semibold">*ness</span> — glob (<span className="font-mono">*</span> = any characters, <span className="font-mono">?</span> = one)</div>
                                             <div><span className="font-mono font-semibold">i1234</span> or <span className="font-mono font-semibold">cili.i1234</span> — look up concept by ILI</div>
                                             <div><span className="font-mono font-semibold">def:word</span> — search inside definitions</div>
-                                            <div className="pt-1 border-t border-gray-100 text-gray-400 italic">Click for more</div>
+                                            <div className="pt-1 border-t border-gray-100 text-gray-500 italic">Click for more</div>
                                         </div>
                                     )}
                                     {helpOpen && (
@@ -2169,12 +2181,15 @@
                                         </div>
                                     )}
                                 </div>
-                                <div className="relative pb-0" ref={settingsRef}>
+                                <div className="relative" ref={settingsRef}>
                                     <button onClick={() => setSettingsOpen(o => !o)}
                                         title="Settings" aria-label="Settings"
-                                        className={`px-3 py-2 rounded-t-lg border-b-2 transition-colors relative ${settingsOpen ? 'bg-gray-50 border-blue-500 text-blue-700' : 'border-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-50'}`}>
-                                        ⚙
-                                        {hasActiveSettings && <span className="absolute top-1.5 right-1 w-1.5 h-1.5 bg-blue-500 rounded-full" />}
+                                        className={`h-11 w-11 flex items-center justify-center rounded-xl border transition-colors relative ${settingsOpen ? 'bg-blue-50 border-blue-300 text-blue-700' : 'border-gray-300 text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`}>
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+                                            <circle cx="12" cy="12" r="3" />
+                                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                                        </svg>
+                                        {hasActiveSettings && <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-blue-500 rounded-full" />}
                                     </button>
                                     {settingsOpen && (
                                         <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded shadow-lg z-20 w-80 max-h-[80vh] overflow-y-auto">
@@ -2195,7 +2210,7 @@
                                                             </select>
                                                         </div>
                                                         {definitionLanguage !== 'en' && (
-                                                            <p className="text-xs text-gray-400 pl-1">Labels and definitions fall back to English if unavailable</p>
+                                                            <p className="text-xs text-gray-500 pl-1">Labels and definitions fall back to English if unavailable</p>
                                                         )}
                                                         <label className="flex items-center gap-2 cursor-pointer">
                                                             <input type="checkbox" checked={showPronunciation}
@@ -2222,7 +2237,7 @@
                                                                 }}
                                                                 className="cursor-pointer" />
                                                             <span className="text-sm text-gray-600">Show sources</span>
-                                                            {showProvenance && provLoading && <span className="text-xs text-gray-400 ml-1">Loading...</span>}
+                                                            {showProvenance && provLoading && <span className="text-xs text-gray-500 ml-1">Loading...</span>}
                                                             {showProvenance && provError && <span className="text-xs text-red-500 ml-1">{provError}</span>}
                                                         </label>
                                                     </div>
@@ -2285,6 +2300,7 @@
                                         </div>
                                     )}
                                 </div>
+                                </div>
                             </nav>
                         </div>
                     </header>
@@ -2341,7 +2357,7 @@
                                             <div><span className="font-mono font-semibold text-gray-800">def:bright</span> — search inside definitions</div>
                                             <div><span className="font-mono font-semibold text-gray-800">i1234</span> or <span className="font-mono font-semibold text-gray-800">cili.i1234</span> — look up concept by ILI</div>
                                         </div>
-                                        <p className="text-sm">Use <strong>⚙ Settings</strong> to filter results by language or part of speech, and to choose the display language for definitions and synset labels. This guide is always available via the <strong>?</strong> button.</p>
+                                        <p className="text-sm">Use <strong>⚙ Settings</strong> to filter results by language or part of speech, and to choose the display language for definitions and synset labels. This guide is always available via the <InfoIcon className="w-3.5 h-3.5" /> button.</p>
                                     </div>
                                 )}
                                 {view === 'search' && dbReady && (
@@ -2408,7 +2424,7 @@
                                                                             <button onClick={() => toggleSection(`pos-${lang}-${pos}`)}
                                                                                 className="w-full flex items-center justify-between py-2 hover:bg-gray-50">
                                                                                 <h4 className="font-semibold text-gray-700">{getPosName(pos, true)}</h4>
-                                                                                <span className="text-gray-400 text-sm">{collapsedSections[`pos-${lang}-${pos}`] ? '▶' : '▼'}</span>
+                                                                                <span className="text-gray-500 text-sm">{collapsedSections[`pos-${lang}-${pos}`] ? '▶' : '▼'}</span>
                                                                             </button>
                                                                         )}
                                                                         {(!collapsedSections[`pos-${lang}-${pos}`] || senseFilter) && (
@@ -2524,7 +2540,7 @@
                                                                                                                                         </button>
                                                                                                                                     );
                                                                                                                                 })}
-                                                                                                                                {hidden > 0 && <span className="text-gray-400 text-xs italic">…{hidden} more</span>}
+                                                                                                                                {hidden > 0 && <span className="text-gray-500 text-xs italic">…{hidden} more</span>}
                                                                                                                             </div>
                                                                                                                         );
                                                                                                                     });
@@ -2653,7 +2669,7 @@
                                                             {['graph','text','none'].map(mode => (
                                                                 <button key={mode}
                                                                     onClick={() => { setRelationsView(mode); localStorage.setItem('relationsView', mode); }}
-                                                                    className={`px-2 py-0.5 transition-colors ${relationsView === mode ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                                                                    className={`px-2 py-0.5 transition-colors ${relationsView === mode ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
                                                                     {mode.charAt(0).toUpperCase() + mode.slice(1)}
                                                                 </button>
                                                             ))}
@@ -2737,7 +2753,7 @@
                                                                     })}
                                                                     {!isExpanded && hidden > 0 && (
                                                                         <button onClick={() => setExpandedRelGroups(prev => new Set([...prev, groupKey]))}
-                                                                            className="text-gray-400 hover:text-gray-600 text-xs italic">
+                                                                            className="text-gray-500 hover:text-gray-600 text-xs italic">
                                                                             …{hidden} more
                                                                         </button>
                                                                     )}
@@ -2745,7 +2761,7 @@
                                                                 );
                                                             })}
                                                             {hasSenseRels && <>
-                                                                <div className="text-xs text-gray-400 italic mt-1 mb-0.5">Related through senses:</div>
+                                                                <div className="text-xs text-gray-500 italic mt-1 mb-0.5">Related through senses:</div>
                                                                 {Object.entries(senseRelsByType).map(([relType, rels]) => {
                                                                 const groupKey = `sr-${relType}`;
                                                                 const isExpanded = expandedRelGroups.has(groupKey);
@@ -2780,7 +2796,7 @@
                                                                     })}
                                                                     {!isExpanded && hidden > 0 && (
                                                                         <button onClick={() => setExpandedRelGroups(prev => new Set([...prev, groupKey]))}
-                                                                            className="text-gray-400 hover:text-gray-600 text-xs italic">
+                                                                            className="text-gray-500 hover:text-gray-600 text-xs italic">
                                                                             …{hidden} more
                                                                         </button>
                                                                     )}
@@ -2858,7 +2874,7 @@
                                                                                 setPathWordSuggestions([]);
                                                                             }}>
                                                                             <span className="font-medium text-gray-800">{s.form}</span>
-                                                                            <span className="text-gray-400 italic text-xs">{getPosName(s.pos)}</span>
+                                                                            <span className="text-gray-500 italic text-xs">{getPosName(s.pos)}</span>
                                                                             {s.def && <span className="text-gray-500 truncate text-xs">{s.def.length > 60 ? s.def.slice(0,60)+'…' : s.def}</span>}
                                                                         </button>
                                                                     ))}
@@ -2866,7 +2882,7 @@
                                                             )}
                                                         </div>
                                                         {targetLabel && <span className="text-sm text-gray-600">{targetLabel.form}{<LangBadge lang={targetLabel.lang} currentLang={definitionLanguage} />}</span>}
-                                                        {pathTargetIli && !pathTargetRowid && pathWordSuggestions.length === 0 && <span className="text-xs text-gray-400 italic">not found</span>}
+                                                        {pathTargetIli && !pathTargetRowid && pathWordSuggestions.length === 0 && <span className="text-xs text-gray-500 italic">not found</span>}
                                                         <button
                                                             onClick={() => pathTargetRowid && runPath(pathTargetRowid)}
                                                             disabled={!pathTargetRowid}
@@ -2882,7 +2898,7 @@
                                                                 return (
                                                                     <React.Fragment key={i}>
                                                                         {i > 0 && step.rel && (
-                                                                            <span className="text-gray-400 text-xs italic whitespace-nowrap">—{getRelLabel(step.rel)}→</span>
+                                                                            <span className="text-gray-500 text-xs italic whitespace-nowrap">—{getRelLabel(step.rel)}→</span>
                                                                         )}
                                                                         <a href={conceptHref(step.node)}
                                                                             onClick={e => onConceptLinkClick(e, step.node)}
@@ -2932,7 +2948,7 @@
                                                                     {lemmas.map((item, idx) => (
                                                                         <span key={item.senseId}>{idx > 0 && ', '}
                                                                             <button onClick={() => handleWordformClickWithSense(item.lemma, item.senseId)}
-                                                                                className="text-blue-600 hover:underline">{item.lemma}<sub className="text-gray-400">{item.ind}</sub></button>
+                                                                                className="text-blue-600 hover:underline">{item.lemma}<sub className="text-gray-500">{item.ind}</sub></button>
                                                                             {renderProvenance('senses', parseInt(item.senseId))}
                                                                         </span>
                                                                     ))}
@@ -3298,7 +3314,7 @@
                                                 </tbody>
                                             </table>
                                         )}
-                                        {!provenanceReady && <p className="text-xs text-gray-400 mt-2">Load the provenance database for detailed statistics.</p>}
+                                        {!provenanceReady && <p className="text-xs text-gray-500 mt-2">Load the provenance database for detailed statistics.</p>}
                                     </div>
 
                                     {summary && summary.relDist.length > 0 && (
@@ -3327,7 +3343,7 @@
                                                                         {' → '}
                                                                         <a href={conceptHref(row.ex_tgt_rowid)} onClick={e => { onConceptLinkClick(e, row.ex_tgt_rowid); setActiveTab('browser'); }} onMouseEnter={e => showTooltip(row.ex_tgt_rowid, e)} onMouseLeave={hideTooltip} className="text-blue-600 hover:underline">{tgtLabel}</a>
                                                                     </>
-                                                                ) : <span className="text-gray-400">—</span>}
+                                                                ) : <span className="text-gray-500">—</span>}
                                                             </td>
                                                         </tr>
                                                         );
@@ -3360,7 +3376,7 @@
                                                                         {' → '}
                                                                         <a href={senseHref(row.ex_tgt_rowid)} onClick={e => { onSenseLinkClick(e, row.ex_tgt_rowid); setActiveTab('browser'); }} className="text-blue-600 hover:underline">{row.tgt_form}</a>
                                                                     </>
-                                                                ) : <span className="text-gray-400">—</span>}
+                                                                ) : <span className="text-gray-500">—</span>}
                                                             </td>
                                                         </tr>
                                                     ))}
@@ -3427,7 +3443,7 @@
                                                                 {r.licence && <div><span className="text-gray-500">Licence:</span> {r.licence.startsWith('http') ? <a href={r.licence} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{shortLicence(r.licence)}</a> : shortLicence(r.licence)}</div>}
                                                                 {r.synset_count != null && <div><span className="text-gray-500">Concepts:</span> {r.synset_count.toLocaleString()}</div>}
                                                                 {r.sense_count != null && <div><span className="text-gray-500">Senses:</span> {r.sense_count.toLocaleString()}</div>}
-                                                                <div className="pt-1 border-t border-gray-100 text-gray-400 italic">Click for full summary (may be slow)</div>
+                                                                <div className="pt-1 border-t border-gray-100 text-gray-500 italic">Click for full summary (may be slow)</div>
                                                             </div>
                                                         </span>
                                                     </td>

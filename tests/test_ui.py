@@ -24,6 +24,8 @@ Expected search results (exact/glob match on normalized_form):
   "def:animal" + English filter → 2 (en:animal, en:dog)   across 1 language
 """
 
+from pathlib import Path
+
 import pytest
 from playwright.sync_api import Page, expect
 
@@ -201,10 +203,12 @@ class TestDatabaseErrorHandling:
 # ---------------------------------------------------------------------------
 
 class TestSearchHelpButton:
-    def test_help_button_shows_circled_i(self, page_ready: Page):
-        """The help button must show ⓘ, not ?."""
+    def test_help_button_shows_info_icon(self, page_ready: Page):
+        """The help button renders an info-circle SVG icon (no visible text,
+        so accessibility rests on the aria-label)."""
         btn = page_ready.locator('button[title="Help"]')
-        expect(btn).to_contain_text('ⓘ')
+        expect(btn).to_have_attribute('aria-label', 'Help')
+        expect(btn.locator('svg')).to_be_visible()
 
     def test_hover_shows_tooltip(self, page_ready: Page):
         """Hovering the ⓘ button reveals the short-syntax tooltip."""
@@ -1278,3 +1282,65 @@ class TestWordnetSummaryWithProvenance:
         self._open_summary(page_prov)
         summary = page_prov.locator('[data-testid="wordnet-summary"]')
         expect(summary.locator('div', has_text='ILI %').first).to_be_visible()
+
+
+# ---------------------------------------------------------------------------
+# Accessibility: text contrast (WCAG 2.x AA)
+# ---------------------------------------------------------------------------
+
+_CONTRAST_CHECK_JS = (Path(__file__).parent / 'contrast_check.js').read_text()
+
+
+def _contrast_violations(page: Page) -> list[dict]:
+    """Run the WCAG contrast checker (tests/contrast_check.js) against the
+    page's current visible state. Returns [] when every visible text node
+    meets the AA threshold (4.5:1 normal text, 3:1 large text).
+    """
+    import json
+    return json.loads(page.evaluate(_CONTRAST_CHECK_JS))
+
+
+class TestTextContrast:
+    """No visible text may fall below WCAG 2.x AA contrast — see
+    tests/contrast_check.js for the (dependency-free) checker. Covers every
+    major view, since a contrast regression is easy to introduce in one
+    spot (a new badge, a new button variant) without noticing elsewhere.
+    """
+
+    def test_landing_page(self, page_ready: Page):
+        assert _contrast_violations(page_ready) == []
+
+    def test_search_results(self, page_ready: Page):
+        _search(page_ready, 'dog')
+        assert _contrast_violations(page_ready) == []
+
+    def test_concept_view(self, page_ready: Page):
+        _search(page_ready, 'dog')
+        page_ready.locator('.concept-inner').first.click()
+        page_ready.wait_for_selector(_CONCEPT_LOADED, timeout=10_000)
+        assert _contrast_violations(page_ready) == []
+
+    def test_settings_panel(self, page_ready: Page):
+        page_ready.locator('button[title="Settings"]').click()
+        page_ready.wait_for_selector('text=Display results in', timeout=5_000)
+        assert _contrast_violations(page_ready) == []
+
+    def test_help_panel(self, page_ready: Page):
+        page_ready.locator('button[title="Help"]').click()
+        page_ready.wait_for_selector('text=Search syntax', timeout=5_000)
+        assert _contrast_violations(page_ready) == []
+
+    def test_about_tab(self, page_ready: Page):
+        page_ready.locator('nav button', has_text='About').click()
+        page_ready.wait_for_selector('text=Citation', timeout=5_000)
+        assert _contrast_violations(page_ready) == []
+
+    def test_wordnets_tab(self, page_ready: Page):
+        page_ready.locator('nav button', has_text='Wordnets').click()
+        page_ready.wait_for_selector('text=Contributing Wordnets', timeout=5_000)
+        assert _contrast_violations(page_ready) == []
+
+    def test_publications_tab(self, page_ready: Page):
+        page_ready.locator('nav button', has_text='Publications').click()
+        page_ready.wait_for_selector('text=Wordnet Citations', timeout=5_000)
+        assert _contrast_violations(page_ready) == []
