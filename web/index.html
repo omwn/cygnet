@@ -880,9 +880,24 @@
 
             useEffect(() => {
                 fetch('relations.json')
-                    .then(r => r.json())
-                    .then(cfg => { _relConfig = cfg; _buildRelLookups(); setRelConfigLoaded(v => v + 1); })
-                    .catch(e => console.warn('relations.json fetch failed:', e));
+                    .then(r => {
+                        if (!r.ok) throw new Error(`relations.json: HTTP ${r.status}`);
+                        return r.json();
+                    })
+                    .then(cfg => {
+                        if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) {
+                            throw new Error('relations.json: unexpected shape (expected an object)');
+                        }
+                        _relConfig = cfg;
+                        _buildRelLookups();
+                        setRelConfigLoaded(v => v + 1);
+                    })
+                    .catch(e => {
+                        // Non-fatal: getRelLabel() falls back to the raw relation
+                        // name when _relConfig is empty, so the app still works —
+                        // just with less friendly relation labels/colors.
+                        console.warn('relations.json fetch failed, using fallback relation labels:', e);
+                    });
             }, []);
 
             useEffect(() => {
@@ -2526,7 +2541,15 @@
 
                                 {view === 'concept' && selectedConcept && dbReady && (() => {
                                     const concept = getConceptData(selectedConcept) || loadConcept(selectedConcept);
-                                    if (!concept) return <div className="text-gray-600">Loading concept...</div>;
+                                    // loadConcept()/queryConcept() are synchronous SQL lookups (dbReady is
+                                    // already guaranteed above), so a falsy result here is a confirmed
+                                    // miss — an invalid/stale deep-link ID — not a pending async load.
+                                    if (!concept) return (
+                                        <div className="text-gray-600">
+                                            <p>Concept not found (id: {selectedConcept}).</p>
+                                            <button onClick={handleBackToSearch} className="mt-2 text-blue-600 hover:underline">← Back to search</button>
+                                        </div>
+                                    );
 
                                     // Load senses
                                     if (concept.s) {
@@ -2912,7 +2935,15 @@
 
                                 {view === 'sense' && selectedSense && dbReady && (() => {
                                     const sense = loadedSenses[selectedSense] || loadSenseData(selectedSense);
-                                    if (!sense?.l) return <div className="text-gray-600">Loading sense...</div>;
+                                    // querySense() is a synchronous SQL lookup (dbReady is already
+                                    // guaranteed above) — a falsy result is a confirmed miss, not a
+                                    // pending async load.
+                                    if (!sense?.l) return (
+                                        <div className="text-gray-600">
+                                            <p>Sense not found (id: {selectedSense}).</p>
+                                            <button onClick={handleBackToSearch} className="mt-2 text-blue-600 hover:underline">← Back to search</button>
+                                        </div>
+                                    );
                                     return (
                                         <div>
                                             <button onClick={handleBackToSearch} className="mb-4 text-blue-600 hover:underline">← Back to search</button>

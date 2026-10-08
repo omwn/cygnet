@@ -104,6 +104,31 @@ class TestPageLoad:
         expect(page_ready.locator('button', has_text='Data')).to_have_count(0)
 
 
+class TestInvalidDeepLinks:
+    """Deep-linking to a nonexistent/invalid concept or sense ID must show a
+    clear not-found message, not an infinite 'Loading...' — loadConcept()/
+    loadSenseData() are synchronous once dbReady, so a falsy result is a
+    confirmed miss, never a pending load.
+    """
+
+    def test_nonexistent_concept_id_shows_not_found(self, page: Page, http_server):
+        page.goto(http_server + '#/search?concept=999999')
+        page.wait_for_selector('input[placeholder*="word"]', timeout=_DB_LOAD_TIMEOUT)
+        expect(page.locator('text=Concept not found')).to_be_visible(timeout=5_000)
+        expect(page.locator('text=Loading concept')).to_have_count(0)
+
+    def test_non_numeric_concept_id_shows_not_found(self, page: Page, http_server):
+        page.goto(http_server + '#/search?concept=not-a-number')
+        page.wait_for_selector('input[placeholder*="word"]', timeout=_DB_LOAD_TIMEOUT)
+        expect(page.locator('text=Concept not found')).to_be_visible(timeout=5_000)
+
+    def test_nonexistent_sense_id_shows_not_found(self, page: Page, http_server):
+        page.goto(http_server + '#/search?sense=999999')
+        page.wait_for_selector('input[placeholder*="word"]', timeout=_DB_LOAD_TIMEOUT)
+        expect(page.locator('text=Sense not found')).to_be_visible(timeout=5_000)
+        expect(page.locator('text=Loading sense')).to_have_count(0)
+
+
 class TestDatabaseErrorHandling:
     """A schema-mismatched or corrupt DB must surface as a visible error,
     not silently reach the ready state — cachedExec() catches every SQL
@@ -116,6 +141,20 @@ class TestDatabaseErrorHandling:
         page.goto(http_server_with_broken_db)
         expect(page.locator('text=no such table')).to_be_visible(timeout=_DB_LOAD_TIMEOUT)
         expect(page.locator('input[placeholder*="word"]')).to_have_count(0)
+
+    def test_missing_relations_json_falls_back_without_crashing(
+        self, page: Page, http_server_with_broken_relations_json
+    ):
+        """A 404 on relations.json must not block DB load or crash the
+        page — getRelLabel() falls back to the raw relation name.
+        """
+        errors = []
+        page.on('pageerror', lambda e: errors.append(str(e)))
+        page.goto(http_server_with_broken_relations_json)
+        page.wait_for_selector('input[placeholder*="word"]', timeout=_DB_LOAD_TIMEOUT)
+        label = page.evaluate("() => window._relTestHook.getLabel('hypernym')")
+        assert label == 'hypernym'
+        assert errors == []
 
 
 # ---------------------------------------------------------------------------

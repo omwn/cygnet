@@ -290,6 +290,21 @@ def http_server_with_broken_db(test_db_dir, tmp_path_factory):
 
 
 @pytest.fixture(scope='session')
+def http_server_with_broken_relations_json(test_db_dir, tmp_path_factory):
+    """HTTP server whose relations.json is a 404 — confirms the app falls
+    back to raw relation names instead of crashing or silently absorbing
+    an unexpected response shape.
+    """
+    broken_dir = tmp_path_factory.mktemp('serve_broken_relations')
+    for f in test_db_dir.iterdir():
+        if f.name != 'relations.json':
+            shutil.copy(f, broken_dir / f.name)
+    server, url = _start_server(str(broken_dir))
+    yield url
+    server.shutdown()
+
+
+@pytest.fixture(scope='session')
 def http_server_with_branding(test_db_dir, tmp_path_factory):
     """HTTP server serving a local.json with full header branding.
 
