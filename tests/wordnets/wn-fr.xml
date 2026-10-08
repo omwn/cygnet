@@ -4,7 +4,7 @@
   adds French senses pointing at the existing ILIs.  Processing both files
   through MergeBuilder tests that cross-wordnet ILI references are resolved.
 -->
-<CygnetResource id="wn-fr" label="Test French WordNet" language="fr" version="1.0">
+<CygnetResource id="wn-fr" label="Test French WordNet" language="fr" version="1.0" citation="&lt;script&gt;window.__citation_xss_fired=true;&lt;/script&gt;&lt;img src=x onerror=&quot;window.__citation_xss_fired=true;&quot;&gt;Legitimate text with *italic* and a `Link &lt;https://example.com&gt;`_.">
 
   <!-- French lexeme -->
   <Lexeme id="lex.fr.chien" language="fr" grammatical_category="NOUN">

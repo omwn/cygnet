@@ -76,6 +76,52 @@
 
         const remove_accents = (text) => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
+        // ========== HTML SAFETY ==========
+        // Shared helpers for anywhere untrusted or semi-trusted text becomes HTML.
+        const _HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+        const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => _HTML_ESCAPES[c]);
+
+        // Only allow a safe link scheme \u2014 blocks `javascript:`/`data:` href injection.
+        const safeHref = (url) => (/^(https?:)?\/\//i.test(url) || /^mailto:/i.test(url)) ? url : '#';
+
+        // Sanitize admin-authored HTML (local.json fields: header, about text,
+        // publications, footer) down to a small allow-list of tags/attributes.
+        // Deployment-time config is a trusted-ish source, but this is cheap
+        // defense-in-depth against a compromised or templated config file.
+        const _ALLOWED_TAGS = new Set(['A', 'EM', 'I', 'B', 'STRONG', 'BR', 'P', 'SPAN', 'UL', 'OL', 'LI', 'CODE', 'SUP', 'SUB']);
+        const _ALLOWED_ATTRS = { A: new Set(['href', 'target', 'rel']) };
+        const sanitizeHtml = (html) => {
+            const template = document.createElement('template');
+            template.innerHTML = String(html ?? '');
+            const walk = (node) => {
+                for (const child of Array.from(node.childNodes)) {
+                    if (child.nodeType === Node.ELEMENT_NODE) {
+                        if (!_ALLOWED_TAGS.has(child.tagName)) {
+                            // Unwrap: keep text content, drop the (disallowed) element itself.
+                            child.replaceWith(...Array.from(child.childNodes));
+                            continue;
+                        }
+                        const allowedAttrs = _ALLOWED_ATTRS[child.tagName] || new Set();
+                        for (const attr of Array.from(child.attributes)) {
+                            if (!allowedAttrs.has(attr.name)) {
+                                child.removeAttribute(attr.name);
+                            }
+                        }
+                        if (child.tagName === 'A') {
+                            child.setAttribute('href', safeHref(child.getAttribute('href') || ''));
+                            child.setAttribute('target', '_blank');
+                            child.setAttribute('rel', 'noopener noreferrer');
+                        }
+                        walk(child);
+                    } else if (child.nodeType !== Node.TEXT_NODE) {
+                        child.remove(); // comments, etc.
+                    }
+                }
+            };
+            walk(template.content);
+            return template.innerHTML;
+        };
+
         // ========== DATABASE URLs ==========
         // Databases are always served from the same directory as this HTML file.
         // Locally: web/ after running build.sh. In production: downloaded by the Pages workflow.
@@ -2215,7 +2261,7 @@
                     {siteConfig.header && (
                         <div className="w-full bg-blue-50 border-b border-blue-100">
                             <div className="max-w-4xl mx-auto px-4 py-3 text-sm text-gray-700"
-                                 dangerouslySetInnerHTML={{ __html: siteConfig.header }} />
+                                 dangerouslySetInnerHTML={{ __html: sanitizeHtml(siteConfig.header) }} />
                         </div>
                     )}
 
@@ -2946,7 +2992,7 @@
                                 <h2 className="text-xl font-bold mb-4">About</h2>
                                 {siteConfig.about?.intro &&
                                     <div className="text-gray-700 mb-4"
-                                         dangerouslySetInnerHTML={{ __html: siteConfig.about.intro }} />
+                                         dangerouslySetInnerHTML={{ __html: sanitizeHtml(siteConfig.about.intro) }} />
                                 }
                                 {dbStats && (
                                     <div className="border-t border-gray-200 pt-4 mb-4">
@@ -2971,7 +3017,7 @@
                                     <h3 className="font-medium text-sm text-gray-700 mb-2">Citation</h3>
                                     {siteConfig.about?.citation &&
                                         <div className="text-sm text-gray-600"
-                                             dangerouslySetInnerHTML={{ __html: siteConfig.about.citation }} />
+                                             dangerouslySetInnerHTML={{ __html: sanitizeHtml(siteConfig.about.citation) }} />
                                     }
                                 </div>
                                 <div className="border-t border-gray-200 pt-4 mb-4">
@@ -3010,7 +3056,7 @@
                                     <h3 className="font-medium text-sm text-gray-700 mb-2">Language Data</h3>
                                     {siteConfig.about?.languageData &&
                                         <div className="text-sm text-gray-600"
-                                             dangerouslySetInnerHTML={{ __html: siteConfig.about.languageData }} />
+                                             dangerouslySetInnerHTML={{ __html: sanitizeHtml(siteConfig.about.languageData) }} />
                                     }
                                 </div>
                                 <div className="border-t border-gray-200 pt-4 mb-4">
@@ -3041,19 +3087,26 @@
                             </div>
                         )}
                         {activeTab === 'publications' && (() => {
+                            // Citation text comes from third-party source wordnet XML, not
+                            // from trusted deployment config — escape every literal run and
+                            // validate link hrefs rather than injecting raw source text as HTML.
                             const rstToHtml = (text) => {
-                                // RST hyperlink: `Title <URL>`_
-                                let html = text.replace(/`([^`]+?)\s+<([^>]+)>`_+/g, (_, title, url) =>
-                                    `<a href="${url}" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline">${title}</a>`
-                                );
-                                // *italic*
-                                html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-                                // LaTeX-style braces {word} → word
-                                html = html.replace(/\{([^}]+)\}/g, '$1');
-                                // Paragraph breaks
-                                html = html.replace(/\n\n+/g, '<br><br>');
-                                // Remaining single newlines → space
-                                html = html.replace(/\n/g, ' ');
+                                const linkRe = /`([^`]+?)\s+<([^>]+)>`_+/g;
+                                const renderText = (t) => escapeHtml(t)
+                                    .replace(/\*([^*]+)\*/g, '<em>$1</em>')       // *italic*
+                                    .replace(/\{([^}]+)\}/g, '$1')                // {word} -> word
+                                    .replace(/\n\n+/g, '<br><br>')                // paragraph breaks
+                                    .replace(/\n/g, ' ');                         // remaining newlines
+                                let html = '';
+                                let lastIndex = 0;
+                                let m;
+                                while ((m = linkRe.exec(text)) !== null) {
+                                    html += renderText(text.slice(lastIndex, m.index));
+                                    const [, title, url] = m;
+                                    html += `<a href="${escapeHtml(safeHref(url.trim()))}" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline">${escapeHtml(title)}</a>`;
+                                    lastIndex = m.index + m[0].length;
+                                }
+                                html += renderText(text.slice(lastIndex));
                                 return html;
                             };
                             const wnsWithCitation = allResources.filter(r => r.citation);
@@ -3063,7 +3116,7 @@
                                 <ul className="space-y-4 mb-8">
                                     {(siteConfig.publications || []).map((pub, i) => (
                                         <li key={`cfg-pub-${i}`} className="text-sm text-gray-800"
-                                            dangerouslySetInnerHTML={{ __html: pub }} />
+                                            dangerouslySetInnerHTML={{ __html: sanitizeHtml(pub) }} />
                                     ))}
                                 </ul>
                                 <h2 className="text-xl font-bold mb-2">Wordnet Citations</h2>
@@ -3354,7 +3407,7 @@
                     <footer className="mt-auto py-4">
                         <div className="max-w-4xl mx-auto px-4 border-t border-gray-200 pt-4 text-center text-sm text-gray-600">
                             {typeof siteConfig.footer === 'string'
-                                ? <div dangerouslySetInnerHTML={{ __html: siteConfig.footer }} />
+                                ? <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(siteConfig.footer) }} />
                                 : <>
                                     {siteConfig.footer.text && <div className="mb-2">{siteConfig.footer.text}</div>}
                                     {siteConfig.footer.logos?.length > 0 && (

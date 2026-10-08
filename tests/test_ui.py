@@ -454,6 +454,61 @@ class TestSecurity:
             page_ready.locator('text=No results found')
         ).to_be_visible(timeout=_SEARCH_TIMEOUT)
 
+    def test_wordnet_citation_script_tag_not_executed(self, page_ready: Page):
+        """A <script> tag in a source wordnet's citation (wn-fr.xml fixture)
+        must not execute — citation text comes from third-party data, not
+        trusted deployment config, and rstToHtml() must escape it.
+        """
+        page_ready.evaluate("window.__citation_xss_fired = false;")
+        page_ready.locator('button', has_text='Publications').click()
+        page_ready.wait_for_selector('text=Wordnet Citations', timeout=5_000)
+        fired = page_ready.evaluate("window.__citation_xss_fired")
+        assert not fired, "XSS payload in wordnet citation was executed"
+
+    def test_wordnet_citation_still_renders_legitimate_markup(self, page_ready: Page):
+        """Despite escaping the XSS payload, the citation's legitimate *italic*
+        text and RST link must still render for the French test wordnet.
+        """
+        page_ready.locator('button', has_text='Publications').click()
+        page_ready.wait_for_selector('text=Wordnet Citations', timeout=5_000)
+        expect(page_ready.locator('em', has_text='italic')).to_be_visible()
+        expect(
+            page_ready.locator('a[href="https://example.com"]', has_text='Link')
+        ).to_be_visible()
+
+
+class TestConfigSanitization:
+    """local.json's HTML-valued fields (header, about, publications, footer)
+    are deployment config, but still run through sanitizeHtml() as
+    defense-in-depth — a compromised or templated config file should not be
+    able to run script. See web/index.html's sanitizeHtml()/safeHref().
+    """
+
+    @pytest.fixture()
+    def page_malicious_config(self, page: Page, http_server_with_malicious_config):
+        page.goto(http_server_with_malicious_config)
+        page.wait_for_selector('input[placeholder*="word"]', timeout=_DB_LOAD_TIMEOUT)
+        return page
+
+    def test_malicious_header_script_not_executed(self, page_malicious_config: Page):
+        fired = page_malicious_config.evaluate("window.__config_xss_fired")
+        assert not fired, "XSS payload in local.json header was executed"
+
+    def test_malicious_header_keeps_legitimate_markup(self, page_malicious_config: Page):
+        expect(page_malicious_config.locator('em', has_text='legit').first).to_be_visible()
+
+    def test_malicious_about_intro_not_executed(self, page_malicious_config: Page):
+        page_malicious_config.locator('button', has_text='About').click()
+        page_malicious_config.wait_for_selector('text=About', timeout=5_000)
+        fired = page_malicious_config.evaluate("window.__config_xss_fired")
+        assert not fired, "XSS payload in local.json about.intro was executed"
+
+    def test_malicious_publications_not_executed(self, page_malicious_config: Page):
+        page_malicious_config.locator('button', has_text='Publications').click()
+        page_malicious_config.wait_for_selector('text=Publications', timeout=5_000)
+        fired = page_malicious_config.evaluate("window.__config_xss_fired")
+        assert not fired, "XSS payload in local.json publications was executed"
+
 
 _CONCEPT_LOADED = 'text=All forms expressing this concept'
 

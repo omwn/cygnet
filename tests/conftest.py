@@ -291,3 +291,26 @@ def http_server_with_branding(test_db_dir, tmp_path_factory):
     server, url = _start_server(str(branding_dir))
     yield url
     server.shutdown()
+
+
+@pytest.fixture(scope='session')
+def http_server_with_malicious_config(test_db_dir, tmp_path_factory):
+    """HTTP server with a local.json whose HTML-valued fields mix a legitimate
+    tag with an XSS payload, so tests can confirm sanitizeHtml() strips the
+    payload but keeps rendering the legitimate markup.
+    """
+    payload = '<script>window.__config_xss_fired=true;</script><img src=x onerror="window.__config_xss_fired=true;"><em>legit</em>'
+    config_dir = tmp_path_factory.mktemp('serve_malicious_config')
+    for f in test_db_dir.iterdir():
+        if f.name != 'local.json':
+            shutil.copy(f, config_dir / f.name)
+    (config_dir / 'local.json').write_text(json.dumps({
+        'header': payload,
+        'footer': payload,
+        'about': {'intro': payload, 'languageData': payload},
+        'publications': [payload],
+        'databases': _DEFAULT_DATABASES,
+    }))
+    server, url = _start_server(str(config_dir))
+    yield url
+    server.shutdown()
