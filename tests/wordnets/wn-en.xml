@@ -164,6 +164,21 @@
     <Provenance resource="wn-en" version="1.0"/>
   </Sense>
 
+  <!-- Example sentences for sense.dog: one plain (tests bold rendering of
+       the matched token), one with literal "<script>"/"<img onerror>" text
+       outside the annotated token (tests that example text — third-party
+       source data — is never parsed as HTML; see renderExample() in
+       web/index.html, which builds React elements from structured
+       {text, bold} segments rather than an HTML string). -->
+  <Example>
+    <AnnotatedSentence>The <AnnotatedToken sense="sense.dog">dog</AnnotatedToken> barked loudly.</AnnotatedSentence>
+    <Provenance resource="wn-en" version="1.0"/>
+  </Example>
+  <Example>
+    <AnnotatedSentence>&lt;script&gt;window.__example_xss_fired=true;&lt;/script&gt;&lt;img src=x onerror="window.__example_xss_fired=true;"&gt;A <AnnotatedToken sense="sense.dog">dog</AnnotatedToken> is dangerous.</AnnotatedSentence>
+    <Provenance resource="wn-en" version="1.0"/>
+  </Example>
+
   <!-- Hypernym chain: dog → animal → entity -->
   <ConceptRelation relation_type="hypernym" source="cili.i3" target="cili.i2">
     <Provenance resource="wn-en" version="1.0"/>

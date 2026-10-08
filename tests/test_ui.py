@@ -11,6 +11,9 @@ Test DB contents (see conftest._UI_TEST_WORDNET):
   Variants: en:dog has variant form "doggo"
   Relations: dog→animal (hypernym), animal→entity (hypernym)
   Translation: en:mouse's gloss is tagged translated_from="fr"
+  Examples: en:dog has 2 examples — one plain, one with a literal
+            "<script>"/"<img onerror>" payload outside the annotated token
+            (XSS-safety regression test for renderExample())
 
 Expected search results (exact/glob match on normalized_form):
   "dog"        exact  → 1  (en:dog)                       across 1 language
@@ -475,6 +478,25 @@ class TestSecurity:
         expect(
             page_ready.locator('a[href="https://example.com"]', has_text='Link')
         ).to_be_visible()
+
+    def test_example_sentence_bolds_matched_sense(self, page_ready: Page):
+        """The dog sense's example sentence bolds "dog" via a real <strong>
+        element — querySense()/renderExample() build React elements from
+        structured segments, not an HTML string.
+        """
+        _open_concept_text_view(page_ready, 'dog')
+        expect(page_ready.locator('strong', has_text='dog').first).to_be_visible()
+
+    def test_example_sentence_script_tag_not_executed(self, page_ready: Page):
+        """Literal "<script>"/"<img onerror>" text in an example sentence
+        (third-party source data, wn-en.xml fixture) must render as visible
+        text, not execute — see renderExample() in web/index.html.
+        """
+        page_ready.evaluate("window.__example_xss_fired = false;")
+        _open_concept_text_view(page_ready, 'dog')
+        fired = page_ready.evaluate("window.__example_xss_fired")
+        assert not fired, "XSS payload in example sentence was executed"
+        expect(page_ready.locator('text=is dangerous')).to_be_visible()
 
 
 class TestConfigSanitization:

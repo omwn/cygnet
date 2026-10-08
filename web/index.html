@@ -269,30 +269,31 @@
                 WHERE se.sense_rowid = ?
             `, [senseRowid]);
 
+            // Structured {text, bold} segments, never an HTML string — example
+            // text is third-party source data and must never be parsed as HTML
+            // (even via a detached element: onerror/onload on an <img>/<svg>
+            // can still fire during innerHTML parsing without DOM attachment).
             const ex = examples.map(ex => {
                 const anns = cachedExec(`
                     SELECT start_offset, end_offset, sense_rowid
                     FROM example_annotations WHERE example_rowid = ?
                 `, [ex.example_rowid]);
-                // Build HTML with bolding for the current sense
-                let text = ex.example;
-                let parts = [];
+                const text = ex.example;
+                const segments = [];
                 let lastIdx = 0;
                 const sorted = anns.sort((a, b) => a.start_offset - b.start_offset);
                 for (const ann of sorted) {
                     if (ann.start_offset > lastIdx) {
-                        parts.push(text.substring(lastIdx, ann.start_offset));
+                        segments.push({ text: text.substring(lastIdx, ann.start_offset), bold: false });
                     }
-                    const tokenText = text.substring(ann.start_offset, ann.end_offset);
-                    if (ann.sense_rowid === senseRowid) {
-                        parts.push(`<b>${tokenText}</b>`);
-                    } else {
-                        parts.push(tokenText);
-                    }
+                    segments.push({
+                        text: text.substring(ann.start_offset, ann.end_offset),
+                        bold: ann.sense_rowid === senseRowid,
+                    });
                     lastIdx = ann.end_offset;
                 }
-                if (lastIdx < text.length) parts.push(text.substring(lastIdx));
-                return parts.join('');
+                if (lastIdx < text.length) segments.push({ text: text.substring(lastIdx), bold: false });
+                return segments;
             });
 
             // Get sense relations
@@ -1576,16 +1577,13 @@
                 setSynonymsCollapsed({}); setActiveTab('browser');
             };
 
-            const renderExample = (exampleHtml) => {
-                const div = document.createElement('div');
-                div.innerHTML = exampleHtml;
+            const renderExample = (segments) => {
                 const parts = [];
-                div.childNodes.forEach((node, idx) => {
-                    if (node.nodeType === Node.TEXT_NODE) {
-                        if (node.textContent) parts.push(<span key={idx}>{node.textContent}</span>);
-                    } else if (node.nodeName === 'B') {
-                        parts.push(<strong key={idx}>{node.textContent}</strong>);
-                    }
+                segments.forEach((seg, idx) => {
+                    if (!seg.text) return;
+                    parts.push(seg.bold
+                        ? <strong key={idx}>{seg.text}</strong>
+                        : <span key={idx}>{seg.text}</span>);
                 });
                 return parts;
             };
@@ -3443,7 +3441,7 @@
                             {li && <div className="font-semibold text-gray-800">{li.form}</div>}
                             <div className="text-gray-500 italic text-xs">{getPosName(concept.oc)}</div>
                             {def && <div className="text-gray-700 mt-1">{def.length > 160 ? def.slice(0, 160) + '…' : def}</div>}
-                            {firstEx && <div className="text-gray-500 italic mt-0.5 text-xs">"{firstEx}"</div>}
+                            {firstEx && <div className="text-gray-500 italic mt-0.5 text-xs">"{renderExample(firstEx)}"</div>}
                         </div>
                     );
                 })()}
