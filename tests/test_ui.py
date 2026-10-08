@@ -104,6 +104,45 @@ class TestPageLoad:
         expect(page_ready.locator('button', has_text='Data')).to_have_count(0)
 
 
+class TestSearchRaceCondition:
+    """An older, slower search's deferred callbacks must never overwrite a
+    newer search's results — see the searchRequestIdRef guard in
+    performSearch() (web/index.html).
+    """
+
+    def test_rapid_successive_searches_show_latest_only(self, page_ready: Page):
+        """Basic correctness check: after two rapid-fire searches, only the
+        second's results remain. This alone can't force the actual async
+        interleaving the guard protects against (same-tick setTimeout(0)
+        callbacks run in FIFO order in a single-threaded event loop, so a
+        trivial double Enter-press doesn't reproduce the race) — see
+        test_request_id_increments_per_search for a direct check of the
+        guard mechanism itself.
+        """
+        box = page_ready.locator('input[placeholder*="word"]')
+        box.fill('dog')
+        box.press('Enter')
+        box.fill('brightness')
+        box.press('Enter')
+        _wait_for_results(page_ready)
+        assert _result_count(page_ready) == 1
+        expect(page_ready.locator('.concept-inner', has_text='brightness')).to_be_visible()
+        expect(page_ready.locator('.concept-inner', has_text='dog')).to_have_count(0)
+
+    def test_request_id_increments_per_search(self, page_ready: Page):
+        """Each performSearch() call must get a distinct, increasing id —
+        the mechanism searchRequestIdRef-guarded deferred callbacks rely on
+        to detect being superseded by a newer search.
+        """
+        before = page_ready.evaluate("() => window._searchTestHook.requestId()")
+        _search(page_ready, 'dog')
+        after_first = page_ready.evaluate("() => window._searchTestHook.requestId()")
+        _search(page_ready, 'brightness')
+        after_second = page_ready.evaluate("() => window._searchTestHook.requestId()")
+        assert after_first > before
+        assert after_second > after_first
+
+
 class TestInvalidDeepLinks:
     """Deep-linking to a nonexistent/invalid concept or sense ID must show a
     clear not-found message, not an infinite 'Loading...' — loadConcept()/

@@ -1413,12 +1413,23 @@
             }, [dbReady, loadConceptWithRelations, loadSenseData]);
 
             // Search
+            // Guards against an older, slower search's deferred callbacks
+            // overwriting a newer search's results — each performSearch()
+            // call gets a request id, and every deferred callback bails out
+            // as soon as a newer call has superseded it.
+            const searchRequestIdRef = useRef(0);
+            useEffect(() => {
+                window._searchTestHook = { requestId: () => searchRequestIdRef.current };
+            }, []);
+
             const performSearch = useCallback((term, lang, pos, sense) => {
                 if (!term?.trim() || !dbReady) return;
+                const requestId = ++searchRequestIdRef.current;
                 setLoadingResults(true);
 
                 // Defer query so the spinner renders before the (potentially slow) SQL runs
                 setTimeout(() => {
+                if (searchRequestIdRef.current !== requestId) return; // superseded by a newer search
                 const t = term.trim();
                 const mode = detectSearchMode(t);
                 const results = mode === 'ili'        ? searchByIli(t)
@@ -1459,6 +1470,7 @@
                 const BATCH_SIZE = 50;
                 let i = 0;
                 const loadBatch = () => {
+                    if (searchRequestIdRef.current !== requestId) return; // superseded by a newer search
                     if (i >= senseIds.length) return;
                     const batch = senseIds.slice(i, i + BATCH_SIZE);
                     setLoadedSenses(prev => {
