@@ -1029,6 +1029,12 @@
                         setDbProgress('Opening database...');
                         _SQL = SQL;
                         _db = new SQL.Database(buf);
+                        // Fail loudly on a schema mismatch/corrupt DB rather than letting
+                        // every cachedExec() call below catch it internally, return [],
+                        // and silently reach setDbReady(true) with a broken database.
+                        for (const table of ['synsets', 'senses', 'entries', 'languages', 'resources']) {
+                            _db.exec(`SELECT 1 FROM ${table} LIMIT 1`);
+                        }
                         _hasCoreTable = cachedExec(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='core_synsets'`).length > 0;
                         _hasTranslatedFrom = cachedExec(`PRAGMA table_info(definitions)`).some(c => c.name === 'translated_from_rowid');
                         buildLangNames();
@@ -2264,19 +2270,23 @@
                     )}
 
                     <main className="w-full max-w-4xl mx-auto px-4 pt-6 pb-4 flex-grow">
+                        {dbError && (
+                            // Rendered unconditionally (not nested under any
+                            // activeTab block) — the useEffect above switches
+                            // activeTab to 'about' as soon as dbError is set,
+                            // which would otherwise make this unreachable.
+                            <div className="max-w-md mx-auto mt-16 text-center">
+                                <h2 className="font-bold text-xl mb-2">Error Loading Database</h2>
+                                <p className="mb-4 text-gray-700">{dbError}</p>
+                                <p className="text-sm text-gray-500">
+                                    {siteConfig.databases?.main?.filename && <>On localhost, make sure <code>{siteConfig.databases.main.filename}</code> is in the same directory as this HTML file.<br/></>}
+                                    In production, the database is fetched from the release URL configured in <code>local.json</code>.
+                                    The release may still be building.
+                                </p>
+                            </div>
+                        )}
                         {activeTab === 'browser' && (
                             <div>
-                                {dbError && (
-                                    <div className="max-w-md mx-auto mt-16 text-center">
-                                        <h2 className="font-bold text-xl mb-2">Error Loading Database</h2>
-                                        <p className="mb-4 text-gray-700">{dbError}</p>
-                                        <p className="text-sm text-gray-500">
-                                            {siteConfig.databases?.main?.filename && <>On localhost, make sure <code>{siteConfig.databases.main.filename}</code> is in the same directory as this HTML file.<br/></>}
-                                            In production, the database is fetched from the release URL configured in <code>local.json</code>.
-                                            The release may still be building.
-                                        </p>
-                                    </div>
-                                )}
                                 {!dbReady && !dbError && (
                                     <div className="flex justify-center mt-16">
                                         <div className="text-center w-72">

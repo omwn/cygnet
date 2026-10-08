@@ -1,7 +1,9 @@
 """Shared pytest fixtures and test-data helpers for the Cygnet test suite."""
 
+import gzip
 import json
 import shutil
+import sqlite3
 import subprocess
 import textwrap
 import threading
@@ -260,6 +262,29 @@ def http_server_with_config(test_db_dir, tmp_path_factory):
         'databases': _DEFAULT_DATABASES,
     }))
     server, url = _start_server(str(config_dir))
+    yield url
+    server.shutdown()
+
+
+@pytest.fixture(scope='session')
+def http_server_with_broken_db(test_db_dir, tmp_path_factory):
+    """HTTP server whose cygnet.db.gz is a valid SQLite file missing the
+    core tables (synsets, senses, etc.) — simulates a schema mismatch, so
+    tests can confirm the UI surfaces an error rather than silently
+    reaching the ready state (cachedExec() swallows query errors).
+    """
+    broken_dir = tmp_path_factory.mktemp('serve_broken_db')
+    for f in test_db_dir.iterdir():
+        shutil.copy(f, broken_dir / f.name)
+    raw_path = broken_dir / 'cygnet_broken.db'
+    conn = sqlite3.connect(raw_path)
+    conn.execute('CREATE TABLE unrelated_table (x INTEGER)')
+    conn.commit()
+    conn.close()
+    with open(raw_path, 'rb') as fh, gzip.open(broken_dir / 'cygnet.db.gz', 'wb') as gz:
+        gz.write(fh.read())
+    raw_path.unlink()
+    server, url = _start_server(str(broken_dir))
     yield url
     server.shutdown()
 

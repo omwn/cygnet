@@ -104,6 +104,20 @@ class TestPageLoad:
         expect(page_ready.locator('button', has_text='Data')).to_have_count(0)
 
 
+class TestDatabaseErrorHandling:
+    """A schema-mismatched or corrupt DB must surface as a visible error,
+    not silently reach the ready state — cachedExec() catches every SQL
+    exception and returns [], so without an explicit startup sanity check
+    a missing core table looks identical to "no rows". See the startup
+    table check in web/index.html, right after `new SQL.Database(buf)`.
+    """
+
+    def test_broken_db_shows_error_not_ready(self, page: Page, http_server_with_broken_db):
+        page.goto(http_server_with_broken_db)
+        expect(page.locator('text=no such table')).to_be_visible(timeout=_DB_LOAD_TIMEOUT)
+        expect(page.locator('input[placeholder*="word"]')).to_have_count(0)
+
+
 # ---------------------------------------------------------------------------
 # Search help button (ⓘ)
 # ---------------------------------------------------------------------------
