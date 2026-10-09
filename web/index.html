@@ -2455,7 +2455,7 @@
                                                                                                         className={`bg-gray-50 p-3 rounded border border-gray-200 sense-box ${hasExtra ? 'hover:border-blue-400 cursor-pointer' : ''}`}
                                                                                                         onClick={hasExtra ? () => toggleSynonyms(sense.id) : undefined}>
                                                                                                         <div className="flex items-start justify-between gap-2">
-                                                                                                            <div className="flex-grow flex items-start gap-2">
+                                                                                                            <div className="flex-grow flex flex-col sm:flex-row sm:items-start gap-1.5 sm:gap-2 min-w-0">
                                                                                                                 <div className="flex-shrink-0 py-1">
                                                                                                                     <strong className="text-base">{sense.l}<sub>{sense.ind}</sub></strong>
                                                                                                                     {renderPronunciations(sense.p)}
@@ -2465,8 +2465,8 @@
                                                                                                                     onMouseEnter={e => showTooltip(group.conceptId, e)}
                                                                                                                     onMouseLeave={hideTooltip}
                                                                                                                     style={{textDecoration:'none',color:'inherit'}}
-                                                                                                                    className="bg-white px-2 py-1 rounded border border-gray-300 hover:border-blue-400 hover:shadow-sm transition-all text-left cursor-pointer flex-shrink concept-inner flex items-start gap-2">
-                                                                                                                    <span className="text-base flex-1">
+                                                                                                                    className="bg-white px-2 py-1 rounded border border-gray-300 hover:border-blue-400 hover:shadow-sm transition-all text-left cursor-pointer w-full min-w-0 sm:flex-1 concept-inner flex items-start gap-2">
+                                                                                                                    <span className="text-base flex-1 break-words">
                                                                                                                         {(() => { const li = getConceptLabel(parseInt(group.conceptId), definitionLanguage); return li ? <><span className="font-semibold text-gray-800">{li.form}</span>{<LangBadge lang={li.lang} currentLang={definitionLanguage} ml="ml-0.5" />}{' · '}</> : null; })()}
                                                                                                                         <span className="text-gray-600 italic">{getPosName(pos)}</span>
                                                                                                                         {' · '}<span className="text-gray-700">{definition}</span>{<LangBadge lang={defLang} currentLang={definitionLanguage} />}
@@ -3280,6 +3280,7 @@
                                             ))}
                                         </div>
                                         {summary?.posStats && (
+                                            <div className="overflow-x-auto">
                                             <table className="w-full text-sm border-collapse">
                                                 <thead>
                                                     <tr className="bg-gray-100 text-left">
@@ -3313,6 +3314,7 @@
                                                     ))}
                                                 </tbody>
                                             </table>
+                                            </div>
                                         )}
                                         {!provenanceReady && <p className="text-xs text-gray-500 mt-2">Load the provenance database for detailed statistics.</p>}
                                     </div>
@@ -3320,6 +3322,7 @@
                                     {summary && summary.relDist.length > 0 && (
                                         <div className="border-t border-gray-200 pt-4 mb-4">
                                             <h3 className="font-medium text-sm text-gray-700 mb-3">Semantic relations</h3>
+                                            <div className="overflow-x-auto">
                                             <table className="w-full text-sm border-collapse">
                                                 <thead>
                                                     <tr className="bg-gray-100 text-left">
@@ -3350,12 +3353,14 @@
                                                     })}
                                                 </tbody>
                                             </table>
+                                            </div>
                                         </div>
                                     )}
 
                                     {summary && summary.senseRelDist.length > 0 && (
                                         <div className="border-t border-gray-200 pt-4 mb-4">
                                             <h3 className="font-medium text-sm text-gray-700 mb-3">Sense relations</h3>
+                                            <div className="overflow-x-auto">
                                             <table className="w-full text-sm border-collapse">
                                                 <thead>
                                                     <tr className="bg-gray-100 text-left">
@@ -3382,6 +3387,7 @@
                                                     ))}
                                                 </tbody>
                                             </table>
+                                            </div>
                                         </div>
                                     )}
                                 </div>
@@ -3408,6 +3414,7 @@
                                 {allResources.length === 0 ? (
                                     <p className="text-gray-600">No resource metadata available.</p>
                                 ) : (
+                                    <div className="overflow-x-auto">
                                     <table className="w-full text-sm border-collapse">
                                         <thead>
                                             <tr className="bg-gray-100 text-left">
@@ -3464,6 +3471,7 @@
                                             ))}
                                         </tbody>
                                     </table>
+                                    </div>
                                 )}
                             </div>
                             );
