@@ -1143,6 +1143,24 @@
                 </svg>
             );
 
+            // Expand/collapse indicator -- a single chevron-right that rotates
+            // 90deg when expanded, rather than swapping between ▶/▼ glyphs.
+            const ChevronIcon = ({ expanded, className = 'w-4 h-4' }) => (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                    className={`inline-block shrink-0 transition-transform duration-150 ${expanded ? 'rotate-90' : ''} ${className}`}>
+                    <polyline points="9 6 15 12 9 18" />
+                </svg>
+            );
+
+            const SpeakerIcon = ({ className = 'w-4 h-4' }) => (
+                <svg viewBox="0 0 24 24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
+                    className={`inline-block ${className}`}>
+                    <polygon points="3 9 7 9 11 5 11 19 7 15 3 15" fill="currentColor" stroke="none" />
+                    <path d="M15.5 8.5a5 5 0 0 1 0 7" fill="none" stroke="currentColor" />
+                    <path d="M18.5 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" />
+                </svg>
+            );
+
             // Renders a comma-separated list of clickable wordforms.
             const renderWordformList = (items, onClick) => items.map((item, i) => (
                 <span key={i}>{i > 0 && ', '}
@@ -1719,7 +1737,7 @@
                         {prons.map((p, i) => (
                             <span key={i} className="mr-3">
                                 {p.pronunciation && <span title={p.variety || undefined}>/{p.pronunciation}/</span>}
-                                {p.audio && <button onClick={() => new Audio(p.audio).play()} title={p.variety || 'Play audio'} className="ml-1 hover:text-indigo-500">🔊</button>}
+                                {p.audio && <button onClick={() => new Audio(p.audio).play()} title={p.variety || 'Play audio'} className="ml-1 align-middle hover:text-indigo-500"><SpeakerIcon className="w-4 h-4" /></button>}
                             </span>
                         ))}
                     </div>
@@ -2411,7 +2429,7 @@
                                                         <button onClick={() => toggleSection(`lang-${lang}`)}
                                                             className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 rounded-t-2xl">
                                                             <h3 className="text-lg font-semibold text-slate-800" title={getLangFullName(lang)}>{getLangName(lang)}</h3>
-                                                            <span className="text-slate-500">{collapsedSections[`lang-${lang}`] ? '▶' : '▼'}</span>
+                                                            <span className="text-slate-500"><ChevronIcon expanded={!collapsedSections[`lang-${lang}`]} className="w-4 h-4" /></span>
                                                         </button>
                                                         {!collapsedSections[`lang-${lang}`] && (
                                                             <div className="px-4 pb-4 space-y-4">
@@ -2426,7 +2444,7 @@
                                                                             <button onClick={() => toggleSection(`pos-${lang}-${pos}`)}
                                                                                 className="w-full flex items-center justify-between py-2 hover:bg-slate-50">
                                                                                 <h4 className="font-semibold text-slate-700">{getPosName(pos, true)}</h4>
-                                                                                <span className="text-slate-500 text-sm">{collapsedSections[`pos-${lang}-${pos}`] ? '▶' : '▼'}</span>
+                                                                                <span className="text-slate-500"><ChevronIcon expanded={!collapsedSections[`pos-${lang}-${pos}`]} className="w-3.5 h-3.5" /></span>
                                                                             </button>
                                                                         )}
                                                                         {(!collapsedSections[`pos-${lang}-${pos}`] || senseFilter) && (
@@ -2493,7 +2511,7 @@
                                                                                                             </div>
                                                                                                             {hasExtra && (
                                                                                                                 <div className="text-slate-500 text-sm pt-1 flex-shrink-0">
-                                                                                                                    {isExpanded ? '▼' : '▶'}
+                                                                                                                    <ChevronIcon expanded={isExpanded} className="w-4 h-4" />
                                                                                                                 </div>
                                                                                                             )}
                                                                                                         </div>
@@ -2984,7 +3002,7 @@
                                                         {sense.p.map((p, i) => (
                                                             <span key={i} className="mr-3">
                                                                 {p.pronunciation && <span title={p.variety || undefined}>/{p.pronunciation}/</span>}
-                                                                {p.audio && <button onClick={() => new Audio(p.audio).play()} title={p.variety || 'Play audio'} className="ml-1 hover:text-indigo-500">🔊</button>}
+                                                                {p.audio && <button onClick={() => new Audio(p.audio).play()} title={p.variety || 'Play audio'} className="ml-1 align-middle hover:text-indigo-500"><SpeakerIcon className="w-4 h-4" /></button>}
                                                             </span>
                                                         ))}
                                                     </div>
