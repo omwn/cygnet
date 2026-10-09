@@ -51,7 +51,7 @@ def page_ready(page: Page, http_server):
 
 def _wait_for_results(page: Page) -> None:
     """Wait until the results summary or 'No results found' banner appears."""
-    page.locator('span.text-sm.text-gray-500').filter(has_text='across').or_(
+    page.locator('span.text-sm.text-slate-500').filter(has_text='across').or_(
         page.locator('text=No results found')
     ).wait_for(timeout=_SEARCH_TIMEOUT)
 
@@ -66,7 +66,7 @@ def _search(page: Page, term: str) -> None:
 
 def _result_count(page: Page) -> int:
     text = (
-        page.locator('span.text-sm.text-gray-500')
+        page.locator('span.text-sm.text-slate-500')
         .filter(has_text='across')
         .text_content()
     )
@@ -75,7 +75,7 @@ def _result_count(page: Page) -> int:
 
 def _language_count(page: Page) -> int:
     text = (
-        page.locator('span.text-sm.text-gray-500')
+        page.locator('span.text-sm.text-slate-500')
         .filter(has_text='across')
         .text_content()
     )
@@ -246,7 +246,7 @@ class TestExactSearch:
         """Summary line should contain 'across' and 'language'."""
         _search(page_ready, 'dog')
         summary = (
-            page_ready.locator('span.text-sm.text-gray-500')
+            page_ready.locator('span.text-sm.text-slate-500')
             .filter(has_text='across')
             .text_content()
         )
@@ -1025,9 +1025,9 @@ class TestSenseRelations:
         (avoiding the concept-inner which would navigate instead of expanding)."""
         _search(page, 'gleaming')
         # Sense data loads asynchronously — wait for the expand arrow
-        page.wait_for_selector('.sense-box .text-gray-500.text-sm.pt-1', timeout=_TEXT_VIEW_TIMEOUT)
+        page.wait_for_selector('.sense-box .text-slate-500.text-sm.pt-1', timeout=_TEXT_VIEW_TIMEOUT)
         # Click the expand arrow (not concept-inner, which has stopPropagation)
-        page.locator('.sense-box .text-gray-500.text-sm.pt-1').first.click()
+        page.locator('.sense-box .text-slate-500.text-sm.pt-1').first.click()
 
     def test_search_sense_card_shows_sense_relation(self, page_ready: Page):
         """Expanded gleaming sense card shows the antonym relation to glowing."""

@@ -1120,13 +1120,13 @@
             // from the preferred one, e.g. [fr].  Pass ml='ml-1' or 'ml-0.5'.
             const LangBadge = ({ lang, currentLang, ml = 'ml-1' }) =>
                 lang && lang !== currentLang
-                    ? <span className={`text-xs text-gray-500 ${ml}`}>[{lang}]</span>
+                    ? <span className={`text-xs text-slate-500 ${ml}`}>[{lang}]</span>
                     : null;
 
             // Unobtrusive note on a machine-translated definition, e.g. "(from Hungarian)".
             const TranslatedBadge = ({ fromLang, ml = 'ml-1' }) =>
                 fromLang
-                    ? <span className={`text-xs text-gray-500 ${ml}`} title="Machine-translated definition">(from {getLangName(fromLang)})</span>
+                    ? <span className={`text-xs text-slate-500 ${ml}`} title="Machine-translated definition">(from {getLangName(fromLang)})</span>
                     : null;
 
             // The help/ⓘ button's icon — shared so inline prose mentioning
@@ -1144,7 +1144,7 @@
             const renderWordformList = (items, onClick) => items.map((item, i) => (
                 <span key={i}>{i > 0 && ', '}
                     <span onClick={(e) => { e.stopPropagation(); onClick(item); }}
-                        className="text-blue-600 hover:underline cursor-pointer">{item}</span>
+                        className="text-indigo-600 hover:underline cursor-pointer">{item}</span>
                 </span>
             ));
 
@@ -1650,11 +1650,11 @@
                         parts.push(
                             <button key={`link-${idx}`}
                                 onClick={(e) => { e.stopPropagation(); handleWordformClickWithSense(linkedSense.l, ann.s.toString()); }}
-                                className="text-blue-600 hover:underline cursor-pointer"
+                                className="text-indigo-600 hover:underline cursor-pointer"
                             >{text}</button>
                         );
                     } else {
-                        parts.push(<span key={`link-${idx}`} className="text-blue-600">{text}</span>);
+                        parts.push(<span key={`link-${idx}`} className="text-indigo-600">{text}</span>);
                     }
                     lastIndex = ann.eo;
                 });
@@ -1669,13 +1669,13 @@
                 const rows = queryProvenance(tableName, itemRowid);
                 if (rows.length === 0) return null;
                 return (
-                    <span className="text-xs text-gray-500 ml-1">
+                    <span className="text-xs text-slate-500 ml-1">
                         ({rows.map((s, i) => (
                             <span key={s.code + (s.version || '')}>
                                 {i > 0 && ', '}
                                 <button
                                     onClick={() => { setSelectedWordnet(s.code); setActiveTab('wordnets'); }}
-                                    className="hover:text-blue-500 hover:underline"
+                                    className="hover:text-indigo-500 hover:underline"
                                 >{s.code}{s.version ? `:${s.version}` : ''}</button>
                             </span>
                         ))})
@@ -1690,16 +1690,16 @@
                 const first = rows[0];
                 const rest = rows.slice(1);
                 return (
-                    <span className="relative inline-block group text-xs text-gray-500 ml-1 cursor-default">
+                    <span className="relative inline-block group text-xs text-slate-500 ml-1 cursor-default">
                         (<button onClick={() => { setSelectedWordnet(first.code); setActiveTab('wordnets'); }}
-                            className="hover:text-blue-500 hover:underline">
+                            className="hover:text-indigo-500 hover:underline">
                             {first.code}{first.version ? `:${first.version}` : ''}
                         </button>{rest.length > 0 && <span> +{rest.length}</span>})
                         {rest.length > 0 && (
-                            <span className="absolute bottom-full left-0 hidden group-hover:flex flex-col bg-white border border-gray-200 rounded shadow-lg text-xs p-1.5 z-10 whitespace-nowrap gap-0.5">
+                            <span className="absolute bottom-full left-0 hidden group-hover:flex flex-col bg-white border border-slate-200 rounded shadow-lg text-xs p-1.5 z-10 whitespace-nowrap gap-0.5">
                                 {rows.map((s, i) => (
                                     <button key={i} onClick={() => { setSelectedWordnet(s.code); setActiveTab('wordnets'); }}
-                                        className="text-left hover:text-blue-500 hover:underline">
+                                        className="text-left hover:text-indigo-500 hover:underline">
                                         {s.code}{s.version ? `:${s.version}` : ''}
                                     </button>
                                 ))}
@@ -1712,11 +1712,11 @@
             const renderPronunciations = (prons) => {
                 if (!showPronunciation || !prons || prons.length === 0) return null;
                 return (
-                    <div className="text-xs text-gray-500 font-normal mt-0.5">
+                    <div className="text-xs text-slate-500 font-normal mt-0.5">
                         {prons.map((p, i) => (
                             <span key={i} className="mr-3">
                                 {p.pronunciation && <span title={p.variety || undefined}>/{p.pronunciation}/</span>}
-                                {p.audio && <button onClick={() => new Audio(p.audio).play()} title={p.variety || 'Play audio'} className="ml-1 hover:text-blue-500">🔊</button>}
+                                {p.audio && <button onClick={() => new Audio(p.audio).play()} title={p.variety || 'Play audio'} className="ml-1 hover:text-indigo-500">🔊</button>}
                             </span>
                         ))}
                     </div>
@@ -2095,19 +2095,19 @@
             });
 
             return (
-                <div className="min-h-screen bg-gray-50 flex flex-col">
-                    <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
+                <div className="min-h-screen bg-slate-50 flex flex-col">
+                    <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
                         <div className="max-w-4xl mx-auto px-4 py-3">
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                     {siteConfig.url
                                         ? <a href={siteConfig.url} target="_blank" rel="noopener noreferrer" className="hover:opacity-80 flex items-center gap-1.5">
                                               {siteConfig.icon && (siteConfig.icon.includes('.') ? <img src={siteConfig.icon} alt="" className="h-10" /> : <h1 className="text-4xl -mt-0.5">{siteConfig.icon}</h1>)}
-                                              {siteConfig.title && <h1 className="text-3xl font-bold text-gray-800"> {siteConfig.title}</h1>}
+                                              {siteConfig.title && <h1 className="text-3xl font-bold text-slate-800"> {siteConfig.title}</h1>}
                                           </a>
                                         : <button onClick={handleLogoClick} className="text-left hover:opacity-80 flex items-center gap-1.5">
                                               {siteConfig.icon && (siteConfig.icon.includes('.') ? <img src={siteConfig.icon} alt="" className="h-10" /> : <h1 className="text-4xl -mt-0.5">{siteConfig.icon}</h1>)}
-                                              {siteConfig.title && <h1 className="text-3xl font-bold text-gray-800"> {siteConfig.title}</h1>}
+                                              {siteConfig.title && <h1 className="text-3xl font-bold text-slate-800"> {siteConfig.title}</h1>}
                                           </button>
                                     }
                                 </div>
@@ -2116,11 +2116,11 @@
                                         ? (
                                             siteConfig.logo.url
                                                 ? <a href={siteConfig.logo.url} target="_blank" rel="noopener noreferrer" className="hover:opacity-80 flex items-center gap-2">
-                                                      {siteConfig.logo.name && <span className="text-3xl font-bold text-gray-800">{siteConfig.logo.name}</span>}
+                                                      {siteConfig.logo.name && <span className="text-3xl font-bold text-slate-800">{siteConfig.logo.name}</span>}
                                                       <img src={siteConfig.logo.src} alt={siteConfig.logo.alt || ''} className="h-10" />
                                                   </a>
                                                 : <span className="flex items-center gap-2">
-                                                      {siteConfig.logo.name && <span className="text-3xl font-bold text-gray-800">{siteConfig.logo.name}</span>}
+                                                      {siteConfig.logo.name && <span className="text-3xl font-bold text-slate-800">{siteConfig.logo.name}</span>}
                                                       <img src={siteConfig.logo.src} alt={siteConfig.logo.alt || ''} className="h-10" />
                                                   </span>
                                           )
@@ -2134,8 +2134,8 @@
                                             onClick={() => { setActiveTab(tab); if (tab === 'wordnets') setSelectedWordnet(null); }}
                                             className={`px-4 py-2 rounded-t-lg border-b-2 transition-colors ${
                                                 activeTab === tab
-                                                    ? 'bg-gray-50 border-blue-500 text-blue-700 font-medium'
-                                                    : 'border-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                                                    ? 'bg-slate-50 border-indigo-500 text-indigo-700 font-medium'
+                                                    : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                                             }`}
                                         >{label}</button>
                                     ))}
@@ -2146,35 +2146,35 @@
                                         onKeyPress={handleKeyPress}
                                         placeholder={dbReady ? "word, hot*, *ness, i1234, def:bright" : "Loading…"}
                                         disabled={!dbReady}
-                                        className="flex-grow min-w-0 md:w-80 h-11 px-4 text-sm rounded-xl border border-gray-300 bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors disabled:opacity-50"
+                                        className="flex-grow min-w-0 md:w-80 h-11 px-4 text-sm rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors disabled:opacity-50"
                                     />
                                 <div className="relative group" ref={helpRef}>
                                     <button onClick={() => setHelpOpen(o => !o)}
                                         title="Help" aria-label="Help"
-                                        className={`h-11 w-11 flex items-center justify-center rounded-xl border transition-colors ${helpOpen ? 'bg-blue-50 border-blue-300 text-blue-700' : 'border-gray-300 text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`}>
+                                        className={`h-11 w-11 flex items-center justify-center rounded-xl border transition-colors ${helpOpen ? 'bg-indigo-50 border-indigo-300 text-indigo-700' : 'border-slate-300 text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
                                         <InfoIcon className="w-5 h-5" />
                                     </button>
                                     {!helpOpen && (
-                                        <div onClick={() => setHelpOpen(true)} className="absolute right-0 top-full mt-1 hidden group-hover:block bg-white border border-gray-200 rounded shadow-lg p-3 text-xs text-gray-700 z-30 w-64 space-y-1.5 cursor-pointer">
+                                        <div onClick={() => setHelpOpen(true)} className="absolute right-0 top-full mt-1 hidden group-hover:block bg-white border border-slate-200 rounded shadow-lg p-3 text-xs text-slate-700 z-30 w-64 space-y-1.5 cursor-pointer">
                                             <div><span className="font-mono font-semibold">word</span> — exact match</div>
                                             <div><span className="font-mono font-semibold">hot*</span> or <span className="font-mono font-semibold">*ness</span> — glob (<span className="font-mono">*</span> = any characters, <span className="font-mono">?</span> = one)</div>
                                             <div><span className="font-mono font-semibold">i1234</span> or <span className="font-mono font-semibold">cili.i1234</span> — look up concept by ILI</div>
                                             <div><span className="font-mono font-semibold">def:word</span> — search inside definitions</div>
-                                            <div className="pt-1 border-t border-gray-100 text-gray-500 italic">Click for more</div>
+                                            <div className="pt-1 border-t border-slate-100 text-slate-500 italic">Click for more</div>
                                         </div>
                                     )}
                                     {helpOpen && (
-                                        <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded shadow-lg z-20 w-80 p-4 text-sm text-gray-700 space-y-3">
-                                            <p>Type in the search box and press <kbd className="px-1 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs">Enter</kbd> to search. Results are <strong>senses</strong> — a word in a specific meaning. Click a sense to open its <strong>concept view</strong>, which shows relations (hypernyms, hyponyms, …) and lexicalizations across all languages.</p>
+                                        <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded shadow-lg z-20 w-80 p-4 text-sm text-slate-700 space-y-3">
+                                            <p>Type in the search box and press <kbd className="px-1 py-0.5 bg-slate-100 border border-slate-300 rounded text-xs">Enter</kbd> to search. Results are <strong>senses</strong> — a word in a specific meaning. Click a sense to open its <strong>concept view</strong>, which shows relations (hypernyms, hyponyms, …) and lexicalizations across all languages.</p>
                                             <div className="space-y-1">
-                                                <p className="font-semibold text-gray-500 text-xs uppercase tracking-wide">Search syntax</p>
+                                                <p className="font-semibold text-slate-500 text-xs uppercase tracking-wide">Search syntax</p>
                                                 <div><span className="font-mono font-semibold">dog</span> — exact word match</div>
                                                 <div><span className="font-mono font-semibold">dog*</span> or <span className="font-mono font-semibold">*ness</span> — wildcard (<span className="font-mono">*</span> = any characters, <span className="font-mono">?</span> = one)</div>
                                                 <div><span className="font-mono font-semibold">def:bright</span> — search inside definitions</div>
                                                 <div><span className="font-mono font-semibold">i1234</span> — look up concept by ILI</div>
                                             </div>
                                             <div className="space-y-1">
-                                                <p className="font-semibold text-gray-500 text-xs uppercase tracking-wide">Filtering &amp; display</p>
+                                                <p className="font-semibold text-slate-500 text-xs uppercase tracking-wide">Filtering &amp; display</p>
                                                 <p>Use <strong>⚙ Settings</strong> to filter results by language or part of speech, and to set the display language for definitions and synset labels.</p>
                                             </div>
                                         </div>
@@ -2183,24 +2183,24 @@
                                 <div className="relative" ref={settingsRef}>
                                     <button onClick={() => setSettingsOpen(o => !o)}
                                         title="Settings" aria-label="Settings"
-                                        className={`h-11 w-11 flex items-center justify-center rounded-xl border transition-colors relative ${settingsOpen ? 'bg-blue-50 border-blue-300 text-blue-700' : 'border-gray-300 text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`}>
+                                        className={`h-11 w-11 flex items-center justify-center rounded-xl border transition-colors relative ${settingsOpen ? 'bg-indigo-50 border-indigo-300 text-indigo-700' : 'border-slate-300 text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
                                             <circle cx="12" cy="12" r="3" />
                                             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
                                         </svg>
-                                        {hasActiveSettings && <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-blue-500 rounded-full" />}
+                                        {hasActiveSettings && <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-indigo-500 rounded-full" />}
                                     </button>
                                     {settingsOpen && (
-                                        <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded shadow-lg z-20 w-80 max-h-[80vh] overflow-y-auto">
+                                        <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded shadow-lg z-20 w-80 max-h-[80vh] overflow-y-auto">
                                             <div className="p-4 space-y-4">
                                                 <div>
-                                                    <h4 className="font-semibold text-gray-500 mb-2 text-xs uppercase tracking-wide">General</h4>
+                                                    <h4 className="font-semibold text-slate-500 mb-2 text-xs uppercase tracking-wide">General</h4>
                                                     <div className="space-y-2 pl-1">
                                                         <div className="flex items-center gap-2">
-                                                            <label className="text-sm text-gray-600 whitespace-nowrap">Display results in</label>
+                                                            <label className="text-sm text-slate-600 whitespace-nowrap">Display results in</label>
                                                             <select value={definitionLanguage}
                                                                 onChange={(e) => setDefinitionLanguage(e.target.value)}
-                                                                className="px-2 py-0.5 border border-gray-300 rounded text-sm flex-grow min-w-0"
+                                                                className="px-2 py-0.5 border border-slate-300 rounded text-sm flex-grow min-w-0"
                                                             >
                                                                 <option value="en">English</option>
                                                                 {allLanguages.filter(l => l !== 'en')
@@ -2209,19 +2209,19 @@
                                                             </select>
                                                         </div>
                                                         {definitionLanguage !== 'en' && (
-                                                            <p className="text-xs text-gray-500 pl-1">Labels and definitions fall back to English if unavailable</p>
+                                                            <p className="text-xs text-slate-500 pl-1">Labels and definitions fall back to English if unavailable</p>
                                                         )}
                                                         <label className="flex items-center gap-2 cursor-pointer">
                                                             <input type="checkbox" checked={showPronunciation}
                                                                 onChange={e => { setShowPronunciation(e.target.checked); localStorage.setItem('showPronunciation', e.target.checked); }}
                                                                 className="cursor-pointer" />
-                                                            <span className="text-sm text-gray-600">Show pronunciation</span>
+                                                            <span className="text-sm text-slate-600">Show pronunciation</span>
                                                         </label>
                                                         <div className="flex items-center gap-2">
-                                                            <label className="text-sm text-gray-600 whitespace-nowrap">Related concepts</label>
+                                                            <label className="text-sm text-slate-600 whitespace-nowrap">Related concepts</label>
                                                             <select value={relationsView}
                                                                 onChange={e => { setRelationsView(e.target.value); localStorage.setItem('relationsView', e.target.value); }}
-                                                                className="px-2 py-0.5 border border-gray-300 rounded text-sm">
+                                                                className="px-2 py-0.5 border border-slate-300 rounded text-sm">
                                                                 <option value="graph">Graph</option>
                                                                 <option value="text">Text</option>
                                                                 <option value="none">Hidden</option>
@@ -2235,22 +2235,22 @@
                                                                     if (e.target.checked && !_provDb && !provLoading) loadProvenanceDb();
                                                                 }}
                                                                 className="cursor-pointer" />
-                                                            <span className="text-sm text-gray-600">Show sources</span>
-                                                            {showProvenance && provLoading && <span className="text-xs text-gray-500 ml-1">Loading...</span>}
+                                                            <span className="text-sm text-slate-600">Show sources</span>
+                                                            {showProvenance && provLoading && <span className="text-xs text-slate-500 ml-1">Loading...</span>}
                                                             {showProvenance && provError && <span className="text-xs text-red-500 ml-1">{provError}</span>}
                                                         </label>
                                                     </div>
                                                 </div>
-                                                <hr className="border-gray-200" />
+                                                <hr className="border-slate-200" />
                                                 <div>
-                                                    <h4 className="font-semibold text-gray-500 mb-2 text-xs uppercase tracking-wide">Search filters</h4>
+                                                    <h4 className="font-semibold text-slate-500 mb-2 text-xs uppercase tracking-wide">Search filters</h4>
                                                     <div className="space-y-3 pl-1">
                                                         <div>
                                                             <div className="flex items-center gap-2 mb-1">
-                                                                <span className="text-sm text-gray-600">Language</span>
+                                                                <span className="text-sm text-slate-600">Language</span>
                                                                 {languageFilter.size > 0 && (
                                                                     <button onClick={() => { setLanguageFilter(new Set()); if (currentSearch) performSearch(currentSearch, new Set(), posFilter, senseFilter); }}
-                                                                        className="text-xs text-blue-600 hover:underline">clear</button>
+                                                                        className="text-xs text-indigo-600 hover:underline">clear</button>
                                                                 )}
                                                             </div>
                                                             <div className="flex flex-wrap gap-2">
@@ -2271,10 +2271,10 @@
                                                         </div>
                                                         <div>
                                                             <div className="flex items-center gap-2 mb-1">
-                                                                <span className="text-sm text-gray-600">Part of speech</span>
+                                                                <span className="text-sm text-slate-600">Part of speech</span>
                                                                 {posFilter.size > 0 && (
                                                                     <button onClick={() => { setPosFilter(new Set()); if (currentSearch) performSearch(currentSearch, languageFilter, new Set(), senseFilter); }}
-                                                                        className="text-xs text-blue-600 hover:underline">clear</button>
+                                                                        className="text-xs text-indigo-600 hover:underline">clear</button>
                                                                 )}
                                                             </div>
                                                             <div className="flex flex-wrap gap-2">
@@ -2305,8 +2305,8 @@
                     </header>
 
                     {siteConfig.header && (
-                        <div className="w-full bg-blue-50 border-b border-blue-100">
-                            <div className="max-w-4xl mx-auto px-4 py-3 text-sm text-gray-700"
+                        <div className="w-full bg-indigo-50 border-b border-indigo-100">
+                            <div className="max-w-4xl mx-auto px-4 py-3 text-sm text-slate-700"
                                  dangerouslySetInnerHTML={{ __html: sanitizeHtml(siteConfig.header) }} />
                         </div>
                     )}
@@ -2319,8 +2319,8 @@
                             // which would otherwise make this unreachable.
                             <div className="max-w-md mx-auto mt-16 text-center">
                                 <h2 className="font-bold text-xl mb-2">Error Loading Database</h2>
-                                <p className="mb-4 text-gray-700">{dbError}</p>
-                                <p className="text-sm text-gray-500">
+                                <p className="mb-4 text-slate-700">{dbError}</p>
+                                <p className="text-sm text-slate-500">
                                     {siteConfig.databases?.main?.filename && <>On localhost, make sure <code>{siteConfig.databases.main.filename}</code> is in the same directory as this HTML file.<br/></>}
                                     In production, the database is fetched from the release URL configured in <code>local.json</code>.
                                     The release may still be building.
@@ -2333,28 +2333,28 @@
                                     <div className="flex justify-center mt-16">
                                         <div className="text-center w-72">
                                             {siteConfig.icon && (siteConfig.icon.includes('.') ? <img src={siteConfig.icon} alt="" className="h-16 mx-auto mb-2" /> : <h1 className="text-4xl mb-4">{siteConfig.icon}</h1>)}
-                                            <p className="text-gray-600 mb-3">{dbProgress || 'Initializing...'}</p>
+                                            <p className="text-slate-600 mb-3">{dbProgress || 'Initializing...'}</p>
                                             {downloadProgress && (
                                                 <div>
-                                                    <div className="w-full bg-gray-200 rounded-full h-2 mb-1">
-                                                        <div className="bg-blue-500 h-2 rounded-full transition-all"
+                                                    <div className="w-full bg-slate-200 rounded-full h-2 mb-1">
+                                                        <div className="bg-indigo-500 h-2 rounded-full transition-all"
                                                             style={{ width: `${Math.min(100, (downloadProgress.loaded / (downloadProgress.compressedTotal * 2.5)) * 100).toFixed(0)}%` }} />
                                                     </div>
-                                                    <p className="text-xs text-gray-500">{(downloadProgress.loaded / 1048576).toFixed(0)} MB decompressed</p>
+                                                    <p className="text-xs text-slate-500">{(downloadProgress.loaded / 1048576).toFixed(0)} MB decompressed</p>
                                                 </div>
                                             )}
                                         </div>
                                     </div>
                                 )}
                                 {view === 'search' && dbReady && !currentSearch && !senseFilter && (
-                                    <div className="max-w-lg mx-auto mt-16 text-gray-600 space-y-5">
+                                    <div className="max-w-lg mx-auto mt-16 text-slate-600 space-y-5">
                                         <p className="text-base">Search for a word, definition, or concept ILI — results are <strong>senses</strong> (a word in a specific meaning). Click any sense to open its <strong>concept view</strong>, which shows how concepts relate to each other and how they are expressed across languages.</p>
-                                        <div className="bg-gray-50 border border-gray-200 rounded p-4 space-y-1.5 text-sm">
-                                            <p className="font-semibold text-gray-500 text-xs uppercase tracking-wide mb-2">Search syntax</p>
-                                            <div><span className="font-mono font-semibold text-gray-800">dog</span> — exact word match</div>
-                                            <div><span className="font-mono font-semibold text-gray-800">dog*</span> or <span className="font-mono font-semibold text-gray-800">*ness</span> — wildcard (<span className="font-mono">*</span> = any characters, <span className="font-mono">?</span> = one character)</div>
-                                            <div><span className="font-mono font-semibold text-gray-800">def:bright</span> — search inside definitions</div>
-                                            <div><span className="font-mono font-semibold text-gray-800">i1234</span> or <span className="font-mono font-semibold text-gray-800">cili.i1234</span> — look up concept by ILI</div>
+                                        <div className="bg-slate-50 border border-slate-200 rounded p-4 space-y-1.5 text-sm">
+                                            <p className="font-semibold text-slate-500 text-xs uppercase tracking-wide mb-2">Search syntax</p>
+                                            <div><span className="font-mono font-semibold text-slate-800">dog</span> — exact word match</div>
+                                            <div><span className="font-mono font-semibold text-slate-800">dog*</span> or <span className="font-mono font-semibold text-slate-800">*ness</span> — wildcard (<span className="font-mono">*</span> = any characters, <span className="font-mono">?</span> = one character)</div>
+                                            <div><span className="font-mono font-semibold text-slate-800">def:bright</span> — search inside definitions</div>
+                                            <div><span className="font-mono font-semibold text-slate-800">i1234</span> or <span className="font-mono font-semibold text-slate-800">cili.i1234</span> — look up concept by ILI</div>
                                         </div>
                                         <p className="text-sm">Use <strong>⚙ Settings</strong> to filter results by language or part of speech, and to choose the display language for definitions and synset labels. This guide is always available via the <InfoIcon className="w-3.5 h-3.5" /> button.</p>
                                     </div>
@@ -2362,17 +2362,17 @@
                                 {view === 'search' && dbReady && (
                                     <div className="mb-8">
                                         {senseFilter && (
-                                            <div className="mb-4 bg-blue-50 border border-blue-200 rounded p-4">
+                                            <div className="mb-4 bg-indigo-50 border border-indigo-200 rounded p-4">
                                                 <div className="flex items-center justify-between">
-                                                    <span className="text-base text-gray-700">Filtered to a single sense</span>
+                                                    <span className="text-base text-slate-700">Filtered to a single sense</span>
                                                     <button onClick={() => { setSenseFilter(null); performSearch(currentSearch, languageFilter, posFilter, null); }}
-                                                        className="text-sm text-blue-600 hover:underline font-medium">Clear filter</button>
+                                                        className="text-sm text-indigo-600 hover:underline font-medium">Clear filter</button>
                                                 </div>
                                             </div>
                                         )}
 
                                         {loadingResults && (
-                                            <div className="flex items-center gap-3 py-6 text-gray-500">
+                                            <div className="flex items-center gap-3 py-6 text-slate-500">
                                                 <svg className="animate-spin h-5 w-5 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                                                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
@@ -2382,7 +2382,7 @@
                                         )}
 
                                         {!loadingResults && currentSearch && filteredResults.length === 0 && (
-                                            <div className="text-center py-8"><p className="text-gray-600">No results found for <span className="font-mono">{currentSearch}</span></p></div>
+                                            <div className="text-center py-8"><p className="text-slate-600">No results found for <span className="font-mono">{currentSearch}</span></p></div>
                                         )}
 
                                         {!loadingResults && currentSearch && filteredResults.length > 0 && (() => {
@@ -2390,7 +2390,7 @@
                                             const showHint = filteredResults.length > 100 && (languageFilter.size === 0 || posFilter.size === 0);
                                             return (<>
                                             <div className="mt-4 mb-1 flex items-center gap-3 flex-wrap">
-                                                <span className="text-sm text-gray-500">
+                                                <span className="text-sm text-slate-500">
                                                     {filteredResults.length.toLocaleString()} {filteredResults.length === 1 ? 'result' : 'results'}
                                                     {' across '}{nLangs} {nLangs === 1 ? 'language' : 'languages'}
                                                 </span>
@@ -2404,11 +2404,11 @@
                                                 {Object.entries(groupedByLanguageAndPos)
                                                     .sort(([a], [b]) => getLangName(a).localeCompare(getLangName(b)))
                                                     .map(([lang, posByLang]) => (
-                                                    <div key={lang} className="bg-white rounded-2xl border border-gray-200 shadow-sm">
+                                                    <div key={lang} className="bg-white rounded-2xl border border-slate-200 shadow-sm">
                                                         <button onClick={() => toggleSection(`lang-${lang}`)}
-                                                            className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 rounded-t-2xl">
-                                                            <h3 className="text-lg font-bold text-gray-800" title={getLangFullName(lang)}>{getLangName(lang)}</h3>
-                                                            <span className="text-gray-500">{collapsedSections[`lang-${lang}`] ? '▶' : '▼'}</span>
+                                                            className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 rounded-t-2xl">
+                                                            <h3 className="text-lg font-bold text-slate-800" title={getLangFullName(lang)}>{getLangName(lang)}</h3>
+                                                            <span className="text-slate-500">{collapsedSections[`lang-${lang}`] ? '▶' : '▼'}</span>
                                                         </button>
                                                         {!collapsedSections[`lang-${lang}`] && (
                                                             <div className="px-4 pb-4 space-y-4">
@@ -2421,9 +2421,9 @@
                                                                     <div key={pos} className="pl-1">
                                                                         {!senseFilter && (
                                                                             <button onClick={() => toggleSection(`pos-${lang}-${pos}`)}
-                                                                                className="w-full flex items-center justify-between py-2 hover:bg-gray-50">
-                                                                                <h4 className="font-semibold text-gray-700">{getPosName(pos, true)}</h4>
-                                                                                <span className="text-gray-500 text-sm">{collapsedSections[`pos-${lang}-${pos}`] ? '▶' : '▼'}</span>
+                                                                                className="w-full flex items-center justify-between py-2 hover:bg-slate-50">
+                                                                                <h4 className="font-semibold text-slate-700">{getPosName(pos, true)}</h4>
+                                                                                <span className="text-slate-500 text-sm">{collapsedSections[`pos-${lang}-${pos}`] ? '▶' : '▼'}</span>
                                                                             </button>
                                                                         )}
                                                                         {(!collapsedSections[`pos-${lang}-${pos}`] || senseFilter) && (
@@ -2451,7 +2451,7 @@
                                                                                                                   (autoExpand && synonymsCollapsed[sense.id] !== true);
                                                                                                 return (
                                                                                                     <div key={sense.id}
-                                                                                                        className={`px-1 py-3 border-t border-gray-100 first:border-t-0 sense-box ${hasExtra ? 'hover:bg-gray-50 cursor-pointer' : ''}`}
+                                                                                                        className={`px-1 py-3 border-t border-slate-100 first:border-t-0 sense-box ${hasExtra ? 'hover:bg-slate-50 cursor-pointer' : ''}`}
                                                                                                         onClick={hasExtra ? () => toggleSynonyms(sense.id) : undefined}>
                                                                                                         <div className="flex items-start justify-between gap-2">
                                                                                                             <div className="flex-grow flex flex-col sm:flex-row sm:items-start gap-1.5 sm:gap-2 min-w-0">
@@ -2464,17 +2464,17 @@
                                                                                                                     onMouseEnter={e => showTooltip(group.conceptId, e)}
                                                                                                                     onMouseLeave={hideTooltip}
                                                                                                                     style={{textDecoration:'none',color:'inherit'}}
-                                                                                                                    className="rounded-lg p-2 hover:bg-blue-50/60 transition-colors text-left cursor-pointer w-full min-w-0 sm:flex-1 concept-inner flex items-start gap-2">
+                                                                                                                    className="rounded-lg p-2 hover:bg-indigo-50/60 transition-colors text-left cursor-pointer w-full min-w-0 sm:flex-1 concept-inner flex items-start gap-2">
                                                                                                                     <span className="text-base flex-1 break-words leading-6">
-                                                                                                                        {(() => { const li = getConceptLabel(parseInt(group.conceptId), definitionLanguage); return li ? <><span className="font-semibold text-gray-800">{li.form}</span>{<LangBadge lang={li.lang} currentLang={definitionLanguage} ml="ml-0.5" />}{' · '}</> : null; })()}
-                                                                                                                        <span className="text-gray-600 italic">{getPosName(pos)}</span>
-                                                                                                                        {' · '}<span className="text-gray-700">{definition}</span>{<LangBadge lang={defLang} currentLang={definitionLanguage} />}
+                                                                                                                        {(() => { const li = getConceptLabel(parseInt(group.conceptId), definitionLanguage); return li ? <><span className="font-semibold text-slate-800">{li.form}</span>{<LangBadge lang={li.lang} currentLang={definitionLanguage} ml="ml-0.5" />}{' · '}</> : null; })()}
+                                                                                                                        <span className="text-slate-600 italic">{getPosName(pos)}</span>
+                                                                                                                        {' · '}<span className="text-slate-700">{definition}</span>{<LangBadge lang={defLang} currentLang={definitionLanguage} />}
                                                                                                                     </span>
                                                                                                                     {(() => {
                                                                                                                         const { ids, isIndirect } = getArasaacFallback(concept);
                                                                                                                         const araId = ids?.[0];
                                                                                                                         if (!araId) return null;
-                                                                                                                        const imgClass = `h-12 w-12 object-contain rounded bg-white flex-shrink-0 ${isIndirect ? 'border-2 border-dashed border-gray-400' : 'border border-gray-200'}`;
+                                                                                                                        const imgClass = `h-12 w-12 object-contain rounded bg-white flex-shrink-0 ${isIndirect ? 'border-2 border-dashed border-slate-400' : 'border border-slate-200'}`;
                                                                                                                         return (
                                                                                                                             <a href={`https://arasaac.org/pictograms/en/${araId}`}
                                                                                                                                 target="_blank" rel="noopener noreferrer"
@@ -2489,7 +2489,7 @@
                                                                                                                 </a>
                                                                                                             </div>
                                                                                                             {hasExtra && (
-                                                                                                                <div className="text-gray-500 text-sm pt-1 flex-shrink-0">
+                                                                                                                <div className="text-slate-500 text-sm pt-1 flex-shrink-0">
                                                                                                                     {isExpanded ? '▼' : '▶'}
                                                                                                                 </div>
                                                                                                             )}
@@ -2497,19 +2497,19 @@
                                                                                                         {isExpanded && (
                                                                                                             <div className="mt-2 space-y-2">
                                                                                                                 {sense.v && sense.v.length > 0 && (
-                                                                                                                    <div className="text-sm text-gray-600">
+                                                                                                                    <div className="text-sm text-slate-600">
                                                                                                                         <span className="font-medium">Variants:</span>{' '}
                                                                                                                         {renderWordformList(sense.v, handleWordformClick)}
                                                                                                                     </div>
                                                                                                                 )}
                                                                                                                 {synonyms.length > 0 && (
-                                                                                                                    <div className="text-sm text-gray-600">
+                                                                                                                    <div className="text-sm text-slate-600">
                                                                                                                         <span className="font-medium">Synonyms:</span>{' '}
                                                                                                                         {renderWordformList(synonyms, handleWordformClick)}
                                                                                                                     </div>
                                                                                                                 )}
                                                                                                                 {sense.ex && sense.ex.length > 0 && (
-                                                                                                                    <div className="text-sm text-gray-600">
+                                                                                                                    <div className="text-sm text-slate-600">
                                                                                                                         <span className="font-medium">Examples:</span>{' '}
                                                                                                                         {sense.ex.map((ex, ei) => (
                                                                                                                             <span key={ei}>{ei > 0 && '; '}"{renderExample(ex)}"</span>
@@ -2526,7 +2526,7 @@
                                                                                                                         const shown = rels.slice(0, 10);
                                                                                                                         const hidden = rels.length - 10;
                                                                                                                         return (
-                                                                                                                            <div key={relType} className="text-sm text-gray-600 flex gap-2 flex-wrap items-baseline">
+                                                                                                                            <div key={relType} className="text-sm text-slate-600 flex gap-2 flex-wrap items-baseline">
                                                                                                                                 <span className="font-medium">{getRelLabel(relType)}:</span>
                                                                                                                                 {shown.map((rel, i) => {
                                                                                                                                     const toId = rel.to.toString();
@@ -2534,12 +2534,12 @@
                                                                                                                                     return (
                                                                                                                                         <button key={i}
                                                                                                                                             onClick={(e) => { e.stopPropagation(); if (toSense?.l) handleWordformClickWithSense(toSense.l, toId); }}
-                                                                                                                                            className="text-blue-600 hover:underline">
+                                                                                                                                            className="text-indigo-600 hover:underline">
                                                                                                                                             {toSense?.l || '…'}
                                                                                                                                         </button>
                                                                                                                                     );
                                                                                                                                 })}
-                                                                                                                                {hidden > 0 && <span className="text-gray-500 text-xs italic">…{hidden} more</span>}
+                                                                                                                                {hidden > 0 && <span className="text-slate-500 text-xs italic">…{hidden} more</span>}
                                                                                                                             </div>
                                                                                                                         );
                                                                                                                     });
@@ -2572,9 +2572,9 @@
                                     // already guaranteed above), so a falsy result here is a confirmed
                                     // miss — an invalid/stale deep-link ID — not a pending async load.
                                     if (!concept) return (
-                                        <div className="text-gray-600">
+                                        <div className="text-slate-600">
                                             <p>Concept not found (id: {selectedConcept}).</p>
-                                            <button onClick={handleBackToSearch} className="mt-2 text-blue-600 hover:underline">← Back to search</button>
+                                            <button onClick={handleBackToSearch} className="mt-2 text-indigo-600 hover:underline">← Back to search</button>
                                         </div>
                                     );
 
@@ -2598,11 +2598,11 @@
 
                                     return (
                                         <div>
-                                            <button onClick={handleBackToSearch} className="mb-4 text-blue-600 hover:underline">← Back to search</button>
+                                            <button onClick={handleBackToSearch} className="mb-4 text-indigo-600 hover:underline">← Back to search</button>
                                             <div className="mb-4 flex gap-4 items-start">
                                                 <div className="flex-1">
                                                     <p className="text-base">
-                                                        {conceptLabel && <><span className="font-medium">{conceptLabel}</span>{' · '}</>}<span className="text-gray-600 italic">{getPosName(concept.oc)}</span>{isCoreConcept && <span title="widely-known concept (one of 4960 OMWN core concepts)" className="ml-1 cursor-help">✪</span>}{' · '}
+                                                        {conceptLabel && <><span className="font-medium">{conceptLabel}</span>{' · '}</>}<span className="text-slate-600 italic">{getPosName(concept.oc)}</span>{isCoreConcept && <span title="widely-known concept (one of 4960 OMWN core concepts)" className="ml-1 cursor-help">✪</span>}{' · '}
                                                         {concept.da ? renderDefinitionWithLinks(mainDef, concept.da) : mainDef}
                                                         {<LangBadge lang={shownLang} currentLang={definitionLanguage} />}
                                                         {<TranslatedBadge fromLang={concept.dtf?.[shownLang]} />}
@@ -2624,7 +2624,7 @@
                                                 {(() => {
                                                     const { ids, isIndirect } = getArasaacFallback(concept);
                                                     if (!ids) return null;
-                                                    const imgClass = `h-24 w-24 object-contain rounded bg-white ${isIndirect ? 'border-2 border-dashed border-gray-400' : 'border border-gray-200'}`;
+                                                    const imgClass = `h-24 w-24 object-contain rounded bg-white ${isIndirect ? 'border-2 border-dashed border-slate-400' : 'border border-slate-200'}`;
                                                     return (
                                                         <div className="flex flex-wrap gap-2 shrink-0">
                                                             {ids.map(id => (
@@ -2664,11 +2664,11 @@
                                                 <div className="mb-4">
                                                     <div className="flex items-center gap-3 mb-2">
                                                         <h3 className="font-bold text-base">Related Concepts</h3>
-                                                        <div className="flex rounded border border-gray-300 overflow-hidden text-xs">
+                                                        <div className="flex rounded border border-slate-300 overflow-hidden text-xs">
                                                             {['graph','text','none'].map(mode => (
                                                                 <button key={mode}
                                                                     onClick={() => { setRelationsView(mode); localStorage.setItem('relationsView', mode); }}
-                                                                    className={`px-2 py-0.5 transition-colors ${relationsView === mode ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                                                                    className={`px-2 py-0.5 transition-colors ${relationsView === mode ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>
                                                                     {mode.charAt(0).toUpperCase() + mode.slice(1)}
                                                                 </button>
                                                             ))}
@@ -2677,14 +2677,14 @@
                                                     {relationsView === 'graph' && <div style={{ position: 'relative', overflow: 'hidden' }}>
                                                         <div id="concept-graph" style={{ width: '100%', height: '500px' }} />
                                                         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs mt-2">
-                                                            <span className="text-gray-500 italic flex-shrink-0">Hover a node to expand its relations.</span>
+                                                            <span className="text-slate-500 italic flex-shrink-0">Hover a node to expand its relations.</span>
                                                             {concept.cr && [...new Set(concept.cr.map(r => r.t))].map(type => {
                                                                 const short = RELATION_TO_SHORT[type];
                                                                 const color = _relColors[short] || _relColors[type] || '#999';
                                                                 return (
                                                                     <span key={type} className="flex items-center gap-1 whitespace-nowrap">
                                                                         <svg width="10" height="10" className="flex-shrink-0"><circle cx="5" cy="5" r="4" fill={color} /></svg>
-                                                                        <span className="text-gray-600">{getRelLabel(type)}</span>
+                                                                        <span className="text-slate-600">{getRelLabel(type)}</span>
                                                                     </span>
                                                                 );
                                                             })}
@@ -2699,20 +2699,20 @@
                                                                 <div ref={menuRef}
                                                                     onMouseEnter={() => { if (hoverTimeoutRef.current) { clearTimeout(hoverTimeoutRef.current); hoverTimeoutRef.current = null; } }}
                                                                     onMouseLeave={() => { hoverTimeoutRef.current = setTimeout(() => { setHoveredNode(null); setHoverMenuPosition(null); }, 100); }}
-                                                                    className="bg-white border-2 border-gray-400 rounded shadow-lg p-2 text-sm min-w-[150px]">
-                                                                    <div className="font-semibold mb-2 text-gray-700 text-xs">Relations:</div>
+                                                                    className="bg-white border-2 border-slate-400 rounded shadow-lg p-2 text-sm min-w-[150px]">
+                                                                    <div className="font-semibold mb-2 text-slate-700 text-xs">Relations:</div>
                                                                     {getAvailableCategories(hoveredNode).map(category => {
                                                                         const isSelected = selectedCategories[hoveredNode]?.has(category);
                                                                         return (
                                                                             <button key={category} onClick={() => handleCategorySelect(hoveredNode, category)}
-                                                                                className={`block w-full text-left px-2 py-1 rounded flex items-center gap-2 ${isSelected ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100'}`}>
+                                                                                className={`block w-full text-left px-2 py-1 rounded flex items-center gap-2 ${isSelected ? 'bg-indigo-100 text-indigo-700' : 'hover:bg-slate-100'}`}>
                                                                                 <span className="w-4">{isSelected ? '☑' : '☐'}</span>
                                                                                 <span>{category.charAt(0).toUpperCase() + category.slice(1)}</span>
                                                                             </button>
                                                                         );
                                                                     })}
                                                                     {getAvailableCategories(hoveredNode).length === 0 && (
-                                                                        <div className="text-gray-500 italic px-2">No relations</div>
+                                                                        <div className="text-slate-500 italic px-2">No relations</div>
                                                                     )}
                                                                 </div>
                                                             </div>
@@ -2733,7 +2733,7 @@
                                                                 const hidden = rels.length - 10;
                                                                 return (
                                                                 <div key={relType} className="flex gap-2 flex-wrap items-baseline">
-                                                                    <span className="text-gray-500 italic flex-shrink-0">{getRelLabel(relType)}:</span>
+                                                                    <span className="text-slate-500 italic flex-shrink-0">{getRelLabel(relType)}:</span>
                                                                     {shown.map(rel => {
                                                                         const li = getConceptLabel(parseInt(rel.to), definitionLanguage);
                                                                         return (
@@ -2742,7 +2742,7 @@
                                                                                     onClick={e => onConceptLinkClick(e, rel.to)}
                                                                                     onMouseEnter={e => showTooltip(rel.to, e)}
                                                                                     onMouseLeave={hideTooltip}
-                                                                                    className="text-blue-600 hover:underline">
+                                                                                    className="text-indigo-600 hover:underline">
                                                                                     {li?.form || `#${rel.to}`}
                                                                                     {<LangBadge lang={li?.lang} currentLang={definitionLanguage} ml="ml-0.5" />}
                                                                                 </a>
@@ -2752,7 +2752,7 @@
                                                                     })}
                                                                     {!isExpanded && hidden > 0 && (
                                                                         <button onClick={() => setExpandedRelGroups(prev => new Set([...prev, groupKey]))}
-                                                                            className="text-gray-500 hover:text-gray-600 text-xs italic">
+                                                                            className="text-slate-500 hover:text-slate-600 text-xs italic">
                                                                             …{hidden} more
                                                                         </button>
                                                                     )}
@@ -2760,7 +2760,7 @@
                                                                 );
                                                             })}
                                                             {hasSenseRels && <>
-                                                                <div className="text-xs text-gray-500 italic mt-1 mb-0.5">Related through senses:</div>
+                                                                <div className="text-xs text-slate-500 italic mt-1 mb-0.5">Related through senses:</div>
                                                                 {Object.entries(senseRelsByType).map(([relType, rels]) => {
                                                                 const groupKey = `sr-${relType}`;
                                                                 const isExpanded = expandedRelGroups.has(groupKey);
@@ -2768,7 +2768,7 @@
                                                                 const hidden = rels.length - 10;
                                                                 return (
                                                                 <div key={`sr-${relType}`} className="flex gap-2 flex-wrap items-baseline">
-                                                                    <span className="text-gray-500 italic flex-shrink-0">{getRelLabel(relType)}:</span>
+                                                                    <span className="text-slate-500 italic flex-shrink-0">{getRelLabel(relType)}:</span>
                                                                     {shown.map(({ fromLemma, toSenseId, rid }, i) => {
                                                                         const toSense = loadedSenses[toSenseId] ?? querySense(parseInt(toSenseId));
                                                                         const cid = toSense?.c?.toString();
@@ -2778,11 +2778,11 @@
                                                                         return (
                                                                             <span key={i} className="inline-flex items-baseline gap-0.5 whitespace-nowrap">
                                                                                 <button onClick={() => toSense?.l && handleWordformClickWithSense(toSense.l, toSenseId)}
-                                                                                    className="text-blue-600 hover:underline">
+                                                                                    className="text-indigo-600 hover:underline">
                                                                                     {targetLabel}
                                                                                 </button>
                                                                                 {conceptLabel && conceptLabel !== targetLabel && (
-                                                                                    <span className="text-gray-500">
+                                                                                    <span className="text-slate-500">
                                                                                         ({conceptLabel}{<LangBadge lang={li.lang} currentLang={definitionLanguage} ml="ml-0.5" />})
                                                                                     </span>
                                                                                 )}
@@ -2795,7 +2795,7 @@
                                                                     })}
                                                                     {!isExpanded && hidden > 0 && (
                                                                         <button onClick={() => setExpandedRelGroups(prev => new Set([...prev, groupKey]))}
-                                                                            className="text-gray-500 hover:text-gray-600 text-xs italic">
+                                                                            className="text-slate-500 hover:text-slate-600 text-xs italic">
                                                                             …{hidden} more
                                                                         </button>
                                                                     )}
@@ -2861,35 +2861,35 @@
                                                                 }}
                                                                 onKeyDown={e => { if (e.key === 'Enter' && pathTargetRowid) runPath(pathTargetRowid); if (e.key === 'Escape') setPathWordSuggestions([]); }}
                                                                 placeholder="word or ILI (e.g. dog, i46360)"
-                                                                className="w-52 border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:border-blue-400"
+                                                                className="w-52 border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:border-indigo-400"
                                                             />
                                                             {pathWordSuggestions.length > 0 && (
-                                                                <div className="absolute z-50 top-full left-0 mt-1 w-80 bg-white border border-gray-300 rounded shadow-lg text-sm max-h-48 overflow-y-auto">
+                                                                <div className="absolute z-50 top-full left-0 mt-1 w-80 bg-white border border-slate-300 rounded shadow-lg text-sm max-h-48 overflow-y-auto">
                                                                     {pathWordSuggestions.map((s, i) => (
-                                                                        <button key={i} className="w-full text-left px-3 py-1.5 hover:bg-blue-50 flex gap-2 items-baseline"
+                                                                        <button key={i} className="w-full text-left px-3 py-1.5 hover:bg-indigo-50 flex gap-2 items-baseline"
                                                                             onMouseDown={e => { e.preventDefault();
                                                                                 setPathTargetRowid(s.rowid);
                                                                                 setPathTargetIli(s.form);
                                                                                 setPathWordSuggestions([]);
                                                                             }}>
-                                                                            <span className="font-medium text-gray-800">{s.form}</span>
-                                                                            <span className="text-gray-500 italic text-xs">{getPosName(s.pos)}</span>
-                                                                            {s.def && <span className="text-gray-500 truncate text-xs">{s.def.length > 60 ? s.def.slice(0,60)+'…' : s.def}</span>}
+                                                                            <span className="font-medium text-slate-800">{s.form}</span>
+                                                                            <span className="text-slate-500 italic text-xs">{getPosName(s.pos)}</span>
+                                                                            {s.def && <span className="text-slate-500 truncate text-xs">{s.def.length > 60 ? s.def.slice(0,60)+'…' : s.def}</span>}
                                                                         </button>
                                                                     ))}
                                                                 </div>
                                                             )}
                                                         </div>
-                                                        {targetLabel && <span className="text-sm text-gray-600">{targetLabel.form}{<LangBadge lang={targetLabel.lang} currentLang={definitionLanguage} />}</span>}
-                                                        {pathTargetIli && !pathTargetRowid && pathWordSuggestions.length === 0 && <span className="text-xs text-gray-500 italic">not found</span>}
+                                                        {targetLabel && <span className="text-sm text-slate-600">{targetLabel.form}{<LangBadge lang={targetLabel.lang} currentLang={definitionLanguage} />}</span>}
+                                                        {pathTargetIli && !pathTargetRowid && pathWordSuggestions.length === 0 && <span className="text-xs text-slate-500 italic">not found</span>}
                                                         <button
                                                             onClick={() => pathTargetRowid && runPath(pathTargetRowid)}
                                                             disabled={!pathTargetRowid}
-                                                            className="px-3 py-1 text-sm rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">
+                                                            className="px-3 py-1 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed">
                                                             Find path
                                                         </button>
                                                     </div>
-                                                    {pathNotFound && <p className="text-sm text-gray-500 italic">No path found within 12 steps.</p>}
+                                                    {pathNotFound && <p className="text-sm text-slate-500 italic">No path found within 12 steps.</p>}
                                                     {pathResult && (
                                                         <div className="flex flex-wrap items-center gap-1 text-sm">
                                                             {pathResult.map((step, i) => {
@@ -2897,13 +2897,13 @@
                                                                 return (
                                                                     <React.Fragment key={i}>
                                                                         {i > 0 && step.rel && (
-                                                                            <span className="text-gray-500 text-xs italic whitespace-nowrap">—{getRelLabel(step.rel)}→</span>
+                                                                            <span className="text-slate-500 text-xs italic whitespace-nowrap">—{getRelLabel(step.rel)}→</span>
                                                                         )}
                                                                         <a href={conceptHref(step.node)}
                                                                             onClick={e => onConceptLinkClick(e, step.node)}
                                                                             onMouseEnter={e => showTooltip(step.node, e)}
                                                                             onMouseLeave={hideTooltip}
-                                                                            className={`px-1.5 py-0.5 rounded text-xs border ${step.node === parseInt(selectedConcept) ? 'bg-blue-100 border-blue-400 text-blue-800 font-semibold' : 'bg-white border-gray-300 text-blue-600 hover:border-blue-400'}`}>
+                                                                            className={`px-1.5 py-0.5 rounded text-xs border ${step.node === parseInt(selectedConcept) ? 'bg-indigo-100 border-indigo-400 text-indigo-800 font-semibold' : 'bg-white border-slate-300 text-indigo-600 hover:border-indigo-400'}`}>
                                                                             {li?.form || `#${step.node}`}
                                                                             {<LangBadge lang={li?.lang} currentLang={definitionLanguage} ml="ml-0.5" />}
                                                                         </a>
@@ -2922,7 +2922,7 @@
                                                     <div className="space-y-1 ml-2">
                                                         {altDefs.map(([lang, def]) => (
                                                             <div key={lang} className="text-sm">
-                                                                <span className="font-semibold text-gray-700" title={getLangFullName(lang)}>{getLangName(lang)}:</span> {def}
+                                                                <span className="font-semibold text-slate-700" title={getLangFullName(lang)}>{getLangName(lang)}:</span> {def}
                                                                 {<TranslatedBadge fromLang={concept.dtf?.[lang]} />}
                                                                 {concept.dr?.[lang] && renderProvenance('definitions', concept.dr[lang])}
                                                             </div>
@@ -2943,11 +2943,11 @@
                                                             }).filter(Boolean);
                                                             return (
                                                                 <div key={lang} className="text-sm">
-                                                                    <span className="font-semibold text-gray-700" title={getLangFullName(lang)}>{getLangName(lang)}:</span>{' '}
+                                                                    <span className="font-semibold text-slate-700" title={getLangFullName(lang)}>{getLangName(lang)}:</span>{' '}
                                                                     {lemmas.map((item, idx) => (
                                                                         <span key={item.senseId}>{idx > 0 && ', '}
                                                                             <button onClick={() => handleWordformClickWithSense(item.lemma, item.senseId)}
-                                                                                className="text-blue-600 hover:underline">{item.lemma}<sub className="text-gray-500">{item.ind}</sub></button>
+                                                                                className="text-indigo-600 hover:underline">{item.lemma}<sub className="text-slate-500">{item.ind}</sub></button>
                                                                             {renderProvenance('senses', parseInt(item.senseId))}
                                                                         </span>
                                                                     ))}
@@ -2966,34 +2966,34 @@
                                     // guaranteed above) — a falsy result is a confirmed miss, not a
                                     // pending async load.
                                     if (!sense?.l) return (
-                                        <div className="text-gray-600">
+                                        <div className="text-slate-600">
                                             <p>Sense not found (id: {selectedSense}).</p>
-                                            <button onClick={handleBackToSearch} className="mt-2 text-blue-600 hover:underline">← Back to search</button>
+                                            <button onClick={handleBackToSearch} className="mt-2 text-indigo-600 hover:underline">← Back to search</button>
                                         </div>
                                     );
                                     return (
                                         <div>
-                                            <button onClick={handleBackToSearch} className="mb-4 text-blue-600 hover:underline">← Back to search</button>
+                                            <button onClick={handleBackToSearch} className="mb-4 text-indigo-600 hover:underline">← Back to search</button>
                                             <div className="mb-4">
                                                 <h2 className="text-2xl font-bold mb-1">{sense.l}</h2>
                                                 {showPronunciation && sense.p && sense.p.length > 0 && (
-                                                    <div className="text-base text-gray-500 mb-1">
+                                                    <div className="text-base text-slate-500 mb-1">
                                                         {sense.p.map((p, i) => (
                                                             <span key={i} className="mr-3">
                                                                 {p.pronunciation && <span title={p.variety || undefined}>/{p.pronunciation}/</span>}
-                                                                {p.audio && <button onClick={() => new Audio(p.audio).play()} title={p.variety || 'Play audio'} className="ml-1 hover:text-blue-500">🔊</button>}
+                                                                {p.audio && <button onClick={() => new Audio(p.audio).play()} title={p.variety || 'Play audio'} className="ml-1 hover:text-indigo-500">🔊</button>}
                                                             </span>
                                                         ))}
                                                     </div>
                                                 )}
-                                                <p className="text-gray-600" title={getLangFullName(sense.lg)}>Language: {getLangName(sense.lg)}</p>
+                                                <p className="text-slate-600" title={getLangFullName(sense.lg)}>Language: {getLangName(sense.lg)}</p>
                                             </div>
                                             {sense.v && sense.v.length > 0 && (
                                                 <div className="mb-4">
                                                     <h3 className="font-bold mb-2">Variants:</h3>
                                                     <div className="ml-2 space-y-1">
                                                         {sense.v.map((v, i) => (
-                                                            <div key={i}><button onClick={() => handleWordformClick(v)} className="text-blue-600 hover:underline">{v}</button></div>
+                                                            <div key={i}><button onClick={() => handleWordformClick(v)} className="text-indigo-600 hover:underline">{v}</button></div>
                                                         ))}
                                                     </div>
                                                 </div>
@@ -3010,9 +3010,9 @@
                                                             onClick={e => onConceptLinkClick(e, sense.c)}
                                                             onMouseEnter={e => showTooltip(sense.c, e)}
                                                             onMouseLeave={hideTooltip}
-                                                            className="text-blue-600 hover:underline">
+                                                            className="text-indigo-600 hover:underline">
                                                             {li?.form || sense.c}
-                                                            {li && <span className="text-gray-500 font-normal"> · <span className="italic">{getPosName(cd?.oc)}</span>{def ? ' · ' + (def.length > 100 ? def.slice(0,100)+'…' : def) : ''}</span>}
+                                                            {li && <span className="text-slate-500 font-normal"> · <span className="italic">{getPosName(cd?.oc)}</span>{def ? ' · ' + (def.length > 100 ? def.slice(0,100)+'…' : def) : ''}</span>}
                                                         </a>
                                                     );
                                                 })()}
@@ -3022,7 +3022,7 @@
                                                     <h3 className="font-bold mb-2">Examples:</h3>
                                                     <div className="ml-2 space-y-1">
                                                         {sense.ex.map((ex, i) => (
-                                                            <div key={i} className="text-gray-700">"{renderExample(ex)}"</div>
+                                                            <div key={i} className="text-slate-700">"{renderExample(ex)}"</div>
                                                         ))}
                                                     </div>
                                                 </div>
@@ -3035,10 +3035,10 @@
                                                             const toSense = loadedSenses[rel.to.toString()] ?? querySense(parseInt(rel.to));
                                                             return (
                                                                 <div key={i}>
-                                                                    <span className="text-gray-600">{getRelLabel(rel.t)}:</span>{' '}
+                                                                    <span className="text-slate-600">{getRelLabel(rel.t)}:</span>{' '}
                                                                     <a href={senseHref(rel.to)}
                                                                         onClick={e => onSenseLinkClick(e, rel.to)}
-                                                                        className="text-blue-600 hover:underline">
+                                                                        className="text-indigo-600 hover:underline">
                                                                         {toSense?.l || rel.to}
                                                                     </a>
                                                                 </div>
@@ -3057,12 +3057,12 @@
                             <div>
                                 <h2 className="text-xl font-bold mb-4">About</h2>
                                 {siteConfig.about?.intro &&
-                                    <div className="text-gray-700 mb-4"
+                                    <div className="text-slate-700 mb-4"
                                          dangerouslySetInnerHTML={{ __html: sanitizeHtml(siteConfig.about.intro) }} />
                                 }
                                 {dbStats && (
-                                    <div className="border-t border-gray-200 pt-4 mb-4">
-                                        <h3 className="font-medium text-sm text-gray-700 mb-3">Database statistics</h3>
+                                    <div className="border-t border-slate-200 pt-4 mb-4">
+                                        <h3 className="font-medium text-sm text-slate-700 mb-3">Database statistics</h3>
                                         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                                             {[
                                                 ['Wordnets',  dbStats.wordnets],
@@ -3071,39 +3071,39 @@
                                                 ['Entries',   dbStats.entries],
                                                 ['Senses',    dbStats.senses],
                                             ].map(([label, n]) => (
-                                                <div key={label} className="bg-gray-50 rounded p-3 text-center">
-                                                    <div className="text-lg font-semibold text-gray-800">{n?.toLocaleString()}</div>
-                                                    <div className="text-xs text-gray-500 mt-0.5">{label}</div>
+                                                <div key={label} className="bg-slate-50 rounded p-3 text-center">
+                                                    <div className="text-lg font-semibold text-slate-800">{n?.toLocaleString()}</div>
+                                                    <div className="text-xs text-slate-500 mt-0.5">{label}</div>
                                                 </div>
                                             ))}
                                         </div>
                                     </div>
                                 )}
-                                <div className="border-t border-gray-200 pt-4 mb-4">
-                                    <h3 className="font-medium text-sm text-gray-700 mb-2">Citation</h3>
+                                <div className="border-t border-slate-200 pt-4 mb-4">
+                                    <h3 className="font-medium text-sm text-slate-700 mb-2">Citation</h3>
                                     {siteConfig.about?.citation &&
-                                        <div className="text-sm text-gray-600"
+                                        <div className="text-sm text-slate-600"
                                              dangerouslySetInnerHTML={{ __html: sanitizeHtml(siteConfig.about.citation) }} />
                                     }
                                 </div>
-                                <div className="border-t border-gray-200 pt-4 mb-4">
-                                    <h3 className="font-medium text-sm text-gray-700 mb-2">Download</h3>
+                                <div className="border-t border-slate-200 pt-4 mb-4">
+                                    <h3 className="font-medium text-sm text-slate-700 mb-2">Download</h3>
                                     {(() => {
                                         const rawDbs = siteConfig.databases;
                                         const dbs = !rawDbs ? []
                                             : Array.isArray(rawDbs) ? rawDbs
                                             : [rawDbs.main, rawDbs.provenance].filter(Boolean);
                                         return (<>
-                                            <p className="text-sm text-gray-600 mb-3">
+                                            <p className="text-sm text-slate-600 mb-3">
                                                 The{siteName ? ` ${siteName}` : ''} databases are available for download below. These are SQLite databases compressed with gzip.
                                             </p>
                                             <ul className="space-y-3 mb-3">
                                                 {dbs.map((db, i) => {
                                                     const href = db.url || db.filename || null;
                                                     return (
-                                                        <li key={i} className="text-sm text-gray-800">
+                                                        <li key={i} className="text-sm text-slate-800">
                                                             {href ? (
-                                                                <a href={href} className="text-blue-600 hover:underline font-medium">{db.filename}</a>
+                                                                <a href={href} className="text-indigo-600 hover:underline font-medium">{db.filename}</a>
                                                             ) : (
                                                                 <span className="font-medium">{db.filename}</span>
                                                             )}
@@ -3112,31 +3112,31 @@
                                                     );
                                                 })}
                                             </ul>
-                                            <p className="text-sm text-gray-600">
-                                                The individual wordnets that make up{siteName ? ` ${siteName}` : ' this resource'} are each available from their respective projects — see the <button onClick={() => setActiveTab('wordnets')} className="text-blue-600 hover:underline">Wordnets</button> tab for the full list with links.
+                                            <p className="text-sm text-slate-600">
+                                                The individual wordnets that make up{siteName ? ` ${siteName}` : ' this resource'} are each available from their respective projects — see the <button onClick={() => setActiveTab('wordnets')} className="text-indigo-600 hover:underline">Wordnets</button> tab for the full list with links.
                                             </p>
                                         </>);
                                     })()}
                                 </div>
-                                <div className="border-t border-gray-200 pt-4 mb-4">
-                                    <h3 className="font-medium text-sm text-gray-700 mb-2">Language Data</h3>
+                                <div className="border-t border-slate-200 pt-4 mb-4">
+                                    <h3 className="font-medium text-sm text-slate-700 mb-2">Language Data</h3>
                                     {siteConfig.about?.languageData &&
-                                        <div className="text-sm text-gray-600"
+                                        <div className="text-sm text-slate-600"
                                              dangerouslySetInnerHTML={{ __html: sanitizeHtml(siteConfig.about.languageData) }} />
                                     }
                                 </div>
-                                <div className="border-t border-gray-200 pt-4 mb-4">
-                                    <h3 className="font-medium text-sm text-gray-700 mb-2">Images</h3>
-                                    <p className="text-sm text-gray-600">
-                                        Concept images are pictograms from <a href="https://arasaac.org/" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">ARASAAC</a> (Aragonese Portal of Augmentative and Alternative Communication), by Sergio Palao. License: <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">CC BY-NC-SA 4.0</a>. Owner: Government of Aragon (Spain).
+                                <div className="border-t border-slate-200 pt-4 mb-4">
+                                    <h3 className="font-medium text-sm text-slate-700 mb-2">Images</h3>
+                                    <p className="text-sm text-slate-600">
+                                        Concept images are pictograms from <a href="https://arasaac.org/" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">ARASAAC</a> (Aragonese Portal of Augmentative and Alternative Communication), by Sergio Palao. License: <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">CC BY-NC-SA 4.0</a>. Owner: Government of Aragon (Spain).
                                     </p>
-                                    <p className="text-sm text-gray-500 mt-1">
+                                    <p className="text-sm text-slate-500 mt-1">
                                         A dashed border on a pictogram indicates the image comes from a hypernym (a more general concept) rather than the concept itself.
                                     </p>
                                 </div>
-                                <div className="border-t border-gray-200 pt-4">
-                                    <h3 className="font-medium text-sm text-gray-700 mb-2">Cache</h3>
-                                    <p className="text-sm text-gray-500 mb-2">
+                                <div className="border-t border-slate-200 pt-4">
+                                    <h3 className="font-medium text-sm text-slate-700 mb-2">Cache</h3>
+                                    <p className="text-sm text-slate-500 mb-2">
                                         The database is cached locally in your browser to avoid re-downloading on each visit.
                                     </p>
                                     <button
@@ -3169,7 +3169,7 @@
                                 while ((m = linkRe.exec(text)) !== null) {
                                     html += renderText(text.slice(lastIndex, m.index));
                                     const [, title, url] = m;
-                                    html += `<a href="${escapeHtml(safeHref(url.trim()))}" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline">${escapeHtml(title)}</a>`;
+                                    html += `<a href="${escapeHtml(safeHref(url.trim()))}" target="_blank" rel="noopener noreferrer" class="text-indigo-600 hover:underline">${escapeHtml(title)}</a>`;
                                     lastIndex = m.index + m[0].length;
                                 }
                                 html += renderText(text.slice(lastIndex));
@@ -3181,17 +3181,17 @@
                                 <h2 className="text-xl font-bold mb-4">Publications</h2>
                                 <ul className="space-y-4 mb-8">
                                     {(siteConfig.publications || []).map((pub, i) => (
-                                        <li key={`cfg-pub-${i}`} className="text-sm text-gray-800"
+                                        <li key={`cfg-pub-${i}`} className="text-sm text-slate-800"
                                             dangerouslySetInnerHTML={{ __html: sanitizeHtml(pub) }} />
                                     ))}
                                 </ul>
                                 <h2 className="text-xl font-bold mb-2">Wordnet Citations</h2>
-                                <p className="text-sm text-gray-500 italic mb-4">Citation data taken from each wordnet's source XML.</p>
+                                <p className="text-sm text-slate-500 italic mb-4">Citation data taken from each wordnet's source XML.</p>
                                 {wnsWithCitation.length === 0
-                                    ? <p className="text-sm text-gray-500">No wordnet citation data available (database not loaded).</p>
+                                    ? <p className="text-sm text-slate-500">No wordnet citation data available (database not loaded).</p>
                                     : <ul className="space-y-4">
                                         {wnsWithCitation.map(r => (
-                                            <li key={r.code} className="text-sm text-gray-800">
+                                            <li key={r.code} className="text-sm text-slate-800">
                                                 <span className="font-medium">{r.label}:</span>{' '}
                                                 <span dangerouslySetInnerHTML={{ __html: rstToHtml(r.citation) }} />
                                             </li>
@@ -3216,7 +3216,7 @@
 
                             if (selectedWordnet) {
                                 const r = allResources.find(res => res.code === selectedWordnet);
-                                if (!r) return <p className="text-gray-600">Wordnet not found.</p>;
+                                if (!r) return <p className="text-slate-600">Wordnet not found.</p>;
                                 const summary = provenanceReady ? queryWordnetSummary(r.code, r.language) : null;
                                 const extra = (() => { try { return r.extra ? JSON.parse(r.extra) : null; } catch(e) { return null; } })();
                                 const metaRows = [
@@ -3238,21 +3238,21 @@
                                 return (
                                 <div data-testid="wordnet-summary">
                                     <button onClick={() => setSelectedWordnet(null)}
-                                            className="text-sm text-blue-600 hover:underline mb-4 block">
+                                            className="text-sm text-indigo-600 hover:underline mb-4 block">
                                         ← Back to Wordnets
                                     </button>
                                     <h2 className="text-xl font-bold mb-1">{r.label || r.code}</h2>
-                                    {r.language && <p className="text-sm text-gray-500 mb-4">{getLangFullName(r.language)} ({r.language})</p>}
+                                    {r.language && <p className="text-sm text-slate-500 mb-4">{getLangFullName(r.language)} ({r.language})</p>}
 
-                                    <div className="border-t border-gray-200 pt-4 mb-4">
-                                        <h3 className="font-medium text-sm text-gray-700 mb-2">Metadata</h3>
+                                    <div className="border-t border-slate-200 pt-4 mb-4">
+                                        <h3 className="font-medium text-sm text-slate-700 mb-2">Metadata</h3>
                                         <dl className="grid grid-cols-[8rem_1fr] gap-x-2 gap-y-1 text-sm">
                                             {metaRows.map(([label, value]) => (
                                                 <React.Fragment key={label}>
-                                                    <dt className="font-medium text-gray-500">{label}</dt>
-                                                    <dd className="text-gray-800 break-words">
+                                                    <dt className="font-medium text-slate-500">{label}</dt>
+                                                    <dd className="text-slate-800 break-words">
                                                         {/^https?:\/\//.test(value)
-                                                            ? <a href={value} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{value}</a>
+                                                            ? <a href={value} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">{value}</a>
                                                             : String(value)}
                                                     </dd>
                                                 </React.Fragment>
@@ -3260,8 +3260,8 @@
                                         </dl>
                                     </div>
 
-                                    <div className="border-t border-gray-200 pt-4 mb-4">
-                                        <h3 className="font-medium text-sm text-gray-700 mb-3">Coverage</h3>
+                                    <div className="border-t border-slate-200 pt-4 mb-4">
+                                        <h3 className="font-medium text-sm text-slate-700 mb-3">Coverage</h3>
                                         <div className={`grid gap-3 mb-4 ${summary ? 'grid-cols-2 sm:grid-cols-5' : 'grid-cols-2'}`}>
                                             {[
                                                 ['Concepts',    r.synset_count],
@@ -3272,9 +3272,9 @@
                                                     ['Examples',    summary.exCount],
                                                 ] : []),
                                             ].filter(([, n]) => n != null).map(([label, n]) => (
-                                                <div key={label} className="bg-gray-50 rounded p-3 text-center">
-                                                    <div className="text-lg font-semibold text-gray-800">{typeof n === 'number' ? n.toLocaleString() : n}</div>
-                                                    <div className="text-xs text-gray-500 mt-0.5">{label}</div>
+                                                <div key={label} className="bg-slate-50 rounded p-3 text-center">
+                                                    <div className="text-lg font-semibold text-slate-800">{typeof n === 'number' ? n.toLocaleString() : n}</div>
+                                                    <div className="text-xs text-slate-500 mt-0.5">{label}</div>
                                                 </div>
                                             ))}
                                         </div>
@@ -3282,20 +3282,20 @@
                                             <div className="overflow-x-auto">
                                             <table className="w-full text-sm border-collapse">
                                                 <thead>
-                                                    <tr className="bg-gray-100 text-left">
-                                                        <th className="px-3 py-2 border border-gray-200">Part of speech</th>
-                                                        <th className="px-3 py-2 border border-gray-200 text-right">Concepts</th>
-                                                        <th className="px-3 py-2 border border-gray-200 text-right">With ILI</th>
-                                                        <th className="px-3 py-2 border border-gray-200">Examples</th>
+                                                    <tr className="bg-slate-100 text-left">
+                                                        <th className="px-3 py-2 border border-slate-200">Part of speech</th>
+                                                        <th className="px-3 py-2 border border-slate-200 text-right">Concepts</th>
+                                                        <th className="px-3 py-2 border border-slate-200 text-right">With ILI</th>
+                                                        <th className="px-3 py-2 border border-slate-200">Examples</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
                                                     {summary.posStats.map((row, i) => (
-                                                        <tr key={row.pos} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                                                            <td className="px-3 py-2 border border-gray-200">{posToHumanReadable[row.pos] || row.pos}</td>
-                                                            <td className="px-3 py-2 border border-gray-200 text-right tabular-nums">{row.cnt.toLocaleString()}</td>
-                                                            <td className="px-3 py-2 border border-gray-200 text-right tabular-nums">{row.withIli.toLocaleString()}</td>
-                                                            <td className="px-3 py-2 border border-gray-200">
+                                                        <tr key={row.pos} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                                                            <td className="px-3 py-2 border border-slate-200">{posToHumanReadable[row.pos] || row.pos}</td>
+                                                            <td className="px-3 py-2 border border-slate-200 text-right tabular-nums">{row.cnt.toLocaleString()}</td>
+                                                            <td className="px-3 py-2 border border-slate-200 text-right tabular-nums">{row.withIli.toLocaleString()}</td>
+                                                            <td className="px-3 py-2 border border-slate-200">
                                                                 <div className="flex flex-wrap gap-x-3 gap-y-0.5">
                                                                     {(byPos[row.pos] || []).map((item, j) => (
                                                                         <a key={j}
@@ -3303,7 +3303,7 @@
                                                                             onClick={e => { onConceptLinkClick(e, item.synset_rowid); setActiveTab('browser'); }}
                                                                             onMouseEnter={e => showTooltip(item.synset_rowid, e)}
                                                                             onMouseLeave={hideTooltip}
-                                                                            className="text-blue-600 hover:underline">
+                                                                            className="text-indigo-600 hover:underline">
                                                                             {item.form}
                                                                         </a>
                                                                     ))}
@@ -3315,19 +3315,19 @@
                                             </table>
                                             </div>
                                         )}
-                                        {!provenanceReady && <p className="text-xs text-gray-500 mt-2">Load the provenance database for detailed statistics.</p>}
+                                        {!provenanceReady && <p className="text-xs text-slate-500 mt-2">Load the provenance database for detailed statistics.</p>}
                                     </div>
 
                                     {summary && summary.relDist.length > 0 && (
-                                        <div className="border-t border-gray-200 pt-4 mb-4">
-                                            <h3 className="font-medium text-sm text-gray-700 mb-3">Semantic relations</h3>
+                                        <div className="border-t border-slate-200 pt-4 mb-4">
+                                            <h3 className="font-medium text-sm text-slate-700 mb-3">Semantic relations</h3>
                                             <div className="overflow-x-auto">
                                             <table className="w-full text-sm border-collapse">
                                                 <thead>
-                                                    <tr className="bg-gray-100 text-left">
-                                                        <th className="px-3 py-2 border border-gray-200">Relation</th>
-                                                        <th className="px-3 py-2 border border-gray-200 text-right">Count</th>
-                                                        <th className="px-3 py-2 border border-gray-200">Example</th>
+                                                    <tr className="bg-slate-100 text-left">
+                                                        <th className="px-3 py-2 border border-slate-200">Relation</th>
+                                                        <th className="px-3 py-2 border border-slate-200 text-right">Count</th>
+                                                        <th className="px-3 py-2 border border-slate-200">Example</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
@@ -3335,17 +3335,17 @@
                                                         const srcLabel = row.ex_src_rowid ? getConceptLabel(row.ex_src_rowid, r.language)?.form : null;
                                                         const tgtLabel = row.ex_tgt_rowid ? getConceptLabel(row.ex_tgt_rowid, r.language)?.form : null;
                                                         return (
-                                                        <tr key={row.type} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                                                            <td className="px-3 py-2 border border-gray-200">{getRelLabel(row.type)}</td>
-                                                            <td className="px-3 py-2 border border-gray-200 text-right tabular-nums">{row.cnt.toLocaleString()}</td>
-                                                            <td className="px-3 py-2 border border-gray-200 text-xs">
+                                                        <tr key={row.type} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                                                            <td className="px-3 py-2 border border-slate-200">{getRelLabel(row.type)}</td>
+                                                            <td className="px-3 py-2 border border-slate-200 text-right tabular-nums">{row.cnt.toLocaleString()}</td>
+                                                            <td className="px-3 py-2 border border-slate-200 text-xs">
                                                                 {srcLabel && tgtLabel ? (
                                                                     <>
-                                                                        <a href={conceptHref(row.ex_src_rowid)} onClick={e => { onConceptLinkClick(e, row.ex_src_rowid); setActiveTab('browser'); }} onMouseEnter={e => showTooltip(row.ex_src_rowid, e)} onMouseLeave={hideTooltip} className="text-blue-600 hover:underline">{srcLabel}</a>
+                                                                        <a href={conceptHref(row.ex_src_rowid)} onClick={e => { onConceptLinkClick(e, row.ex_src_rowid); setActiveTab('browser'); }} onMouseEnter={e => showTooltip(row.ex_src_rowid, e)} onMouseLeave={hideTooltip} className="text-indigo-600 hover:underline">{srcLabel}</a>
                                                                         {' → '}
-                                                                        <a href={conceptHref(row.ex_tgt_rowid)} onClick={e => { onConceptLinkClick(e, row.ex_tgt_rowid); setActiveTab('browser'); }} onMouseEnter={e => showTooltip(row.ex_tgt_rowid, e)} onMouseLeave={hideTooltip} className="text-blue-600 hover:underline">{tgtLabel}</a>
+                                                                        <a href={conceptHref(row.ex_tgt_rowid)} onClick={e => { onConceptLinkClick(e, row.ex_tgt_rowid); setActiveTab('browser'); }} onMouseEnter={e => showTooltip(row.ex_tgt_rowid, e)} onMouseLeave={hideTooltip} className="text-indigo-600 hover:underline">{tgtLabel}</a>
                                                                     </>
-                                                                ) : <span className="text-gray-500">—</span>}
+                                                                ) : <span className="text-slate-500">—</span>}
                                                             </td>
                                                         </tr>
                                                         );
@@ -3357,30 +3357,30 @@
                                     )}
 
                                     {summary && summary.senseRelDist.length > 0 && (
-                                        <div className="border-t border-gray-200 pt-4 mb-4">
-                                            <h3 className="font-medium text-sm text-gray-700 mb-3">Sense relations</h3>
+                                        <div className="border-t border-slate-200 pt-4 mb-4">
+                                            <h3 className="font-medium text-sm text-slate-700 mb-3">Sense relations</h3>
                                             <div className="overflow-x-auto">
                                             <table className="w-full text-sm border-collapse">
                                                 <thead>
-                                                    <tr className="bg-gray-100 text-left">
-                                                        <th className="px-3 py-2 border border-gray-200">Relation</th>
-                                                        <th className="px-3 py-2 border border-gray-200 text-right">Count</th>
-                                                        <th className="px-3 py-2 border border-gray-200">Example</th>
+                                                    <tr className="bg-slate-100 text-left">
+                                                        <th className="px-3 py-2 border border-slate-200">Relation</th>
+                                                        <th className="px-3 py-2 border border-slate-200 text-right">Count</th>
+                                                        <th className="px-3 py-2 border border-slate-200">Example</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
                                                     {summary.senseRelDist.map((row, i) => (
-                                                        <tr key={row.type} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                                                            <td className="px-3 py-2 border border-gray-200">{getRelLabel(row.type)}</td>
-                                                            <td className="px-3 py-2 border border-gray-200 text-right tabular-nums">{row.cnt.toLocaleString()}</td>
-                                                            <td className="px-3 py-2 border border-gray-200 text-xs">
+                                                        <tr key={row.type} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                                                            <td className="px-3 py-2 border border-slate-200">{getRelLabel(row.type)}</td>
+                                                            <td className="px-3 py-2 border border-slate-200 text-right tabular-nums">{row.cnt.toLocaleString()}</td>
+                                                            <td className="px-3 py-2 border border-slate-200 text-xs">
                                                                 {row.src_form && row.tgt_form ? (
                                                                     <>
-                                                                        <a href={senseHref(row.ex_src_rowid)} onClick={e => { onSenseLinkClick(e, row.ex_src_rowid); setActiveTab('browser'); }} className="text-blue-600 hover:underline">{row.src_form}</a>
+                                                                        <a href={senseHref(row.ex_src_rowid)} onClick={e => { onSenseLinkClick(e, row.ex_src_rowid); setActiveTab('browser'); }} className="text-indigo-600 hover:underline">{row.src_form}</a>
                                                                         {' → '}
-                                                                        <a href={senseHref(row.ex_tgt_rowid)} onClick={e => { onSenseLinkClick(e, row.ex_tgt_rowid); setActiveTab('browser'); }} className="text-blue-600 hover:underline">{row.tgt_form}</a>
+                                                                        <a href={senseHref(row.ex_tgt_rowid)} onClick={e => { onSenseLinkClick(e, row.ex_tgt_rowid); setActiveTab('browser'); }} className="text-indigo-600 hover:underline">{row.tgt_form}</a>
                                                                     </>
-                                                                ) : <span className="text-gray-500">—</span>}
+                                                                ) : <span className="text-slate-500">—</span>}
                                                             </td>
                                                         </tr>
                                                     ))}
@@ -3405,65 +3405,65 @@
                             })();
                             const sortTh = (col, right) => {
                                 const active = wnSort.col === col;
-                                return <th className={`px-3 py-2 border border-gray-200 cursor-pointer select-none hover:bg-gray-200${right ? ' text-right' : ''}`} onClick={() => sortResources(col)}>{col}{active ? (wnSort.asc ? ' ▲' : ' ▼') : ''}</th>;
+                                return <th className={`px-3 py-2 border border-slate-200 cursor-pointer select-none hover:bg-slate-200${right ? ' text-right' : ''}`} onClick={() => sortResources(col)}>{col}{active ? (wnSort.asc ? ' ▲' : ' ▼') : ''}</th>;
                             };
                             return (
                             <div>
                                 <h2 className="text-xl font-bold mb-4">Contributing Wordnets</h2>
                                 {allResources.length === 0 ? (
-                                    <p className="text-gray-600">No resource metadata available.</p>
+                                    <p className="text-slate-600">No resource metadata available.</p>
                                 ) : (
                                     <div className="overflow-x-auto">
                                     <table className="w-full text-sm border-collapse">
                                         <thead>
-                                            <tr className="bg-gray-100 text-left">
+                                            <tr className="bg-slate-100 text-left">
                                                 {sortTh('Language')}
                                                 {sortTh('Name')}
                                                 {sortTh('Concepts', true)}
                                                 {sortTh('Senses', true)}
                                                 {sortTh('Version')}
-                                                <th className="px-3 py-2 border border-gray-200">Citation</th>
+                                                <th className="px-3 py-2 border border-slate-200">Citation</th>
                                                 {sortTh('Licence')}
                                             </tr>
                                         </thead>
                                         <tbody>
                                             {sortedResources.map((r, i) => (
                                                 <tr key={r.code + '|' + i}
-                                                    className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                                                    <td className="px-3 py-2 border border-gray-200 whitespace-nowrap">
+                                                    className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                                                    <td className="px-3 py-2 border border-slate-200 whitespace-nowrap">
                                                         {r.language
                                                             ? <span title={r.language} className="cursor-help">{getLangFullName(r.language)}</span>
                                                             : '—'}
                                                     </td>
-                                                    <td className="px-3 py-2 border border-gray-200 font-medium">
+                                                    <td className="px-3 py-2 border border-slate-200 font-medium">
                                                         {r.url
-                                                            ? <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{r.label || r.code}</a>
+                                                            ? <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">{r.label || r.code}</a>
                                                             : (r.label || r.code)}
                                                         <span className="float-right relative group/wni">
                                                             <button onClick={() => setSelectedWordnet(r.code)}
-                                                                    className="text-blue-600 hover:text-blue-800"
+                                                                    className="text-indigo-600 hover:text-indigo-800"
                                                                     title="Show wordnet summary">ⓘ</button>
-                                                            <div className="absolute right-0 top-full mt-1 hidden group-hover/wni:block bg-white border border-gray-200 rounded shadow-lg p-3 text-xs text-gray-700 z-40 w-56 space-y-1">
-                                                                {r.version && <div><span className="text-gray-500">Version:</span> {r.version}</div>}
-                                                                {r.language && <div><span className="text-gray-500">Language:</span> {getLangFullName(r.language)}</div>}
-                                                                {r.licence && <div><span className="text-gray-500">Licence:</span> {r.licence.startsWith('http') ? <a href={r.licence} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{shortLicence(r.licence)}</a> : shortLicence(r.licence)}</div>}
-                                                                {r.synset_count != null && <div><span className="text-gray-500">Concepts:</span> {r.synset_count.toLocaleString()}</div>}
-                                                                {r.sense_count != null && <div><span className="text-gray-500">Senses:</span> {r.sense_count.toLocaleString()}</div>}
-                                                                <div className="pt-1 border-t border-gray-100 text-gray-500 italic">Click for full summary (may be slow)</div>
+                                                            <div className="absolute right-0 top-full mt-1 hidden group-hover/wni:block bg-white border border-slate-200 rounded shadow-lg p-3 text-xs text-slate-700 z-40 w-56 space-y-1">
+                                                                {r.version && <div><span className="text-slate-500">Version:</span> {r.version}</div>}
+                                                                {r.language && <div><span className="text-slate-500">Language:</span> {getLangFullName(r.language)}</div>}
+                                                                {r.licence && <div><span className="text-slate-500">Licence:</span> {r.licence.startsWith('http') ? <a href={r.licence} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">{shortLicence(r.licence)}</a> : shortLicence(r.licence)}</div>}
+                                                                {r.synset_count != null && <div><span className="text-slate-500">Concepts:</span> {r.synset_count.toLocaleString()}</div>}
+                                                                {r.sense_count != null && <div><span className="text-slate-500">Senses:</span> {r.sense_count.toLocaleString()}</div>}
+                                                                <div className="pt-1 border-t border-slate-100 text-slate-500 italic">Click for full summary (may be slow)</div>
                                                             </div>
                                                         </span>
                                                     </td>
-                                                    <td className="px-3 py-2 border border-gray-200 text-right tabular-nums">{r.synset_count != null ? r.synset_count.toLocaleString() : '—'}</td>
-                                                    <td className="px-3 py-2 border border-gray-200 text-right tabular-nums">{r.sense_count != null ? r.sense_count.toLocaleString() : '—'}</td>
-                                                    <td className="px-3 py-2 border border-gray-200 whitespace-nowrap">{r.version || '—'}</td>
-                                                    <td className="px-3 py-2 border border-gray-200">
+                                                    <td className="px-3 py-2 border border-slate-200 text-right tabular-nums">{r.synset_count != null ? r.synset_count.toLocaleString() : '—'}</td>
+                                                    <td className="px-3 py-2 border border-slate-200 text-right tabular-nums">{r.sense_count != null ? r.sense_count.toLocaleString() : '—'}</td>
+                                                    <td className="px-3 py-2 border border-slate-200 whitespace-nowrap">{r.version || '—'}</td>
+                                                    <td className="px-3 py-2 border border-slate-200">
                                                         {r.citation
-                                                            ? <details><summary className="cursor-pointer text-blue-600 hover:underline list-none w-fit">cite</summary><p className="mt-1 text-xs text-gray-600 max-w-sm">{r.citation}</p></details>
+                                                            ? <details><summary className="cursor-pointer text-indigo-600 hover:underline list-none w-fit">cite</summary><p className="mt-1 text-xs text-slate-600 max-w-sm">{r.citation}</p></details>
                                                             : '—'}
                                                     </td>
-                                                    <td className="px-3 py-2 border border-gray-200 whitespace-nowrap">
+                                                    <td className="px-3 py-2 border border-slate-200 whitespace-nowrap">
                                                         {r.licence
-                                                            ? <a href={r.licence} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{shortLicence(r.licence)}</a>
+                                                            ? <a href={r.licence} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">{shortLicence(r.licence)}</a>
                                                             : '—'}
                                                     </td>
                                                 </tr>
@@ -3479,7 +3479,7 @@
 
                     {siteConfig.footer && (
                     <footer className="mt-auto py-4">
-                        <div className="max-w-4xl mx-auto px-4 border-t border-gray-200 pt-4 text-center text-sm text-gray-600">
+                        <div className="max-w-4xl mx-auto px-4 border-t border-slate-200 pt-4 text-center text-sm text-slate-600">
                             {typeof siteConfig.footer === 'string'
                                 ? <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(siteConfig.footer) }} />
                                 : <>
@@ -3513,11 +3513,11 @@
                     const top = ct.y + 16;
                     return (
                         <div style={{ position: 'fixed', left, top, zIndex: 9999, maxWidth: 280, pointerEvents: 'none' }}
-                             className="bg-white border border-gray-300 rounded shadow-lg px-3 py-2 text-sm">
-                            {li && <div className="font-semibold text-gray-800">{li.form}</div>}
-                            <div className="text-gray-500 italic text-xs">{getPosName(concept.oc)}</div>
-                            {def && <div className="text-gray-700 mt-1">{def.length > 160 ? def.slice(0, 160) + '…' : def}</div>}
-                            {firstEx && <div className="text-gray-500 italic mt-0.5 text-xs">"{renderExample(firstEx)}"</div>}
+                             className="bg-white border border-slate-300 rounded shadow-lg px-3 py-2 text-sm">
+                            {li && <div className="font-semibold text-slate-800">{li.form}</div>}
+                            <div className="text-slate-500 italic text-xs">{getPosName(concept.oc)}</div>
+                            {def && <div className="text-slate-700 mt-1">{def.length > 160 ? def.slice(0, 160) + '…' : def}</div>}
+                            {firstEx && <div className="text-slate-500 italic mt-0.5 text-xs">"{renderExample(firstEx)}"</div>}
                         </div>
                     );
                 })()}
