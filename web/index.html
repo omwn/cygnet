@@ -2130,15 +2130,15 @@
                                         : null
                                 )}
                             </div>
-                            <nav className="flex flex-col md:flex-row md:items-center gap-3 mt-3 -mb-px">
-                                <div className="flex gap-1 flex-wrap">
+                            <nav className="flex flex-col md:flex-row md:items-center gap-3 mt-3 mb-3">
+                                <div className="inline-flex flex-wrap gap-1 rounded-xl bg-slate-100 p-1">
                                     {[['browser','Browse'],['about','About'],['publications','Publications'],['wordnets','Wordnets']].map(([tab, label]) => (
                                         <button key={tab}
                                             onClick={() => { setActiveTab(tab); if (tab === 'wordnets') setSelectedWordnet(null); }}
-                                            className={`px-4 py-2 rounded-t-lg border-b-2 transition-colors ${
+                                            className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                                                 activeTab === tab
-                                                    ? 'bg-slate-50 border-indigo-500 text-indigo-700 font-medium'
-                                                    : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                                                    ? 'bg-white text-slate-900 shadow-sm'
+                                                    : 'text-slate-600 hover:text-slate-900'
                                             }`}
                                         >{label}</button>
                                     ))}
