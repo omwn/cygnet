@@ -10,8 +10,11 @@
     <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.js"></script>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 
     <style>
+        body { font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif; }
         .sense-box:has(.concept-inner:hover) { background-color: transparent !important; }
     </style>
 </head>
@@ -2103,11 +2106,11 @@
                                     {siteConfig.url
                                         ? <a href={siteConfig.url} target="_blank" rel="noopener noreferrer" className="hover:opacity-80 flex items-center gap-1.5">
                                               {siteConfig.icon && (siteConfig.icon.includes('.') ? <img src={siteConfig.icon} alt="" className="h-10" /> : <h1 className="text-4xl -mt-0.5">{siteConfig.icon}</h1>)}
-                                              {siteConfig.title && <h1 className="text-3xl font-bold text-slate-800"> {siteConfig.title}</h1>}
+                                              {siteConfig.title && <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-slate-800"> {siteConfig.title}</h1>}
                                           </a>
                                         : <button onClick={handleLogoClick} className="text-left hover:opacity-80 flex items-center gap-1.5">
                                               {siteConfig.icon && (siteConfig.icon.includes('.') ? <img src={siteConfig.icon} alt="" className="h-10" /> : <h1 className="text-4xl -mt-0.5">{siteConfig.icon}</h1>)}
-                                              {siteConfig.title && <h1 className="text-3xl font-bold text-slate-800"> {siteConfig.title}</h1>}
+                                              {siteConfig.title && <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-slate-800"> {siteConfig.title}</h1>}
                                           </button>
                                     }
                                 </div>
@@ -2116,11 +2119,11 @@
                                         ? (
                                             siteConfig.logo.url
                                                 ? <a href={siteConfig.logo.url} target="_blank" rel="noopener noreferrer" className="hover:opacity-80 flex items-center gap-2">
-                                                      {siteConfig.logo.name && <span className="text-3xl font-bold text-slate-800">{siteConfig.logo.name}</span>}
+                                                      {siteConfig.logo.name && <span className="text-2xl sm:text-3xl font-semibold tracking-tight text-slate-800">{siteConfig.logo.name}</span>}
                                                       <img src={siteConfig.logo.src} alt={siteConfig.logo.alt || ''} className="h-10" />
                                                   </a>
                                                 : <span className="flex items-center gap-2">
-                                                      {siteConfig.logo.name && <span className="text-3xl font-bold text-slate-800">{siteConfig.logo.name}</span>}
+                                                      {siteConfig.logo.name && <span className="text-2xl sm:text-3xl font-semibold tracking-tight text-slate-800">{siteConfig.logo.name}</span>}
                                                       <img src={siteConfig.logo.src} alt={siteConfig.logo.alt || ''} className="h-10" />
                                                   </span>
                                           )
@@ -2318,7 +2321,7 @@
                             // activeTab to 'about' as soon as dbError is set,
                             // which would otherwise make this unreachable.
                             <div className="max-w-md mx-auto mt-16 text-center">
-                                <h2 className="font-bold text-xl mb-2">Error Loading Database</h2>
+                                <h2 className="font-semibold text-xl mb-2">Error Loading Database</h2>
                                 <p className="mb-4 text-slate-700">{dbError}</p>
                                 <p className="text-sm text-slate-500">
                                     {siteConfig.databases?.main?.filename && <>On localhost, make sure <code>{siteConfig.databases.main.filename}</code> is in the same directory as this HTML file.<br/></>}
@@ -2407,7 +2410,7 @@
                                                     <div key={lang} className="bg-white rounded-2xl border border-slate-200 shadow-sm">
                                                         <button onClick={() => toggleSection(`lang-${lang}`)}
                                                             className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 rounded-t-2xl">
-                                                            <h3 className="text-lg font-bold text-slate-800" title={getLangFullName(lang)}>{getLangName(lang)}</h3>
+                                                            <h3 className="text-lg font-semibold text-slate-800" title={getLangFullName(lang)}>{getLangName(lang)}</h3>
                                                             <span className="text-slate-500">{collapsedSections[`lang-${lang}`] ? '▶' : '▼'}</span>
                                                         </button>
                                                         {!collapsedSections[`lang-${lang}`] && (
@@ -2663,7 +2666,7 @@
                                                 return (
                                                 <div className="mb-4">
                                                     <div className="flex items-center gap-3 mb-2">
-                                                        <h3 className="font-bold text-base">Related Concepts</h3>
+                                                        <h3 className="font-semibold text-base">Related Concepts</h3>
                                                         <div className="flex rounded border border-slate-300 overflow-hidden text-xs">
                                                             {['graph','text','none'].map(mode => (
                                                                 <button key={mode}
@@ -2820,7 +2823,7 @@
                                                 const targetLabel = pathTargetRowid ? getConceptLabel(pathTargetRowid, definitionLanguage) : null;
                                                 return (
                                                 <div className="mb-4">
-                                                    <h3 className="font-bold mb-2 text-base">Path to concept</h3>
+                                                    <h3 className="font-semibold mb-2 text-base">Path to concept</h3>
                                                     <div className="flex gap-2 mb-2 items-center flex-wrap">
                                                         <div className="relative">
                                                             <input
@@ -2918,7 +2921,7 @@
 
                                             {altDefs.length > 0 && (
                                                 <div className="mb-4">
-                                                    <h3 className="font-bold mb-2 text-base">Other definitions:</h3>
+                                                    <h3 className="font-semibold mb-2 text-base">Other definitions:</h3>
                                                     <div className="space-y-1 ml-2">
                                                         {altDefs.map(([lang, def]) => (
                                                             <div key={lang} className="text-sm">
@@ -2932,7 +2935,7 @@
                                             )}
 
                                             <div className="mb-4">
-                                                <h3 className="font-bold mb-2 text-base">All forms expressing this concept:</h3>
+                                                <h3 className="font-semibold mb-2 text-base">All forms expressing this concept:</h3>
                                                 <div className="space-y-1 ml-2">
                                                     {concept.s && Object.entries(concept.s)
                                                         .sort(([a], [b]) => getLangName(a).localeCompare(getLangName(b)))
@@ -2975,7 +2978,7 @@
                                         <div>
                                             <button onClick={handleBackToSearch} className="mb-4 text-indigo-600 hover:underline">← Back to search</button>
                                             <div className="mb-4">
-                                                <h2 className="text-2xl font-bold mb-1">{sense.l}</h2>
+                                                <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight mb-1">{sense.l}</h2>
                                                 {showPronunciation && sense.p && sense.p.length > 0 && (
                                                     <div className="text-base text-slate-500 mb-1">
                                                         {sense.p.map((p, i) => (
@@ -2990,7 +2993,7 @@
                                             </div>
                                             {sense.v && sense.v.length > 0 && (
                                                 <div className="mb-4">
-                                                    <h3 className="font-bold mb-2">Variants:</h3>
+                                                    <h3 className="font-semibold mb-2">Variants:</h3>
                                                     <div className="ml-2 space-y-1">
                                                         {sense.v.map((v, i) => (
                                                             <div key={i}><button onClick={() => handleWordformClick(v)} className="text-indigo-600 hover:underline">{v}</button></div>
@@ -2999,7 +3002,7 @@
                                                 </div>
                                             )}
                                             <div className="mb-4">
-                                                <h3 className="font-bold mb-2">Concept:</h3>
+                                                <h3 className="font-semibold mb-2">Concept:</h3>
                                                 {(() => {
                                                     const cid = sense.c?.toString();
                                                     const li = cid ? getConceptLabel(parseInt(cid), definitionLanguage) : null;
@@ -3019,7 +3022,7 @@
                                             </div>
                                             {sense.ex && sense.ex.length > 0 && (
                                                 <div className="mb-4">
-                                                    <h3 className="font-bold mb-2">Examples:</h3>
+                                                    <h3 className="font-semibold mb-2">Examples:</h3>
                                                     <div className="ml-2 space-y-1">
                                                         {sense.ex.map((ex, i) => (
                                                             <div key={i} className="text-slate-700">"{renderExample(ex)}"</div>
@@ -3029,7 +3032,7 @@
                                             )}
                                             {sense.sr && sense.sr.length > 0 && (
                                                 <div className="mb-4">
-                                                    <h3 className="font-bold mb-2">Sense Relations:</h3>
+                                                    <h3 className="font-semibold mb-2">Sense Relations:</h3>
                                                     <div className="ml-2 space-y-1 text-sm">
                                                         {sense.sr.map((rel, i) => {
                                                             const toSense = loadedSenses[rel.to.toString()] ?? querySense(parseInt(rel.to));
@@ -3055,7 +3058,7 @@
 
                         {activeTab === 'about' && (
                             <div>
-                                <h2 className="text-xl font-bold mb-4">About</h2>
+                                <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight mb-4">About</h2>
                                 {siteConfig.about?.intro &&
                                     <div className="text-slate-700 mb-4"
                                          dangerouslySetInnerHTML={{ __html: sanitizeHtml(siteConfig.about.intro) }} />
@@ -3080,14 +3083,14 @@
                                     </div>
                                 )}
                                 <div className="border-t border-slate-200 pt-4 mb-4">
-                                    <h3 className="font-medium text-sm text-slate-700 mb-2">Citation</h3>
+                                    <h3 className="text-base font-semibold text-slate-900 mb-2">Citation</h3>
                                     {siteConfig.about?.citation &&
                                         <div className="text-sm text-slate-600"
                                              dangerouslySetInnerHTML={{ __html: sanitizeHtml(siteConfig.about.citation) }} />
                                     }
                                 </div>
                                 <div className="border-t border-slate-200 pt-4 mb-4">
-                                    <h3 className="font-medium text-sm text-slate-700 mb-2">Download</h3>
+                                    <h3 className="text-base font-semibold text-slate-900 mb-2">Download</h3>
                                     {(() => {
                                         const rawDbs = siteConfig.databases;
                                         const dbs = !rawDbs ? []
@@ -3119,14 +3122,14 @@
                                     })()}
                                 </div>
                                 <div className="border-t border-slate-200 pt-4 mb-4">
-                                    <h3 className="font-medium text-sm text-slate-700 mb-2">Language Data</h3>
+                                    <h3 className="text-base font-semibold text-slate-900 mb-2">Language Data</h3>
                                     {siteConfig.about?.languageData &&
                                         <div className="text-sm text-slate-600"
                                              dangerouslySetInnerHTML={{ __html: sanitizeHtml(siteConfig.about.languageData) }} />
                                     }
                                 </div>
                                 <div className="border-t border-slate-200 pt-4 mb-4">
-                                    <h3 className="font-medium text-sm text-slate-700 mb-2">Images</h3>
+                                    <h3 className="text-base font-semibold text-slate-900 mb-2">Images</h3>
                                     <p className="text-sm text-slate-600">
                                         Concept images are pictograms from <a href="https://arasaac.org/" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">ARASAAC</a> (Aragonese Portal of Augmentative and Alternative Communication), by Sergio Palao. License: <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">CC BY-NC-SA 4.0</a>. Owner: Government of Aragon (Spain).
                                     </p>
@@ -3135,7 +3138,7 @@
                                     </p>
                                 </div>
                                 <div className="border-t border-slate-200 pt-4">
-                                    <h3 className="font-medium text-sm text-slate-700 mb-2">Cache</h3>
+                                    <h3 className="text-base font-semibold text-slate-900 mb-2">Cache</h3>
                                     <p className="text-sm text-slate-500 mb-2">
                                         The database is cached locally in your browser to avoid re-downloading on each visit.
                                     </p>
@@ -3178,14 +3181,14 @@
                             const wnsWithCitation = allResources.filter(r => r.citation);
                             return (
                             <div>
-                                <h2 className="text-xl font-bold mb-4">Publications</h2>
+                                <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight mb-4">Publications</h2>
                                 <ul className="space-y-4 mb-8">
                                     {(siteConfig.publications || []).map((pub, i) => (
                                         <li key={`cfg-pub-${i}`} className="text-sm text-slate-800"
                                             dangerouslySetInnerHTML={{ __html: sanitizeHtml(pub) }} />
                                     ))}
                                 </ul>
-                                <h2 className="text-xl font-bold mb-2">Wordnet Citations</h2>
+                                <h2 className="text-xl font-semibold mb-2">Wordnet Citations</h2>
                                 <p className="text-sm text-slate-500 italic mb-4">Citation data taken from each wordnet's source XML.</p>
                                 {wnsWithCitation.length === 0
                                     ? <p className="text-sm text-slate-500">No wordnet citation data available (database not loaded).</p>
@@ -3241,11 +3244,11 @@
                                             className="text-sm text-indigo-600 hover:underline mb-4 block">
                                         ← Back to Wordnets
                                     </button>
-                                    <h2 className="text-xl font-bold mb-1">{r.label || r.code}</h2>
+                                    <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight mb-1">{r.label || r.code}</h2>
                                     {r.language && <p className="text-sm text-slate-500 mb-4">{getLangFullName(r.language)} ({r.language})</p>}
 
                                     <div className="border-t border-slate-200 pt-4 mb-4">
-                                        <h3 className="font-medium text-sm text-slate-700 mb-2">Metadata</h3>
+                                        <h3 className="text-base font-semibold text-slate-900 mb-2">Metadata</h3>
                                         <dl className="grid grid-cols-[8rem_1fr] gap-x-2 gap-y-1 text-sm">
                                             {metaRows.map(([label, value]) => (
                                                 <React.Fragment key={label}>
@@ -3409,7 +3412,7 @@
                             };
                             return (
                             <div>
-                                <h2 className="text-xl font-bold mb-4">Contributing Wordnets</h2>
+                                <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight mb-4">Contributing Wordnets</h2>
                                 {allResources.length === 0 ? (
                                     <p className="text-slate-600">No resource metadata available.</p>
                                 ) : (
