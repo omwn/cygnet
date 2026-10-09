@@ -16,6 +16,10 @@
     <style>
         body { font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif; }
         .sense-box:has(.concept-inner:hover) { background-color: transparent !important; }
+        @keyframes tooltip-in {
+            from { opacity: 0; transform: scale(0.96); }
+            to   { opacity: 1; transform: scale(1); }
+        }
     </style>
 </head>
 <body>
@@ -2176,7 +2180,7 @@
                                         <InfoIcon className="w-5 h-5" />
                                     </button>
                                     {!helpOpen && (
-                                        <div onClick={() => setHelpOpen(true)} className="absolute right-0 top-full mt-1 hidden group-hover:block bg-white border border-slate-200 rounded shadow-lg p-3 text-xs text-slate-700 z-30 w-64 space-y-1.5 cursor-pointer">
+                                        <div onClick={() => setHelpOpen(true)} className="absolute right-0 top-full mt-1 hidden group-hover:block bg-white border border-slate-200 rounded-lg shadow-xl ring-1 ring-black/5 p-3 text-xs text-slate-700 z-30 w-64 space-y-1.5 cursor-pointer">
                                             <div><span className="font-mono font-semibold">word</span> — exact match</div>
                                             <div><span className="font-mono font-semibold">hot*</span> or <span className="font-mono font-semibold">*ness</span> — glob (<span className="font-mono">*</span> = any characters, <span className="font-mono">?</span> = one)</div>
                                             <div><span className="font-mono font-semibold">i1234</span> or <span className="font-mono font-semibold">cili.i1234</span> — look up concept by ILI</div>
@@ -3493,9 +3497,9 @@
                                                             : (r.label || r.code)}
                                                         <span className="float-right relative group/wni">
                                                             <button onClick={() => setSelectedWordnet(r.code)}
-                                                                    className="text-indigo-600 hover:text-indigo-800"
-                                                                    title="Show wordnet summary">ⓘ</button>
-                                                            <div className="absolute right-0 top-full mt-1 hidden group-hover/wni:block bg-white border border-slate-200 rounded shadow-lg p-3 text-xs text-slate-700 z-40 w-56 space-y-1">
+                                                                    className="text-indigo-600 hover:text-indigo-800 align-middle"
+                                                                    title="Show wordnet summary"><InfoIcon className="w-4 h-4" /></button>
+                                                            <div className="absolute right-0 top-full mt-1 hidden group-hover/wni:block bg-white border border-slate-200 rounded-lg shadow-xl ring-1 ring-black/5 p-3 text-xs text-slate-700 z-40 w-56 space-y-1">
                                                                 {r.version && <div><span className="text-slate-500">Version:</span> {r.version}</div>}
                                                                 {r.language && <div><span className="text-slate-500">Language:</span> {getLangFullName(r.language)}</div>}
                                                                 {r.licence && <div><span className="text-slate-500">Licence:</span> {r.licence.startsWith('http') ? <a href={r.licence} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">{shortLicence(r.licence)}</a> : shortLicence(r.licence)}</div>}
@@ -3561,11 +3565,17 @@
                     const li = getConceptLabel(ct.id, definitionLanguage);
                     const allSenseIds = concept.s ? Object.values(concept.s).flat().map(s => s.toString()) : [];
                     const firstEx = allSenseIds.map(sid => loadedSenses[sid]?.ex?.[0]).find(Boolean);
-                    const left = Math.min(ct.x + 14, window.innerWidth - 300);
-                    const top = ct.y + 16;
+                    // Clamp both axes -- the pointer-relative offset alone can place the
+                    // tooltip off-screen on the right (narrow viewport) or below the
+                    // bottom (cursor near the bottom of a tall results list).
+                    const TOOLTIP_W = 280, TOOLTIP_H_EST = 140;
+                    const left = Math.max(8, Math.min(ct.x + 14, window.innerWidth - TOOLTIP_W - 8));
+                    const top = (ct.y + 16 + TOOLTIP_H_EST > window.innerHeight)
+                        ? Math.max(8, ct.y - TOOLTIP_H_EST - 8)
+                        : ct.y + 16;
                     return (
-                        <div style={{ position: 'fixed', left, top, zIndex: 9999, maxWidth: 280, pointerEvents: 'none' }}
-                             className="bg-white border border-slate-300 rounded shadow-lg px-3 py-2 text-sm">
+                        <div style={{ position: 'fixed', left, top, zIndex: 9999, maxWidth: TOOLTIP_W, pointerEvents: 'none' }}
+                             className="bg-white border border-slate-200 rounded-lg shadow-xl ring-1 ring-black/5 px-3 py-2 text-sm animate-[tooltip-in_0.1s_ease-out]">
                             {li && <div className="font-semibold text-slate-800">{li.form}</div>}
                             <div className="text-slate-500 italic text-xs">{getPosName(concept.oc)}</div>
                             {def && <div className="text-slate-700 mt-1">{def.length > 160 ? def.slice(0, 160) + '…' : def}</div>}
