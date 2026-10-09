@@ -227,6 +227,14 @@ class TestSearchHelpButton:
         page_ready.locator('text=exact match').click()
         expect(page_ready.locator('text=Filtering & display')).to_be_visible()
 
+    def test_mobile_close_button_closes_help_panel(self, page_ready: Page):
+        """The panel's close button (visible on narrow viewports) closes it."""
+        page_ready.set_viewport_size({'width': 390, 'height': 700})
+        page_ready.locator('button[title="Help"]').click()
+        expect(page_ready.locator('text=Filtering & display')).to_be_visible()
+        page_ready.locator('button[aria-label="Close"]').click()
+        expect(page_ready.locator('text=Filtering & display')).to_have_count(0)
+
 
 # ---------------------------------------------------------------------------
 # Exact search
@@ -339,7 +347,7 @@ class TestDefinitionSearch:
         page_ready.wait_for_selector('text=Search filters', timeout=3_000)
 
         en_label = (
-            page_ready.locator('div.flex.flex-wrap.gap-2 label')
+            page_ready.locator('div.grid.grid-cols-2 label')
             .filter(has_text='English')
             .first
         )

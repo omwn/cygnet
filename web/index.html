@@ -2185,18 +2185,26 @@
                                         </div>
                                     )}
                                     {helpOpen && (
-                                        <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded shadow-lg z-20 w-80 p-4 text-sm text-slate-700 space-y-3">
-                                            <p>Type in the search box and press <kbd className="px-1 py-0.5 bg-slate-100 border border-slate-300 rounded text-xs">Enter</kbd> to search. Results are <strong>senses</strong> — a word in a specific meaning. Click a sense to open its <strong>concept view</strong>, which shows relations (hypernyms, hyponyms, …) and lexicalizations across all languages.</p>
-                                            <div className="space-y-1">
-                                                <p className="font-semibold text-slate-500 text-xs uppercase tracking-wide">Search syntax</p>
-                                                <div><span className="font-mono font-semibold">dog</span> — exact word match</div>
-                                                <div><span className="font-mono font-semibold">dog*</span> or <span className="font-mono font-semibold">*ness</span> — wildcard (<span className="font-mono">*</span> = any characters, <span className="font-mono">?</span> = one)</div>
-                                                <div><span className="font-mono font-semibold">def:bright</span> — search inside definitions</div>
-                                                <div><span className="font-mono font-semibold">i1234</span> — look up concept by ILI</div>
+                                        <div className="fixed sm:absolute left-3 right-3 sm:left-auto sm:right-0 top-20 sm:top-full sm:mt-1.5 bg-white border border-slate-200 rounded-xl shadow-xl ring-1 ring-black/5 z-20 sm:w-96 max-h-[75vh] overflow-y-auto">
+                                            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+                                                <h3 className="text-sm font-semibold text-slate-900">Search help</h3>
+                                                <button onClick={() => setHelpOpen(false)} aria-label="Close" className="sm:hidden text-slate-400 hover:text-slate-700 p-1 -m-1">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-5 h-5"><path d="M18 6 6 18M6 6l12 12" /></svg>
+                                                </button>
                                             </div>
-                                            <div className="space-y-1">
-                                                <p className="font-semibold text-slate-500 text-xs uppercase tracking-wide">Filtering &amp; display</p>
-                                                <p>Use <strong>⚙ Settings</strong> to filter results by language or part of speech, and to set the display language for definitions and synset labels.</p>
+                                            <div className="p-4 text-sm text-slate-700 space-y-4">
+                                                <p>Type in the search box and press <kbd className="px-1 py-0.5 bg-slate-100 border border-slate-300 rounded text-xs">Enter</kbd> to search. Results are <strong>senses</strong> — a word in a specific meaning. Click a sense to open its <strong>concept view</strong>, which shows relations (hypernyms, hyponyms, …) and lexicalizations across all languages.</p>
+                                                <div className="space-y-1">
+                                                    <p className="font-semibold text-slate-500 text-xs uppercase tracking-wide">Search syntax</p>
+                                                    <div><span className="font-mono font-semibold">dog</span> — exact word match</div>
+                                                    <div><span className="font-mono font-semibold">dog*</span> or <span className="font-mono font-semibold">*ness</span> — wildcard (<span className="font-mono">*</span> = any characters, <span className="font-mono">?</span> = one)</div>
+                                                    <div><span className="font-mono font-semibold">def:bright</span> — search inside definitions</div>
+                                                    <div><span className="font-mono font-semibold">i1234</span> — look up concept by ILI</div>
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <p className="font-semibold text-slate-500 text-xs uppercase tracking-wide">Filtering &amp; display</p>
+                                                    <p>Use <strong>⚙ Settings</strong> to filter results by language or part of speech, and to set the display language for definitions and synset labels.</p>
+                                                </div>
                                             </div>
                                         </div>
                                     )}
@@ -2212,7 +2220,13 @@
                                         {hasActiveSettings && <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-indigo-500 rounded-full" />}
                                     </button>
                                     {settingsOpen && (
-                                        <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded shadow-lg z-20 w-80 max-h-[80vh] overflow-y-auto">
+                                        <div className="fixed sm:absolute left-3 right-3 sm:left-auto sm:right-0 top-20 sm:top-full sm:mt-1.5 bg-white border border-slate-200 rounded-xl shadow-xl ring-1 ring-black/5 z-20 sm:w-96 max-h-[75vh] overflow-y-auto">
+                                            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 sticky top-0 bg-white">
+                                                <h3 className="text-sm font-semibold text-slate-900">Settings</h3>
+                                                <button onClick={() => setSettingsOpen(false)} aria-label="Close" className="sm:hidden text-slate-400 hover:text-slate-700 p-1 -m-1">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-5 h-5"><path d="M18 6 6 18M6 6l12 12" /></svg>
+                                                </button>
+                                            </div>
                                             <div className="p-4 space-y-4">
                                                 <div>
                                                     <h4 className="font-semibold text-slate-500 mb-2 text-xs uppercase tracking-wide">General</h4>
@@ -2274,9 +2288,9 @@
                                                                         className="text-xs text-indigo-600 hover:underline">clear</button>
                                                                 )}
                                                             </div>
-                                                            <div className="flex flex-wrap gap-2">
+                                                            <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 max-h-48 overflow-y-auto pr-1 border border-slate-100 rounded-lg p-2">
                                                                 {allLanguages.sort((a, b) => getLangName(a).localeCompare(getLangName(b))).map(lang => (
-                                                                    <label key={lang} className="flex items-center gap-1 cursor-pointer">
+                                                                    <label key={lang} className="flex items-center gap-1.5 cursor-pointer">
                                                                         <input type="checkbox" checked={languageFilter.has(lang)}
                                                                             onChange={() => {
                                                                                 const nf = new Set(languageFilter);
@@ -2284,8 +2298,8 @@
                                                                                 setLanguageFilter(nf);
                                                                                 setSenseFilter(null);
                                                                                 if (currentSearch) performSearch(currentSearch, nf, posFilter, null);
-                                                                            }} className="cursor-pointer" />
-                                                                        <span className="text-xs">{getLangFullName(lang)}</span>
+                                                                            }} className="cursor-pointer shrink-0" />
+                                                                        <span className="text-xs truncate">{getLangFullName(lang)}</span>
                                                                     </label>
                                                                 ))}
                                                             </div>
