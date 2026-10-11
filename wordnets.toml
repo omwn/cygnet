@@ -1,5 +1,7 @@
 # Wordnets to include in Cygnet.
 # Keys are BCP 47 / ISO 639 language codes; values are lists of source archive URLs.
+# The key "mul" is for multi-lexicon releases linked by a shared concepts
+# lexicon (see CUSTOMIZE.md).
 # To add a language, append an entry here and re-run build.sh.
 
 # English — Open English WordNet

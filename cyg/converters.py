@@ -11,6 +11,14 @@ import lzma
 import sys
 from collections import defaultdict
 from lxml import etree
+
+from cyg.multilex import (
+    SharedConcepts,
+    dc_attr,
+    dc_identifier,
+    encode_for_xml_id,
+    fix_language,
+)
 import spacy
 import pyinflect
 from nltk.stem import WordNetLemmatizer
@@ -130,6 +138,8 @@ CONCEPT_REVERSE_RELATIONS: dict[str, str | None] = {
     # Figurative
     'metaphor':          'has_metaphor',
     'metonym':           'has_metonym',
+    # Pronoun possession (omw-pronoun: relType="other" with dc:type)
+    'possessive':        'possessor',
     # Symmetric
     'antonym':           'antonym',
     'similar':           'similar',
@@ -180,9 +190,29 @@ def _spacy_candidates(lang: str) -> list[str]:
 class WordNetToCygnetConverter:
     """Converts WordNet LMF lexical resources to Cygnet format."""
 
-    def __init__(self, cili_path: str, relations_path: str | None = None, skip_cili_defns=False):
+    # Parsed CILI files, shared by every converter in the process: a build
+    # may convert hundreds of small lexicons against the same CILI.
+    _cili_cache: dict[str, tuple[dict, dict, int]] = {}
+    # Concept relations of the English base output, likewise shared.
+    _relations_cache: dict[str, frozenset[tuple[str, str, str]]] = {}
 
+    def __init__(self, cili_path: str, relations_path: str | None = None, skip_cili_defns=False,
+                 shared: SharedConcepts | None = None, language: str | None = None):
+        """Set up a converter.
+
+        Args:
+            cili_path: Path to the CILI file (Cygnet XML)
+            relations_path: Optional English-base output whose concept
+                relations should not be repeated
+            skip_cili_defns: Do not add glosses to CILI concepts
+            shared: Concept identity shared across a multi-lexicon release;
+                synsets are matched to concepts by dc:identifier
+            language: Language code to use instead of the Lexicon's own
+                (e.g. the code an existing wordnet already uses)
+        """
         self.skip_cili_defns = skip_cili_defns
+        self.shared = shared
+        self.language_override = language
 
         self.cili_path = cili_path
         self.relations_path = relations_path
@@ -249,6 +279,13 @@ class WordNetToCygnetConverter:
                 'count': 0
             },
             'missing_lemmas': {
+                'count': 0
+            },
+            'unlexicalized_skipped': {
+                'synsets': 0,
+                'senses': 0
+            },
+            'shared_concept_not_found': {
                 'count': 0
             },
             'sense_missing_synset': {
@@ -341,9 +378,15 @@ class WordNetToCygnetConverter:
             self.lexicon_attrs = dict(lexicon_elem.attrib)
             self.lexicon_id = lexicon_elem.get('id')
             self.lexicon_version = lexicon_elem.get('version')
-            self.lexicon_language = lexicon_elem.get('language')
+            self._set_language(lexicon_elem.get('language'))
 
         return root, tree
+
+    def _set_language(self, source_language: str | None) -> None:
+        """Set the lexicon language: the override if given, else the fixed source code."""
+        self.lexicon_language = self.language_override or fix_language(source_language)
+        if self.lexicon_language:
+            self.lexicon_attrs['language'] = self.lexicon_language
 
     def _open_file(self, filepath: str):
         """
@@ -816,26 +859,8 @@ class WordNetToCygnetConverter:
         return new_start, new_end
 
     def _encode_for_xml_id(self, text: str) -> str:
-        """
-        Convert any Unicode string to a safe XML ID format with one-to-one correspondence.
-        Each unique input string produces a unique output key.
-
-        Encoding rules:
-        - ASCII letters (a-z, A-Z): pass through unchanged
-        - ASCII digits (0-9): pass through unchanged
-        - Everything else (including punctuation, spaces, non-ASCII Unicode):
-          encode as xHHHH where HHHH is the 4-digit uppercase hex Unicode codepoint
-        """
-        encoded = []
-        for char in text:
-            # Only allow ASCII alphanumeric (a-z, A-Z, 0-9)
-            if ('a' <= char <= 'z') or ('A' <= char <= 'Z') or ('0' <= char <= '9'):
-                encoded.append(char)
-            else:
-                # Encode everything else as x followed by 4-digit hex codepoint
-                hex_val = f"{ord(char):04X}"
-                encoded.append(f"x{hex_val}")
-        return ''.join(encoded)
+        """Convert any Unicode string to a safe XML ID, one-to-one (see encode_for_xml_id)."""
+        return encode_for_xml_id(text)
 
     def _normalize_text(self, text: str) -> str:
         """Normalize text for comparison (whitespace and punctuation)."""
@@ -849,6 +874,12 @@ class WordNetToCygnetConverter:
 
     def load_cili(self):
         """Load and parse the CILI file."""
+        cached = self._cili_cache.get(str(self.cili_path))
+        if cached is not None:
+            self.cili_concepts, self.cili_glosses, fixes = cached
+            self.log['statistics']['html_entity_fixes']['count'] += fixes
+            return
+        fixes_before = self.log['statistics']['html_entity_fixes']['count']
         logger.info(f"Loading CILI from {self.cili_path}...")
         with self._open_file(self.cili_path) as f:
             tree = etree.parse(f)
@@ -871,6 +902,8 @@ class WordNetToCygnetConverter:
                 self.cili_glosses[definiendum] = gloss_text
 
         logger.info(f"Loaded {len(self.cili_concepts)} CILI concepts and {len(self.cili_glosses)} glosses")
+        fixes = self.log['statistics']['html_entity_fixes']['count'] - fixes_before
+        self._cili_cache[str(self.cili_path)] = (self.cili_concepts, self.cili_glosses, fixes)
 
     def _extract_text_content(self, element: etree.Element) -> str:
         """Extract all text content from an element (including mixed content)."""
@@ -892,6 +925,10 @@ class WordNetToCygnetConverter:
         """Load and parse the relations file to identify existing concept relations."""
         if not self.relations_path:
             return
+        cached = self._relations_cache.get(str(self.relations_path))
+        if cached is not None:
+            self.existing_concept_relations = set(cached)
+            return
 
         logger.info(f"Loading existing relations from {self.relations_path}...")
         with self._open_file(self.relations_path) as f:
@@ -909,6 +946,28 @@ class WordNetToCygnetConverter:
                     self.existing_concept_relations.add((source, target, relation_type))
 
         logger.info(f"Loaded {len(self.existing_concept_relations)} existing concept relations")
+        self._relations_cache[str(self.relations_path)] = frozenset(
+            self.existing_concept_relations)
+
+    def _shared_concept_id(self, synset: etree.Element) -> str | None:
+        """Concept id for a synset of a multi-lexicon release, else None.
+
+        The concept is the CILI concept if its ILI is in CILI, otherwise the
+        release's stable local id.  Every lexicon of the release resolves the
+        same dc:identifier to the same id.
+        """
+        if self.shared is None:
+            return None
+        ident = dc_identifier(synset)
+        entry = self.shared.concepts.get(ident) if ident else None
+        if entry is None:
+            if ident:
+                self.log['shared_concept_not_found']['count'] += 1
+            return None
+        ili, local = entry
+        if ili and f"cili.{ili}" in self.cili_concepts:
+            return f"cili.{ili}"
+        return local
 
     def pass1_synsets_to_concepts_and_glosses(self, root: etree.Element):
         """
@@ -920,7 +979,7 @@ class WordNetToCygnetConverter:
         for lexicon in root.findall('Lexicon') + root.findall('LexiconExtension'):
             if self.lexicon_id is None:
                 self.lexicon_id = lexicon.get('id')
-                self.lexicon_language = lexicon.get('language')
+                self._set_language(lexicon.get('language'))
                 self.lexicon_version = lexicon.get('version')
                 logger.info(f"  Using lexicon ID: {self.lexicon_id}, language: {self.lexicon_language}")
 
@@ -932,10 +991,39 @@ class WordNetToCygnetConverter:
                 # Normalize POS (s -> r) before any comparisons or storage
                 pos = self._normalize_pos(pos)
 
+                # Multi-lexicon releases: identity comes from dc:identifier.
+                shared_id = self._shared_concept_id(synset)
+                if shared_id is not None and self.shared.role == 'member':
+                    # Member lexicons only point at the concept; its definition
+                    # and relations come from the concepts lexicon.  Recorded
+                    # lexical gaps are dropped (Cygnet cannot show them yet).
+                    if synset.get('lexicalized') == 'false':
+                        self.log['unlexicalized_skipped']['synsets'] += 1
+                    else:
+                        self.synset_to_concept[synset_id] = shared_id
+                    continue
+
                 # Check if ILI is valid
                 is_valid_ili = ili and ili not in ['', 'in']
 
-                if is_valid_ili:
+                if shared_id is not None and not shared_id.startswith('cili.'):
+                    # Concepts lexicon: a stable id shared with its members.
+                    concept_id = shared_id
+                    concept = etree.Element('Concept',
+                                            id=concept_id,
+                                            ontological_category=pos,
+                                            status='1')
+                    from_elem = etree.SubElement(concept, 'Provenance',
+                                                 resource=self.lexicon_id,
+                                                 version=self.lexicon_version)
+                    from_elem.set('original_id', synset_id)
+                    self.concepts.append(concept)
+                    self.created_concepts.add(concept_id)
+                    self.log['statistics']['concepts']['newly_created'] += 1
+                    self.log['statistics']['concepts']['total'] += 1
+                elif is_valid_ili or shared_id is not None:
+                    if shared_id is not None:
+                        ili = shared_id.removeprefix('cili.')
                     # Map to CILI concept
                     concept_id = f"cili.{ili}"
 
@@ -1008,7 +1096,8 @@ class WordNetToCygnetConverter:
                 should_add_gloss = not (self.skip_cili_defns and concept_id.startswith('cili.'))
                 for definition_elem in synset.findall('Definition'):
                     definition_text = self._extract_text_content(definition_elem)
-                    definition_lang = definition_elem.get('language', self.lexicon_language)
+                    definition_lang = fix_language(
+                        definition_elem.get('language', self.lexicon_language))
 
                     if should_add_gloss:
                         gloss = etree.Element('Gloss',
@@ -1195,6 +1284,11 @@ class WordNetToCygnetConverter:
                         self.log['sense_missing_synset']['count'] += 1
                         continue
 
+                    if (self.shared is not None and self.shared.role == 'member'
+                            and sense.get('lexicalized') == 'false'):
+                        self.log['unlexicalized_skipped']['senses'] += 1
+                        continue
+
                     # Get concept ID from synset mapping
                     if synset_ref not in self.synset_to_concept:
                         self.log['synset_not_found']['count'] += 1
@@ -1294,6 +1388,20 @@ class WordNetToCygnetConverter:
                 return forward_type
 
         return None
+
+    @staticmethod
+    def _relation_type(rel: etree.Element) -> str:
+        """A relation's type: its dc:type when relType is 'other' and one is given.
+
+        LMF expresses relations outside its fixed list as relType="other"
+        with dc:type naming the real relation (e.g. "possessive").  Keeping
+        only 'other' would merge distinct relations and make inverse pairs
+        look like reversed duplicates.
+        """
+        rel_type = rel.get('relType')
+        if rel_type == 'other':
+            return dc_attr(rel, 'type') or rel_type
+        return rel_type
 
     def pass3_relations(self, root: etree.Element):
         """
@@ -1403,7 +1511,7 @@ class WordNetToCygnetConverter:
                 source_concept = self.synset_to_concept[synset_id]
                 for rel in synset.findall('SynsetRelation'):
                     target_synset = rel.get('target')
-                    rel_type = rel.get('relType')
+                    rel_type = self._relation_type(rel)
                     if target_synset in self.synset_to_concept:
                         target_concept = self.synset_to_concept[target_synset]
                         raw_concept_relations.append((source_concept, target_concept, rel_type))
@@ -1420,7 +1528,7 @@ class WordNetToCygnetConverter:
                     source_sense = self.old_sense_to_new_sense[old_sense_id]
                     for rel in sense.findall('SenseRelation'):
                         target_old_sense = rel.get('target')
-                        rel_type = rel.get('relType')
+                        rel_type = self._relation_type(rel)
                         if target_old_sense in self.old_sense_to_new_sense:
                             target_sense = self.old_sense_to_new_sense[target_old_sense]
                             raw_sense_relations.append((source_sense, target_sense, rel_type))
@@ -1508,6 +1616,11 @@ class WordNetToCygnetConverter:
         Pass 4: Process examples from Synsets and Senses, tagging with sense annotations.
         """
         logger.info("\nPass 4: Processing examples...")
+
+        # Loading spaCy is slow; small lexicons often have no examples at all.
+        if next(root.iter('Example'), None) is None:
+            logger.info("  No examples")
+            return
 
         self._initialize_nlp_tools()
 

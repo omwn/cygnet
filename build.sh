@@ -31,6 +31,10 @@
 #                      publishing (translation takes hours, so it isn't run
 #                      in CI — see .github/workflows/check-wordnets.yml).
 #   --skip-tests       Skip the test suite
+#   --all-languages    Keep every language of the multi-lexicon releases
+#                      listed under 'mul' in wordnets.toml.  By default only
+#                      languages that already have another wordnet in the
+#                      build are kept.  For local, per-project builds.
 #
 set -euo pipefail
 
@@ -46,6 +50,7 @@ DO_DOWNLOAD=true
 DO_BUILD=true
 DO_TESTS=true
 TRANSLATE_ONLY=false
+ALL_LANGUAGES=false
 WORK_DIR=""
 
 while [[ $# -gt 0 ]]; do
@@ -66,6 +71,7 @@ while [[ $# -gt 0 ]]; do
         --build-only)     DO_DOWNLOAD=false;    shift ;;
         --translate-only) TRANSLATE_ONLY=true; WITH_TRANSLATE=true; shift ;;
         --skip-tests)     DO_TESTS=false;       shift ;;
+        --all-languages)  ALL_LANGUAGES=true;   shift ;;
         --help|-h)
             sed -n '3,/^$/{ s/^# \?//; p }' "$0"
             exit 0
@@ -289,7 +295,9 @@ if $DO_BUILD; then
     echo
 
     echo "=== Step 2: Convert wordnets ==="
-    run_pipeline 2_batch_convert_lmfs.py
+    STEP2_ARGS=()
+    if $ALL_LANGUAGES; then STEP2_ARGS+=(--all-languages); fi
+    run_pipeline 2_batch_convert_lmfs.py ${STEP2_ARGS[@]+"${STEP2_ARGS[@]}"}
     echo
 
     if $WITH_GLOSSTAG; then

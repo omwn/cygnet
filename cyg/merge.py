@@ -276,6 +276,7 @@ INVERSE_CONCEPT_RELATIONS: dict[str, str] = {
     'secondary_aspect_ip': 'secondary_aspect_pi',
     'metaphor':          'has_metaphor',
     'metonym':           'has_metonym',
+    'possessive':        'possessor',
     'antonym':           'antonym',
     'similar':           'similar',
     'attribute':         'attribute',

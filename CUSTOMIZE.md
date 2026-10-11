@@ -89,6 +89,30 @@ kaw = ["https://github.com/yourorg/yourproject/releases/latest/download/yourwn.t
 Archives may be `.xml.gz`, `.tar.gz`, or `.tar.xz`; cygnet's downloader handles
 all three.
 
+### Multi-lexicon releases (`mul`)
+
+Some releases, such as omw-pronoun and kindiv, bundle a *concepts* lexicon
+(`language="mul"`) with one lexicon per language.  The concepts lexicon holds
+unlexicalized synsets with the definitions and the hierarchy.  Each synset's
+`dc:identifier` (e.g. `KinDiv:Fa;Br;So`) links it to its concept, since most of
+these concepts have no ILI yet.  List such releases under the key `mul`:
+
+```toml
+mul = ["https://github.com/fcbond/KinDiv/releases/download/v0.1/kindiv-0.1.tar.xz"]
+```
+
+Cygnet then:
+
+- keeps the concepts lexicon's synsets, relations and code-like lemmas
+  (e.g. `Fa;Br;So`, shown under the language "Multiple languages");
+- merges every synset with the same `dc:identifier` into one concept (the
+  CILI concept if it has an ILI);
+- drops recorded lexical gaps (`lexicalized="false"` in a language lexicon);
+- by default keeps only languages that already have another wordnet in the
+  build, under that wordnet's language code (e.g. `ar` → `arb`).  Pass
+  `--all-languages` to `build.sh` to keep every language — for a site built
+  just for the release.
+
 ---
 
 ## Step 3 — Configure `etc/local.json`

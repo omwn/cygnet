@@ -11,7 +11,58 @@ import logging
 import sys
 from pathlib import Path
 
+from lxml import etree
+
 from cyg.merge import MergeBuilder
+
+
+MANIFEST_NAME = 'manifest.txt'  # written by 2_batch_convert_lmfs.py
+
+
+def select_files(input_dir: Path) -> list[Path]:
+    """Pre-synth files to merge: CILI, this build's Step 2 outputs, and mtg.
+
+    Step 2 lists the outputs it planned in manifest.txt; any other wordnet
+    output in the directory is left over from an earlier build and ignored.
+    Without a manifest (Step 2 not run), every file is used.
+
+    Args:
+        input_dir: The pre-synth directory
+
+    Returns:
+        Files to merge, sorted by name
+    """
+    all_files = sorted(input_dir.glob('*.xml'))
+    manifest = input_dir / MANIFEST_NAME
+    if not manifest.exists():
+        print(f'  Warning: no {MANIFEST_NAME}; merging every file in {input_dir}')
+        return all_files
+    planned = set(manifest.read_text(encoding='utf-8').split())
+    keep, ignored = [], []
+    for f in all_files:
+        if f.name in planned or 'cili' in f.stem or 'mtg' in f.stem:
+            keep.append(f)
+        else:
+            ignored.append(f.name)
+    if ignored:
+        print(f'  Ignoring {len(ignored)} file(s) not planned by Step 2: '
+              f'{" ".join(ignored)}')
+    missing = planned - {f.name for f in all_files}
+    if missing:
+        print(f'  Warning: planned but missing: {" ".join(sorted(missing))}')
+    return keep
+
+
+def is_concepts_lexicon(path: Path) -> bool:
+    """True if a pre-synth file is a 'mul' concepts lexicon.
+
+    Its member lexicons' senses point at its concepts, and _do_sense() drops
+    a sense whose concept is not registered yet, so it must be merged first.
+    """
+    for _event, elem in etree.iterparse(str(path), events=('start',)):
+        return elem.get('language') == 'mul'
+    return False
+
 
 def main() -> None:
     sys.stdout.reconfigure(line_buffering=True)
@@ -29,18 +80,20 @@ def main() -> None:
 
     db_path.parent.mkdir(exist_ok=True)
 
-    all_files = sorted(input_dir.glob('*.xml'))
+    all_files = select_files(input_dir)
     cili_files = [f for f in all_files if 'cili' in f.stem]
     oewn_files = [f for f in all_files if 'oewn' in f.stem]
     # Machine-translated glosses (mtg) reference definiendum concepts from
     # every other resource — _do_gloss() silently drops a Gloss if its
     # concept isn't registered yet, so mtg must be processed last.
     mtg_files = [f for f in all_files if 'mtg' in f.stem]
-    other_files = [
+    rest = [
         f for f in all_files
         if f not in cili_files and f not in oewn_files and f not in mtg_files
     ]
-    xml_files = cili_files + oewn_files + other_files + mtg_files
+    concept_files = [f for f in rest if is_concepts_lexicon(f)]
+    other_files = [f for f in rest if f not in concept_files]
+    xml_files = cili_files + oewn_files + concept_files + other_files + mtg_files
     print(f'Found {len(xml_files)} pre-synth files to merge')
 
     builder = MergeBuilder(db_path, prov_db_path)
