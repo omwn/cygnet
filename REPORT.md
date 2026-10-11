@@ -95,6 +95,15 @@ concepts rather than showing the same one N times — so a 10-item sample is
 representative of the file's spread of problems, not just whichever concept
 happened to appear first.
 
+`--summary`'s output always opens with a **Senses per lemma, by wordnet**
+table, ranked highest-first regardless of issue severity. A healthy wordnet
+is usually in the low single digits; a ratio of dozens or more is a strong
+signal of a conversion bug rather than genuine polysemy — e.g. a bilingual
+dictionary converter linking one lemma to every synset that matches its
+gloss, instead of just the correct sense (this is exactly how
+`ancientgreek-grc`'s ~37/lemma ratio and the resulting POS-mismatch flood
+were traced back to a specific bug in its upstream converter script).
+
 ---
 
 ## What the report checks

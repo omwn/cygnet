@@ -149,16 +149,19 @@ def generate_xml(
 
     # ---- GlossLayer ----
     gloss_layer = ET.SubElement(root, 'GlossLayer')
-    for def_rowid, synset_rowid, definition, lang in cur.execute("""
-        SELECT d.rowid, d.synset_rowid, d.definition, l.code
+    for def_rowid, synset_rowid, definition, lang, translated_from in cur.execute("""
+        SELECT d.rowid, d.synset_rowid, d.definition, l.code, tf.code
         FROM definitions d
         JOIN languages l ON d.language_rowid = l.rowid
+        LEFT JOIN languages tf ON d.translated_from_rowid = tf.rowid
         ORDER BY d.synset_rowid, l.code
     """).fetchall():
         sid = synset_id.get(synset_rowid)
         if not sid:
             continue
         gloss = ET.SubElement(gloss_layer, 'Gloss', definiendum=sid, language=lang)
+        if translated_from:
+            gloss.set('translated_from', translated_from)
         anns = [
             (start, end, sense_id[s_rowid])
             for start, end, s_rowid in cur.execute("""

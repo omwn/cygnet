@@ -285,15 +285,21 @@
 
             // Get definitions grouped by language
             const defs = cachedExec(`
-                SELECT rowid as def_rowid, definition, language_rowid FROM definitions
+                SELECT rowid as def_rowid, definition, language_rowid
+                       ${_hasTranslatedFrom ? ', translated_from_rowid' : ''}
+                FROM definitions
                 WHERE synset_rowid = ? ORDER BY language_rowid
             `, [synsetRowid]);
             const d = {};
             const dr = {};
+            const dtf = {};
             defs.forEach(def => {
                 const lang = _langRowidToCode[def.language_rowid];
                 d[lang] = def.definition;
                 dr[lang] = def.def_rowid;
+                if (def.translated_from_rowid) {
+                    dtf[lang] = _langRowidToCode[def.translated_from_rowid];
+                }
             });
 
             // Get definition annotations (for English)
@@ -348,6 +354,7 @@
                 ili: r.ili,
                 d: Object.keys(d).length > 0 ? d : undefined,
                 dr: Object.keys(dr).length > 0 ? dr : undefined,
+                dtf: Object.keys(dtf).length > 0 ? dtf : undefined,
                 da,
                 s: Object.keys(s).length > 0 ? s : undefined,
                 cr: cr.length > 0 ? cr : undefined,
@@ -400,6 +407,7 @@
         const _labelCache = {};
         const _summaryCache = {};
         let _hasCoreTable = null;
+        let _hasTranslatedFrom = null;
 
         async function readChunksToUint8Array(reader, onProgress) {
             const chunks = [];
@@ -975,6 +983,7 @@
                         _SQL = SQL;
                         _db = new SQL.Database(buf);
                         _hasCoreTable = cachedExec(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='core_synsets'`).length > 0;
+                        _hasTranslatedFrom = cachedExec(`PRAGMA table_info(definitions)`).some(c => c.name === 'translated_from_rowid');
                         buildLangNames();
                         setAllLanguages(getAllLanguages());
                         setAllResources(queryResources());
@@ -1045,6 +1054,12 @@
             const LangBadge = ({ lang, currentLang, ml = 'ml-1' }) =>
                 lang && lang !== currentLang
                     ? <span className={`text-xs text-gray-400 ${ml}`}>[{lang}]</span>
+                    : null;
+
+            // Unobtrusive note on a machine-translated definition, e.g. "(from Hungarian)".
+            const TranslatedBadge = ({ fromLang, ml = 'ml-1' }) =>
+                fromLang
+                    ? <span className={`text-xs text-gray-400 ${ml}`} title="Machine-translated definition">(from {getLangName(fromLang)})</span>
                     : null;
 
             // Renders a comma-separated list of clickable wordforms.
@@ -2486,6 +2501,7 @@
                                                         {conceptLabel && <><span className="font-medium">{conceptLabel}</span>{' · '}</>}<span className="text-gray-600 italic">{getPosName(concept.oc)}</span>{isCoreConcept && <span title="widely-known concept (one of 4960 OMWN core concepts)" className="ml-1 cursor-help">✪</span>}{' · '}
                                                         {concept.da ? renderDefinitionWithLinks(mainDef, concept.da) : mainDef}
                                                         {<LangBadge lang={shownLang} currentLang={definitionLanguage} />}
+                                                        {<TranslatedBadge fromLang={concept.dtf?.[shownLang]} />}
                                                         {concept.dr?.[shownLang] && renderProvenance('definitions', concept.dr[shownLang])}
                                                         {concept.ili && <span className="text-sm ml-2">⟪{concept.ili}⟫</span>}
                                                     </p>
@@ -2803,6 +2819,7 @@
                                                         {altDefs.map(([lang, def]) => (
                                                             <div key={lang} className="text-sm">
                                                                 <span className="font-semibold text-gray-700" title={getLangFullName(lang)}>{getLangName(lang)}:</span> {def}
+                                                                {<TranslatedBadge fromLang={concept.dtf?.[lang]} />}
                                                                 {concept.dr?.[lang] && renderProvenance('definitions', concept.dr[lang])}
                                                             </div>
                                                         ))}

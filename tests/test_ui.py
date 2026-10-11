@@ -4,10 +4,13 @@ Uses a small purpose-built test database (built by conftest.py) with known
 contents, so every assertion can be exact.
 
 Test DB contents (see conftest._UI_TEST_WORDNET):
-  Synsets:  entity (i1), animal (i2), dog (i3), brightness (i4), dogfish (i5)
-  Senses:   en:entity, en:animal, en:dog, en:brightness, en:dogfish, fr:chien
+  Synsets:  entity (i1), animal (i2), dog (i3), brightness (i4), dogfish (i5),
+            mouse (i9)
+  Senses:   en:entity, en:animal, en:dog, en:brightness, en:dogfish, en:mouse,
+            fr:chien
   Variants: en:dog has variant form "doggo"
   Relations: dog→animal (hypernym), animal→entity (hypernym)
+  Translation: en:mouse's gloss is tagged translated_from="fr"
 
 Expected search results (exact/glob match on normalized_form):
   "dog"        exact  → 1  (en:dog)                       across 1 language
@@ -306,6 +309,26 @@ class TestConceptNavigation:
         content = page_ready.content()
         assert 'dog' in content
         assert 'chien' in content
+
+    def test_machine_translated_gloss_shows_source_language(self, page_ready: Page):
+        """mouse (i9) has an English gloss tagged translated_from="fr" —
+        the concept view must show an unobtrusive "(from French)" note.
+        """
+        _search(page_ready, 'mouse')
+        page_ready.locator('.concept-inner').first.click()
+        page_ready.wait_for_selector(
+            'text=All forms expressing this concept', timeout=10_000
+        )
+        expect(page_ready.locator('text=(from French)')).to_be_visible()
+
+    def test_native_gloss_has_no_translated_badge(self, page_ready: Page):
+        """dog (i3) has a native English gloss — no "(from ...)" note."""
+        _search(page_ready, 'dog')
+        page_ready.locator('.concept-inner').first.click()
+        page_ready.wait_for_selector(
+            'text=All forms expressing this concept', timeout=10_000
+        )
+        expect(page_ready.locator('text=(from')).not_to_be_visible()
 
 
 # ---------------------------------------------------------------------------
