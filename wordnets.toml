@@ -66,7 +66,7 @@ is = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-is-2.0.tar.xz
 
 # Italian — OMW Italian + Italian WordNet (IWN)
 it = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-it-2.0.tar.xz",
-"https://github.com/omwn/omw-data/releases/download/v2.0/omw-ien-2.0.tar.xz"]
+"https://github.com/omwn/omw-data/releases/download/v2.0/omw-iwn-2.0.tar.xz"]
 # illformed
 #"https://github.com/valeq/IWN-OMW/raw/refs/heads/main/data/LMF-XML/IWN-OMW_LMF_v1.0.xml"
 

@@ -267,10 +267,14 @@ if $DO_BUILD; then
     if $WITH_GLOSSTAG; then EXTRAS+=(--extra glosstag); fi
     if $WITH_TRANSLATE; then EXTRAS+=(--extra translate); fi
 
-    uv sync ${EXTRAS[@]+"${EXTRAS[@]}"}
+    # --inexact keeps hand-installed packages (e.g. spaCy language models)
+    uv sync --inexact ${EXTRAS[@]+"${EXTRAS[@]}"}
 
     uv run python -c "import nltk; nltk.download('wordnet', quiet=True); nltk.download('omw-1.4', quiet=True)"
-    uv run playwright install chromium
+    # Browsers are only needed for the UI tests; a platform Playwright does
+    # not yet support (or an offline machine) should not abort the build.
+    uv run playwright install chromium \
+        || echo "WARNING: playwright browser install failed; UI tests may not run."
 
     echo
 fi
