@@ -82,6 +82,148 @@
 
         const remove_accents = (text) => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
+        // ========== STATIC DATA (search index, concept details) ==========
+        // Precomputed at build time (MergeBuilder.write_search_index() /
+        // write_concept_details() / write_sense_index() in cyg/merge.py) so
+        // the dominant search-and-browse path never needs the full database
+        // loaded. See the architecture plan this was built from
+        // (~/.claude/plans/optimized-wondering-lighthouse.md) for the full
+        // rationale and data shapes.
+        const DATA_BASE = 'data/';
+        let _manifest = null;
+        const _manifestPromise = fetch(DATA_BASE + 'manifest.json', { cache: 'no-cache' })
+            .then(r => r.ok ? r.json() : null)
+            .then(m => { _manifest = m; return m; })
+            .catch(() => null);
+
+        let _searchManifest = null;
+        const _searchManifestPromise = fetch(DATA_BASE + 'search/manifest.json', { cache: 'no-cache' })
+            .then(r => r.ok ? r.json() : null)
+            .then(m => { _searchManifest = m; return m; })
+            .catch(() => null);
+
+        const _shardCache = {};
+        function fetchShard(file) {
+            if (!_shardCache[file]) {
+                _shardCache[file] = fetch(DATA_BASE + 'search/' + file)
+                    .then(r => r.ok ? r.json() : {})
+                    .catch(() => ({}));
+            }
+            return _shardCache[file];
+        }
+
+        // Python's sorted() orders strings by Unicode code point; JS `<`
+        // compares UTF-16 code units, which disagree for characters outside
+        // the Basic Multilingual Plane. Compare by code point so shard
+        // lookup matches how the manifest was actually sorted at build time.
+        function codePointCompare(a, b) {
+            const ai = Array.from(a), bi = Array.from(b);
+            const len = Math.min(ai.length, bi.length);
+            for (let i = 0; i < len; i++) {
+                const diff = ai[i].codePointAt(0) - bi[i].codePointAt(0);
+                if (diff !== 0) return diff;
+            }
+            return ai.length - bi.length;
+        }
+
+        // Binary-search the search-index manifest for the single shard an
+        // exact term (or the start of a glob prefix) falls in.
+        function findShardForTerm(term) {
+            if (!_searchManifest || _searchManifest.shards.length === 0) return null;
+            const shards = _searchManifest.shards;
+            let lo = 0, hi = shards.length - 1, result = shards[0];
+            while (lo <= hi) {
+                const mid = (lo + hi) >> 1;
+                if (codePointCompare(shards[mid].first, term) <= 0) {
+                    result = shards[mid];
+                    lo = mid + 1;
+                } else {
+                    hi = mid - 1;
+                }
+            }
+            return result;
+        }
+
+        // Compact shard row -> the full field names performSearch() consumes.
+        function adaptStaticSearchRow(row) {
+            return {
+                sense_id: row.sid, synset_id: row.syn, lemma: row.l,
+                matched_rank: row.rk, lg: row.lg, pos: row.pos, ind: row.ind,
+            };
+        }
+
+        async function searchWordformStatic(term) {
+            await _searchManifestPromise;
+            const normalized = remove_accents(term.toLowerCase());
+            const shard = findShardForTerm(normalized);
+            if (!shard) return [];
+            const data = await fetchShard(shard.file);
+            const rows = data[normalized] || [];
+            return rows.map(adaptStaticSearchRow);
+        }
+
+        // Build-time storage shapes (cr/sr) carry a raw relation_types.type
+        // string, not RELATION_TO_SHORT's short code -- stay correct even if
+        // relations.json changes without a DB rebuild. Map it at read time.
+        function adaptRelation(rel) {
+            const { type, ...rest } = rel;
+            return { ...rest, t: RELATION_TO_SHORT[type] || type };
+        }
+
+        const _conceptCache = {};
+        function fetchConceptStatic(id) {
+            const key = String(id);
+            if (!_conceptCache[key]) {
+                _conceptCache[key] = fetch(DATA_BASE + 'concepts/' + key + '.json')
+                    .then(r => r.ok ? r.json() : null)
+                    .catch(() => null);
+            }
+            return _conceptCache[key];
+        }
+
+        async function getConceptStatic(synsetRowid) {
+            const concept = await fetchConceptStatic(synsetRowid);
+            if (!concept) return null;
+            const senses = {};
+            if (concept.senses) {
+                for (const [sid, sense] of Object.entries(concept.senses)) {
+                    senses[sid] = { ...sense, sr: sense.sr ? sense.sr.map(adaptRelation) : undefined };
+                }
+            }
+            return {
+                oc: concept.oc, ili: concept.ili, d: concept.d, dr: concept.dr,
+                dtf: concept.dtf, da: concept.da, s: concept.s,
+                cr: concept.cr ? concept.cr.map(adaptRelation) : undefined,
+                ara: concept.ara, core: concept.core, senses,
+            };
+        }
+
+        // Ordinary call sites already know the owning concept (from a search
+        // result row or a concept's own `s` map) -- fetch that concept's
+        // bundle and pull the one sense out, rather than a separate per-sense
+        // fetch. Only a direct #/search?sense=<id> URL with no concept ID in
+        // hand needs the sense index at all.
+        async function getSenseStatic(senseRowid, ownerConceptId) {
+            if (ownerConceptId != null) {
+                const concept = await getConceptStatic(ownerConceptId);
+                return concept?.senses?.[String(senseRowid)] || null;
+            }
+            const bucket = Math.floor(senseRowid / 20000);
+            try {
+                const r = await fetch(DATA_BASE + `sense-index/${bucket}.json`);
+                if (!r.ok) return null;
+                const data = await r.json();
+                const synsetId = data[String(senseRowid)];
+                if (synsetId == null) return null;
+                return getSenseStatic(senseRowid, synsetId);
+            } catch (_) {
+                return null;
+            }
+        }
+
+        // Test hook -- lets Playwright assert the full DB was never loaded.
+        window._dbTestHook = { isLoaded: () => _db !== null };
+
         // ========== HTML SAFETY ==========
         // Shared helpers for anywhere untrusted or semi-trusted text becomes HTML.
         const _HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
@@ -975,11 +1117,23 @@
             const loadConcept = useCallback((conceptId) => {
                 const cid = conceptId.toString();
                 if (loadedConcepts[cid]) return loadedConcepts[cid];
-                const data = queryConcept(parseInt(cid));
-                if (data) {
-                    setLoadedConcepts(prev => ({ ...prev, [cid]: data }));
+                if (_db) {
+                    const data = queryConcept(parseInt(cid));
+                    if (data) {
+                        setLoadedConcepts(prev => ({ ...prev, [cid]: data }));
+                    }
+                    return data;
                 }
-                return data;
+                // Static mode: the fetch is inherently async, so this call
+                // returns null on the first render -- the call sites already
+                // tolerate "not loaded yet" via loadedConcepts[cid] ||
+                // loadConcept(cid) -- and the fetch populates loadedConcepts
+                // in the background, the same fetch-and-cache idiom
+                // wordnetSummary's useEffect already established.
+                getConceptStatic(cid).then(data => {
+                    if (data) setLoadedConcepts(prev => prev[cid] ? prev : { ...prev, [cid]: data });
+                });
+                return null;
             }, [loadedConcepts]);
 
             const getConceptData = (conceptId) => {
@@ -1067,14 +1221,22 @@
                 return { ids: directIds || fallbackIds, isIndirect: !directIds && !!fallbackIds };
             };
 
-            const loadSenseData = useCallback((senseId) => {
+            const loadSenseData = useCallback((senseId, ownerConceptId) => {
                 const sid = senseId.toString();
                 if (loadedSenses[sid]?.l) return loadedSenses[sid];
-                const data = querySense(parseInt(sid));
-                if (data) {
-                    setLoadedSenses(prev => ({ ...prev, [sid]: data }));
+                if (_db) {
+                    const data = querySense(parseInt(sid));
+                    if (data) {
+                        setLoadedSenses(prev => ({ ...prev, [sid]: data }));
+                    }
+                    return data;
                 }
-                return data;
+                // Static mode: async, same background-fetch-and-cache
+                // pattern as loadConcept() above.
+                getSenseStatic(parseInt(sid), ownerConceptId).then(data => {
+                    if (data) setLoadedSenses(prev => prev[sid]?.l ? prev : { ...prev, [sid]: data });
+                });
+                return null;
             }, [loadedSenses]);
 
             const loadConceptRelations = useCallback((conceptId) => {
@@ -1338,14 +1500,20 @@
                 setLoadingResults(true);
 
                 // Defer query so the spinner renders before the (potentially slow) SQL runs
-                setTimeout(() => {
+                setTimeout(async () => {
                 if (searchRequestIdRef.current !== requestId) return; // superseded by a newer search
                 const t = term.trim();
                 const mode = detectSearchMode(t);
-                const results = mode === 'ili'        ? searchByIli(t)
-                              : mode === 'definition' ? searchDefinition(t.slice(4).trim(), lang)
-                              : mode === 'glob'       ? searchGlob(t)
-                              : searchWordform(t);
+                // Static mode (no DB loaded): only exact-term lookup is served
+                // from the precomputed index so far -- ili/definition/glob
+                // still need the full DB (loadMainDb() wiring is a follow-up,
+                // not yet implemented in this prototype slice).
+                const results = !_db
+                    ? (mode === 'exact' ? await searchWordformStatic(t) : [])
+                    : mode === 'ili'        ? searchByIli(t)
+                    : mode === 'definition' ? searchDefinition(t.slice(4).trim(), lang)
+                    : mode === 'glob'       ? searchGlob(t)
+                    : searchWordform(t);
                 const senseMap = {};
 
                 results.forEach(r => {
@@ -1383,16 +1551,38 @@
                     if (searchRequestIdRef.current !== requestId) return; // superseded by a newer search
                     if (i >= senseIds.length) return;
                     const batch = senseIds.slice(i, i + BATCH_SIZE);
-                    setLoadedSenses(prev => {
-                        const updates = {};
-                        batch.forEach(sid => {
-                            const full = querySense(parseInt(sid));
-                            if (full) updates[sid] = { ...full, matched_rank: prev[sid]?.matched_rank };
+                    if (_db) {
+                        // Live-DB path, byte-for-byte the original synchronous
+                        // code -- no new await point, so existing timing-
+                        // sensitive tests (e.g. rapid-search race handling)
+                        // see identical behavior to before this static-mode
+                        // support was added.
+                        setLoadedSenses(prev => {
+                            const updates = {};
+                            batch.forEach(sid => {
+                                const full = querySense(parseInt(sid));
+                                if (full) updates[sid] = { ...full, matched_rank: prev[sid]?.matched_rank };
+                            });
+                            return { ...prev, ...updates };
                         });
-                        return { ...prev, ...updates };
-                    });
-                    i += BATCH_SIZE;
-                    if (i < senseIds.length) setTimeout(loadBatch, 0);
+                        i += BATCH_SIZE;
+                        if (i < senseIds.length) setTimeout(loadBatch, 0);
+                    } else {
+                        // Static mode: async fetch-and-cache.
+                        Promise.all(batch.map(sid => getSenseStatic(parseInt(sid), senseMap[sid]?.c))).then(fulls => {
+                            if (searchRequestIdRef.current !== requestId) return; // superseded while awaiting
+                            setLoadedSenses(prev => {
+                                const updates = {};
+                                batch.forEach((sid, idx) => {
+                                    const full = fulls[idx];
+                                    if (full) updates[sid] = { ...full, matched_rank: prev[sid]?.matched_rank };
+                                });
+                                return { ...prev, ...updates };
+                            });
+                            i += BATCH_SIZE;
+                            if (i < senseIds.length) setTimeout(loadBatch, 0);
+                        });
+                    }
                 };
                 setTimeout(loadBatch, 0);
                 }, 0); // end deferred search
@@ -2482,20 +2672,26 @@
 
                                 {view === 'concept' && selectedConcept && dbReady && (() => {
                                     const concept = getConceptData(selectedConcept) || loadConcept(selectedConcept);
-                                    // loadConcept()/queryConcept() are synchronous SQL lookups (dbReady is
-                                    // already guaranteed above), so a falsy result here is a confirmed
-                                    // miss — an invalid/stale deep-link ID — not a pending async load.
-                                    if (!concept) return (
+                                    // In static mode (_db still null -- dbReady was already true
+                                    // because no DB is configured at all), loadConcept() kicks off an
+                                    // async fetch and returns null on the first call -- this isn't yet
+                                    // a confirmed miss the way it is in live-DB mode (a synchronous SQL
+                                    // lookup), just "still loading"; a real miss resolves to null from
+                                    // the fetch too, so this still falls through to the same message,
+                                    // briefly, before the next render once state resolves either way.
+                                    if (!concept) return _db ? (
                                         <div className="text-slate-600">
                                             <p>Concept not found (id: {selectedConcept}).</p>
                                             <button onClick={handleBackToSearch} className="mt-2 text-indigo-600 hover:underline">← Back to search</button>
                                         </div>
+                                    ) : (
+                                        <div className="text-slate-500">Loading…</div>
                                     );
 
                                     // Load senses
                                     if (concept.s) {
                                         Object.values(concept.s).flat().forEach(sid => {
-                                            if (!loadedSenses[sid.toString()]) loadSenseData(sid.toString());
+                                            if (!loadedSenses[sid.toString()]) loadSenseData(sid.toString(), selectedConcept);
                                         });
                                     }
 
@@ -2503,12 +2699,24 @@
                                     const mainDefIsFallback = shownLang && shownLang !== definitionLanguage;
                                     const altDefs = concept.d ? Object.entries(concept.d).filter(([l]) => l !== shownLang) : [];
 
-                                    const conceptLabelInfo = getConceptLabel(parseInt(selectedConcept), definitionLanguage);
-                                    const conceptLabel = conceptLabelInfo?.form || '';
-                                    const isCoreConcept = _hasCoreTable && cachedExec(
-                                        'SELECT 1 FROM core_synsets WHERE synset_rowid = ?',
-                                        [parseInt(selectedConcept)]
-                                    ).length > 0;
+                                    // Static mode: labels.json/sharded fallback resolution isn't wired
+                                    // into this prototype slice yet -- derive a reasonable label
+                                    // directly from the concept's own already-fetched senses instead
+                                    // of an extra fetch (requested language, else English, else any).
+                                    const conceptLabel = _db
+                                        ? (getConceptLabel(parseInt(selectedConcept), definitionLanguage)?.form || '')
+                                        : (() => {
+                                            const senses = Object.values(concept.senses || {});
+                                            const pick = senses.find(s => s.lg === definitionLanguage)
+                                                || senses.find(s => s.lg === 'en') || senses[0];
+                                            return pick?.l || '';
+                                        })();
+                                    const isCoreConcept = _db
+                                        ? (_hasCoreTable && cachedExec(
+                                            'SELECT 1 FROM core_synsets WHERE synset_rowid = ?',
+                                            [parseInt(selectedConcept)]
+                                        ).length > 0)
+                                        : !!concept.core;
 
                                     return (
                                         <div>

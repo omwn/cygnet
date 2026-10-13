@@ -5,6 +5,7 @@ Core merge logic for synthesising pre-converted Cygnet XML files into SQLite.
 import json
 import logging
 import re
+import shutil
 import sqlite3
 import unicodedata
 from pathlib import Path
@@ -125,6 +126,9 @@ CREATE TABLE arasaac (
 CREATE TABLE core_synsets (
     synset_rowid INTEGER NOT NULL REFERENCES synsets(rowid)
 );
+CREATE TABLE build_info (
+    version TEXT NOT NULL
+);
 """
 
 PROV_SCHEMA = """
@@ -145,6 +149,9 @@ CREATE TABLE provenance (
     original_id    TEXT
 );
 CREATE INDEX idx_provenance_lookup ON provenance(table_rowid, item_rowid);
+CREATE TABLE build_info (
+    version TEXT NOT NULL
+);
 """
 
 INDEXES = """
@@ -2017,18 +2024,569 @@ class MergeBuilder:
         self.cur.execute('DROP TABLE _sum_senses')
         return n_written
 
+    def write_search_index(self, out_dir: Path, n_shards: int = 500) -> dict:
+        """Precompute a static word-search index for the browser's
+        dominant search path, sharded by alphabetic range of
+        ``normalized_form`` so a glob query only needs to fetch the
+        shards whose range overlaps its prefix.
+
+        Each shard is a JSON object keyed by ``normalized_form``, whose
+        values are compact match rows (see ``adaptStaticSearchRow()`` in
+        web/index.html for the read-time adapter back to
+        ``performSearch()``'s full field names): ``sid`` (sense rowid),
+        ``syn`` (synset rowid), ``lg`` (language code), ``pos``, ``ind``
+        (sense_index), ``l`` (lemma), ``rk`` (rank).
+
+        A shard boundary only ever falls *between* distinct
+        ``normalized_form`` keys -- never splits one form's match list.
+
+        Args:
+            out_dir: Directory to write shard files and manifest.json into.
+            n_shards: Target shard count (actual count may differ
+                slightly to avoid splitting a form's matches).
+
+        Returns:
+            Stats dict with ``shards``, ``forms``, and ``rows`` counts.
+        """
+        rows = self.cur.execute("""
+            SELECT f.normalized_form, s.rowid, syn.rowid, l.code, syn.pos,
+                   s.sense_index, f.form, f.rank
+            FROM forms f
+            JOIN entries e ON f.entry_rowid = e.rowid
+            JOIN senses s ON s.entry_rowid = e.rowid
+            JOIN synsets syn ON s.synset_rowid = syn.rowid
+            JOIN languages l ON e.language_rowid = l.rowid
+            ORDER BY f.normalized_form
+        """).fetchall()
+
+        by_form: dict[str, list[dict]] = {}
+        for norm_form, sid, syn, lg, pos, ind, lemma, rank in rows:
+            by_form.setdefault(norm_form, []).append({
+                'sid': sid, 'syn': syn, 'lg': lg, 'pos': pos,
+                'ind': ind, 'l': lemma, 'rk': rank,
+            })
+
+        total_rows = len(rows)
+        target_per_shard = max(1, total_rows // n_shards) if by_form else 1
+
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for stale in out_dir.glob('*.json'):
+            stale.unlink()
+
+        manifest_shards: list[dict] = []
+        shard_idx = 0
+        current: dict[str, list[dict]] = {}
+        current_rows = 0
+
+        def flush() -> None:
+            nonlocal shard_idx, current, current_rows
+            if not current:
+                return
+            fname = f'{shard_idx:04d}.json'
+            (out_dir / fname).write_text(
+                json.dumps(current, ensure_ascii=False, separators=(',', ':')),
+                encoding='utf-8',
+            )
+            manifest_shards.append({'first': next(iter(current)), 'file': fname})
+            shard_idx += 1
+            current = {}
+            current_rows = 0
+
+        for form in sorted(by_form):
+            current[form] = by_form[form]
+            current_rows += len(by_form[form])
+            if current_rows >= target_per_shard:
+                flush()
+        flush()
+
+        (out_dir / 'manifest.json').write_text(
+            json.dumps({'shards': manifest_shards}, ensure_ascii=False, separators=(',', ':')),
+            encoding='utf-8',
+        )
+
+        return {'shards': len(manifest_shards), 'forms': len(by_form), 'rows': total_rows}
+
+    def write_concept_details(self, out_dir: Path) -> int:
+        """Precompute one JSON file per concept (synset), covering
+        everything the live ``queryConcept()``/``querySense()`` functions
+        in web/index.html compute via synchronous SQL, so the browser's
+        dominant search-and-browse path never needs the full database.
+
+        Relation types are stored **raw** (``relation_types.type``), not
+        mapped to ``RELATION_TO_SHORT``'s short codes -- the client
+        applies that mapping at read time, matching
+        ``write_wordnet_summaries()``'s existing convention. Inverse
+        relations are **not** suppressed here (unlike
+        ``write_wordnet_summaries()``) -- ``queryConcept()`` returns
+        every stored relation live, so the precomputed version must too.
+
+        Sense-relation entries embed the target sense's lemma
+        (``toForm``) and owning concept (``toConcept``) directly,
+        mirroring ``write_wordnet_summaries()``'s ``src_form``/``tgt_form``
+        pattern, so rendering a sense relation never needs a separate
+        sense-index lookup on the hot path.
+
+        Generation is set-oriented (a handful of bulk queries grouped in
+        Python), not one query per concept -- avoids ~10 round trips x
+        hundreds of thousands of concepts. Output is written to a
+        sibling temp directory and swapped into place atomically on
+        success, so an interrupted build never leaves a partial,
+        inconsistent set of concept files behind.
+
+        Args:
+            out_dir: Directory to write ``<synset_rowid>.json`` files into.
+
+        Returns:
+            Number of concept files written.
+        """
+        lang_code: dict[int, str] = dict(
+            self.cur.execute('SELECT rowid, code FROM languages').fetchall()
+        )
+
+        forms_by_entry: dict[int, list[tuple[int, str, int]]] = {}
+        for entry_rowid, form_rowid, form, rank in self.cur.execute(
+            'SELECT entry_rowid, rowid, form, rank FROM forms ORDER BY entry_rowid, rank'
+        ):
+            forms_by_entry.setdefault(entry_rowid, []).append((form_rowid, form, rank))
+
+        def lemma_variants_formrowid(entry_rowid: int) -> tuple[str, list[str], int | None]:
+            flist = forms_by_entry.get(entry_rowid, [])
+            lemma_row = next((f for f in flist if f[2] == 0), None)
+            lemma = lemma_row[1] if lemma_row else ''
+            lemma_form_rowid = lemma_row[0] if lemma_row else None
+            variants = [f[1] for f in flist if f[2] > 0]
+            return lemma, variants, lemma_form_rowid
+
+        pron_by_form: dict[int, list[dict]] = {}
+        for form_rowid, variety, pronunciation, audio in self.cur.execute(
+            'SELECT form_rowid, variety, pronunciation, audio FROM pronunciations ORDER BY rowid'
+        ):
+            pron_by_form.setdefault(form_rowid, []).append({
+                'variety': variety, 'pronunciation': pronunciation, 'audio': audio,
+            })
+
+        # Base sense rows, grouped by synset -- and a global sense_rowid ->
+        # (synset_rowid, lemma) lookup, since sense relations can target a
+        # sense in a different concept.
+        sense_base: dict[int, list[tuple]] = {}
+        sense_to_synset: dict[int, int] = {}
+        sense_to_lemma: dict[int, str] = {}
+        for sid, entry_rowid, synset_rowid, sense_index, lang_rowid in self.cur.execute("""
+            SELECT s.rowid, s.entry_rowid, s.synset_rowid, s.sense_index, e.language_rowid
+            FROM senses s JOIN entries e ON s.entry_rowid = e.rowid
+        """):
+            sense_base.setdefault(synset_rowid, []).append(
+                (sid, entry_rowid, sense_index, lang_rowid)
+            )
+            sense_to_synset[sid] = synset_rowid
+            lemma, _variants, _form_rowid = lemma_variants_formrowid(entry_rowid)
+            sense_to_lemma[sid] = lemma
+
+        # Examples per sense -- the same example can be shared by several
+        # senses (via sense_examples), with different bold-token offsets
+        # per sense, so segments are built per (sense, example) pair, not
+        # cached across senses.
+        examples_by_sense: dict[int, list[int]] = {}
+        example_text: dict[int, str] = {}
+        for sense_rowid, example_rowid, example in self.cur.execute("""
+            SELECT se.sense_rowid, e.rowid, e.example
+            FROM sense_examples se JOIN examples e ON se.example_rowid = e.rowid
+        """):
+            examples_by_sense.setdefault(sense_rowid, []).append(example_rowid)
+            example_text[example_rowid] = example
+
+        anns_by_example: dict[int, list[tuple[int, int, int]]] = {}
+        for example_rowid, start_offset, end_offset, ann_sense in self.cur.execute(
+            'SELECT example_rowid, start_offset, end_offset, sense_rowid '
+            'FROM example_annotations ORDER BY example_rowid, start_offset'
+        ):
+            anns_by_example.setdefault(example_rowid, []).append(
+                (start_offset, end_offset, ann_sense)
+            )
+
+        def build_segments(example_rowid: int, owning_sense: int) -> list[dict]:
+            text = example_text[example_rowid]
+            segments = []
+            last_idx = 0
+            for start, end, ann_sense in anns_by_example.get(example_rowid, []):
+                if start > last_idx:
+                    segments.append({'text': text[last_idx:start], 'bold': False})
+                segments.append({'text': text[start:end], 'bold': ann_sense == owning_sense})
+                last_idx = end
+            if last_idx < len(text):
+                segments.append({'text': text[last_idx:], 'bold': False})
+            return segments
+
+        sense_rels: dict[int, list[dict]] = {}
+        for source_rowid, rel_type, target_rowid, rid in self.cur.execute("""
+            SELECT sr.source_rowid, rt.type, sr.target_rowid, sr.rowid
+            FROM sense_relations sr JOIN relation_types rt ON sr.type_rowid = rt.rowid
+        """):
+            sense_rels.setdefault(source_rowid, []).append({
+                'type': rel_type, 'to': target_rowid, 'rid': rid,
+                'toForm': sense_to_lemma.get(target_rowid, ''),
+                'toConcept': sense_to_synset.get(target_rowid),
+            })
+
+        concept_rels: dict[int, list[dict]] = {}
+        for source_rowid, rel_type, target_rowid, rid in self.cur.execute("""
+            SELECT sr.source_rowid, rt.type, sr.target_rowid, sr.rowid
+            FROM synset_relations sr JOIN relation_types rt ON sr.type_rowid = rt.rowid
+        """):
+            concept_rels.setdefault(source_rowid, []).append(
+                {'type': rel_type, 'to': target_rowid, 'rid': rid}
+            )
+
+        defs_by_synset: dict[int, list[tuple]] = {}
+        for def_rowid, synset_rowid, definition, def_lang_rowid, translated_from in self.cur.execute(
+            'SELECT rowid, synset_rowid, definition, language_rowid, translated_from_rowid '
+            'FROM definitions ORDER BY language_rowid'
+        ):
+            defs_by_synset.setdefault(synset_rowid, []).append(
+                (def_rowid, definition, def_lang_rowid, translated_from)
+            )
+
+        def_anns_by_def: dict[int, list[dict]] = {}
+        for definition_rowid, start_offset, end_offset, ann_sense in self.cur.execute(
+            'SELECT definition_rowid, start_offset, end_offset, sense_rowid '
+            'FROM definition_annotations'
+        ):
+            def_anns_by_def.setdefault(definition_rowid, []).append(
+                {'so': start_offset, 'eo': end_offset, 's': ann_sense}
+            )
+
+        arasaac_by_synset: dict[int, list[int]] = {}
+        for synset_rowid, arasaac_id in self.cur.execute(
+            'SELECT synset_rowid, arasaac_id FROM arasaac'
+        ):
+            arasaac_by_synset.setdefault(synset_rowid, []).append(arasaac_id)
+
+        core_synsets = {
+            r[0] for r in self.cur.execute('SELECT synset_rowid FROM core_synsets')
+        }
+
+        out_dir = Path(out_dir)
+        tmp_dir = out_dir.parent / f'.{out_dir.name}.tmp'
+        if tmp_dir.exists():
+            shutil.rmtree(tmp_dir)
+        tmp_dir.mkdir(parents=True)
+
+        n_written = 0
+        for synset_rowid, oc, ili in self.cur.execute('SELECT rowid, pos, ili FROM synsets'):
+            senses_out: dict[str, dict] = {}
+            s_by_lang: dict[str, list[int]] = {}
+            for sid, entry_rowid, sense_index, lang_rowid in sense_base.get(synset_rowid, []):
+                lemma, variants, lemma_form_rowid = lemma_variants_formrowid(entry_rowid)
+                lg = lang_code.get(lang_rowid)
+                prons = pron_by_form.get(lemma_form_rowid, []) if lemma_form_rowid else []
+                ex_out = [
+                    build_segments(ex_rowid, sid)
+                    for ex_rowid in examples_by_sense.get(sid, [])
+                ]
+                sr_out = sense_rels.get(sid, [])
+
+                senses_out[str(sid)] = {
+                    'id': str(sid), 'l': lemma,
+                    'v': variants or None,
+                    'p': prons or None,
+                    'lg': lg, 'c': synset_rowid, 'ind': sense_index,
+                    'ex': ex_out or None,
+                    'sr': sr_out or None,
+                    'ontological_category': oc,
+                }
+                s_by_lang.setdefault(lg, []).append(sid)
+
+            d: dict[str, str] = {}
+            dr: dict[str, int] = {}
+            dtf: dict[str, str] = {}
+            da = None
+            for def_rowid, definition, def_lang_rowid, translated_from in defs_by_synset.get(synset_rowid, []):
+                lang = lang_code.get(def_lang_rowid)
+                if lang is None:
+                    continue
+                d[lang] = definition
+                dr[lang] = def_rowid
+                if translated_from is not None:
+                    tf_code = lang_code.get(translated_from)
+                    if tf_code:
+                        dtf[lang] = tf_code
+                if lang == 'en':
+                    anns = def_anns_by_def.get(def_rowid)
+                    if anns:
+                        da = anns
+
+            concept = {
+                'oc': oc,
+                'ili': ili,
+                'd': d or None,
+                'dr': dr or None,
+                'dtf': dtf or None,
+                'da': da,
+                's': s_by_lang or None,
+                'senses': senses_out or None,
+                'cr': concept_rels.get(synset_rowid) or None,
+                'ara': arasaac_by_synset.get(synset_rowid) or None,
+                'core': synset_rowid in core_synsets,
+            }
+            (tmp_dir / f'{synset_rowid}.json').write_text(
+                json.dumps(concept, ensure_ascii=False, separators=(',', ':')),
+                encoding='utf-8',
+            )
+            n_written += 1
+
+        if out_dir.exists():
+            old_dir = out_dir.parent / f'.{out_dir.name}.old'
+            if old_dir.exists():
+                shutil.rmtree(old_dir)
+            out_dir.rename(old_dir)
+            tmp_dir.rename(out_dir)
+            shutil.rmtree(old_dir)
+        else:
+            tmp_dir.rename(out_dir)
+
+        return n_written
+
+    def write_labels_index(self, out_dir: Path, bucket_size: int = 20_000) -> int:
+        """Precompute a numeric-bucket-sharded, language-aware concept
+        label index, so rendering a relation list never needs one fetch
+        per related concept just to show its display label.
+
+        Each concept's entry stores every language's rank-0 lemma
+        (``byLang``) plus an explicit precomputed fallback
+        (``fallback``), reproducing ``getConceptLabel()``'s live
+        requested-language -> English -> any-language rule (lowest
+        ``sense_index`` across *all* of that concept's senses) --
+        a bare ``{lang: label}`` map can't reproduce that fallback
+        deterministically, since JS object key order isn't a reliable
+        stand-in for "lowest sense_index across languages".
+
+        Args:
+            out_dir: Directory to write ``<bucket>.json`` files into.
+            bucket_size: Number of synset rowids per bucket
+                (bucket = synset_rowid // bucket_size).
+
+        Returns:
+            Number of distinct concepts indexed.
+        """
+        lang_code: dict[int, str] = dict(
+            self.cur.execute('SELECT rowid, code FROM languages').fetchall()
+        )
+
+        # Rank-0 forms per sense, ordered by sense_index so the first
+        # row seen per (synset, language) and per synset overall are
+        # exactly getConceptLabel()'s requested-language and
+        # any-language picks.
+        rows = self.cur.execute("""
+            SELECT s.synset_rowid, e.language_rowid, f.form, s.sense_index
+            FROM senses s
+            JOIN entries e ON s.entry_rowid = e.rowid
+            JOIN forms f ON f.entry_rowid = e.rowid AND f.rank = 0
+            ORDER BY s.synset_rowid, s.sense_index
+        """).fetchall()
+
+        by_lang: dict[int, dict[str, str]] = {}
+        fallback: dict[int, dict] = {}
+        for synset_rowid, lang_rowid, form, _sense_index in rows:
+            lang = lang_code.get(lang_rowid)
+            if lang is None:
+                continue
+            lang_map = by_lang.setdefault(synset_rowid, {})
+            if lang not in lang_map:
+                lang_map[lang] = form
+            if synset_rowid not in fallback:
+                fallback[synset_rowid] = {'lang': lang, 'label': form}
+
+        buckets: dict[int, dict[str, dict]] = {}
+        for synset_rowid in by_lang:
+            bucket = synset_rowid // bucket_size
+            buckets.setdefault(bucket, {})[str(synset_rowid)] = {
+                'byLang': by_lang[synset_rowid],
+                'fallback': fallback[synset_rowid],
+            }
+
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for stale in out_dir.glob('*.json'):
+            stale.unlink()
+        for bucket, entries in buckets.items():
+            (out_dir / f'{bucket}.json').write_text(
+                json.dumps(entries, ensure_ascii=False, separators=(',', ':')),
+                encoding='utf-8',
+            )
+
+        return len(by_lang)
+
+    def write_sense_index(self, out_dir: Path, bucket_size: int = 20_000) -> int:
+        """Precompute a numeric-bucket-sharded sense_rowid -> synset_rowid
+        index, for the one remaining case that needs it: a direct
+        ``#/search?sense=<id>`` URL with no concept ID already in hand.
+        Ordinary search results and sense-relation entries both already
+        carry their owning concept id directly, so this stays off the
+        hot render path.
+
+        Args:
+            out_dir: Directory to write ``<bucket>.json`` files into.
+            bucket_size: Number of sense rowids per bucket
+                (bucket = sense_rowid // bucket_size).
+
+        Returns:
+            Number of senses indexed.
+        """
+        buckets: dict[int, dict[str, int]] = {}
+        n = 0
+        for sense_rowid, synset_rowid in self.cur.execute(
+            'SELECT rowid, synset_rowid FROM senses'
+        ):
+            bucket = sense_rowid // bucket_size
+            buckets.setdefault(bucket, {})[str(sense_rowid)] = synset_rowid
+            n += 1
+
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for stale in out_dir.glob('*.json'):
+            stale.unlink()
+        for bucket, entries in buckets.items():
+            (out_dir / f'{bucket}.json').write_text(
+                json.dumps(entries, ensure_ascii=False, separators=(',', ':')),
+                encoding='utf-8',
+            )
+
+        return n
+
+    def write_ili_index(self, out_dir: Path) -> int:
+        """Precompute a flat ILI -> synset_rowid index for ``i123``/
+        ``cili.i123`` search queries. Small enough (one entry per
+        ILI-mapped synset) to ship as a single file, fetched lazily on
+        first use.
+
+        Args:
+            out_dir: Directory to write ``ili-index.json`` into.
+
+        Returns:
+            Number of ILI-mapped synsets indexed.
+        """
+        rows = self.cur.execute(
+            'SELECT ili, rowid FROM synsets WHERE ili IS NOT NULL'
+        ).fetchall()
+        index = {ili: rowid for ili, rowid in rows}
+
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / 'ili-index.json').write_text(
+            json.dumps(index, ensure_ascii=False, separators=(',', ':')),
+            encoding='utf-8',
+        )
+        return len(index)
+
+    def write_manifest(self, out_dir: Path, version: str) -> None:
+        """Write the top-level ``manifest.json`` the browser fetches
+        first: the one build-version value (see ``build_info``, written
+        to both databases by ``finalize()``) plus everything the browser
+        used to populate from an eager DB load -- languages, resources,
+        DB-wide stats, and the ``core_synsets``/``translated_from_rowid``
+        feature flags -- so dropping eager DB loading doesn't also drop
+        the Wordnets tab, About-page stats, language filters, core-concept
+        stars, or translated-definition handling.
+
+        Args:
+            out_dir: Directory to write ``manifest.json`` into.
+            version: The build version string also written to
+                ``build_info`` in both databases.
+        """
+        languages = [
+            {'code': code, 'name': name, 'rowid': rowid}
+            for rowid, code, name in self.cur.execute(
+                'SELECT rowid, code, name FROM languages ORDER BY code'
+            )
+        ]
+
+        cols = {row[1] for row in self.cur.execute('PRAGMA table_info(resources)')}
+        coverage = (
+            ', r.synset_count, r.sense_count'
+            if 'synset_count' in cols else
+            ', NULL AS synset_count, NULL AS sense_count'
+        )
+        resources = [
+            dict(zip((
+                'code', 'version', 'label', 'language', 'url', 'citation',
+                'licence', 'email', 'status', 'confidence_score', 'extra',
+                'synset_count', 'sense_count',
+            ), row))
+            for row in self.cur.execute(f"""
+                SELECT r.code, r.version, r.label, l.code AS language,
+                       r.url, r.citation, r.licence, r.email, r.status,
+                       r.confidence_score, r.extra{coverage}
+                FROM resources r
+                LEFT JOIN languages l ON r.language_rowid = l.rowid
+                ORDER BY r.label
+            """)
+        ]
+
+        def count(sql: str) -> int:
+            return self.cur.execute(sql).fetchone()[0]
+
+        stats = {
+            'synsets': count('SELECT COUNT(*) FROM synsets'),
+            'entries': count('SELECT COUNT(*) FROM entries'),
+            'senses': count('SELECT COUNT(*) FROM senses'),
+            'languages': count('SELECT COUNT(DISTINCT language_rowid) FROM entries'),
+            'wordnets': count(
+                "SELECT COUNT(*) FROM resources WHERE code NOT IN ('cili', 'pwn')"
+            ),
+        }
+
+        has_core_table = count(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='core_synsets'"
+        ) > 0
+        has_translated_from = any(
+            row[1] == 'translated_from_rowid'
+            for row in self.cur.execute('PRAGMA table_info(definitions)')
+        )
+
+        manifest = {
+            'version': version,
+            'languages': languages,
+            'resources': resources,
+            'stats': stats,
+            'hasCoreTable': has_core_table,
+            'hasTranslatedFrom': has_translated_from,
+        }
+
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / 'manifest.json').write_text(
+            json.dumps(manifest, ensure_ascii=False, separators=(',', ':')),
+            encoding='utf-8',
+        )
+
     def create_indexes(self) -> None:
         """Create indexes before post-processing queries (critical for performance)."""
         self.cur.executescript(INDEXES)
 
-    def finalize(self, db_path: Path, prov_db_path: Path) -> None:
-        """Drop build-only indexes, run ANALYZE/VACUUM, and commit both databases."""
+    def finalize(self, db_path: Path, prov_db_path: Path, version: str) -> None:
+        """Drop build-only indexes, run ANALYZE/VACUUM, and commit both databases.
+
+        Args:
+            db_path: Path the main database is written to.
+            prov_db_path: Path the provenance database is written to.
+            version: Build version string, written into both databases'
+                ``build_info`` table -- lets the browser validate a cached
+                database (same-origin or cross-origin, where response
+                headers may not be readable) against ``manifest.json``'s
+                ``version`` without depending on HTTP headers at all.
+        """
         # idx_forms_lower only speeds up merge_case_variants()/compute_sense_indices()
         # during the build itself -- the shipped web UI never queries LOWER(form)
         # (it uses the normalized_form column instead), so keeping this index in
         # the exported database just costs ~87MB for every visitor to download.
         print('Dropping build-only indexes...')
         self.cur.execute('DROP INDEX IF EXISTS idx_forms_lower')
+
+        self.cur.execute('DELETE FROM build_info')
+        self.cur.execute('INSERT INTO build_info (version) VALUES (?)', (version,))
+        self.prov_cur.execute('DELETE FROM build_info')
+        self.prov_cur.execute('INSERT INTO build_info (version) VALUES (?)', (version,))
 
         print('Running ANALYZE...')
         self.cur.execute('ANALYZE')

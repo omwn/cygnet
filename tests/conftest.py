@@ -167,7 +167,17 @@ def build_test_db(db_path: Path, prov_path: Path,
     b.conn.commit()
 
     b.write_wordnet_summaries(db_path.parent / 'summaries')
-    b.finalize(db_path, prov_path)
+
+    build_version = '20260101000000'
+    data_dir = db_path.parent / 'data'
+    b.write_search_index(data_dir / 'search')
+    b.write_concept_details(data_dir / 'concepts')
+    b.write_labels_index(data_dir / 'labels')
+    b.write_sense_index(data_dir / 'sense-index')
+    b.write_ili_index(data_dir)
+    b.write_manifest(data_dir, build_version)
+
+    b.finalize(db_path, prov_path, build_version)
     for path in (db_path, prov_path):
         subprocess.run(['gzip', '-k', '-9', '-f', str(path)], check=True)
 
@@ -191,6 +201,7 @@ def test_db_dir(tmp_path_factory):
     shutil.copy(db_path.with_suffix('.db.gz'), serve_dir / 'cygnet.db.gz')
     shutil.copy(prov_path.with_suffix('.db.gz'), serve_dir / 'provenance.db.gz')
     shutil.copytree(db_path.parent / 'summaries', serve_dir / 'summaries')
+    shutil.copytree(db_path.parent / 'data', serve_dir / 'data')
     (serve_dir / 'local.json').write_text(json.dumps({
         'title': 'Cygnet',
         'icon': '🦢',
@@ -259,6 +270,22 @@ def _copy_serve_dir(src: Path, dst: Path, skip: set[str] = frozenset()) -> None:
 def http_server(test_db_dir):
     """Session-scoped HTTP server serving the test DB directory."""
     server, url = _start_server(str(test_db_dir))
+    yield url
+    server.shutdown()
+
+
+@pytest.fixture(scope='session')
+def http_server_without_db(test_db_dir, tmp_path_factory):
+    """HTTP server serving only the static data (web/data/), no DB config
+    at all -- proves the dominant search-and-browse path works with `_db`
+    never becoming non-null, since dbReady fires immediately (no
+    databases.main.filename to wait on) while indexReady gates the actual
+    search/concept UI.
+    """
+    no_db_dir = tmp_path_factory.mktemp('serve_no_db')
+    _copy_serve_dir(test_db_dir, no_db_dir, skip={'local.json', 'cygnet.db.gz', 'provenance.db.gz'})
+    (no_db_dir / 'local.json').write_text(json.dumps({'title': 'Cygnet'}))
+    server, url = _start_server(str(no_db_dir))
     yield url
     server.shutdown()
 

@@ -7,6 +7,7 @@ cygnet_small.xml
 web/*.db
 web/*.db.gz
 web/summaries/
+web/data/
 reports/
 
 # Editor backup files

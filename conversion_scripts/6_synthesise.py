@@ -9,6 +9,7 @@ ID-mapping dictionaries (~300 MB), not the entire merged dataset.
 
 import logging
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from lxml import etree
@@ -177,8 +178,36 @@ def main() -> None:
     n_summaries = builder.write_wordnet_summaries(summaries_dir)
     print(f'  {n_summaries:,} summary file(s) written to {summaries_dir}')
 
+    # One build version for everything this run produces -- generated here
+    # (not from a release tag) so local/--work-dir builds get a real value
+    # too. Written into both databases' build_info table by finalize() and
+    # into manifest.json by write_manifest(), below; the browser compares
+    # the two to validate a cached database without depending on HTTP
+    # headers (which may not even be readable cross-origin).
+    build_version = datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')
+    data_dir = db_path.parent / 'data'
+
+    print('\nPhase 9: Writing search index...')
+    idx_stats = builder.write_search_index(data_dir / 'search')
+    print(f'  {idx_stats["shards"]:,} shard(s), {idx_stats["forms"]:,} forms, '
+          f'{idx_stats["rows"]:,} rows written')
+
+    print('\nPhase 10: Writing concept detail files...')
+    n_concepts = builder.write_concept_details(data_dir / 'concepts')
+    print(f'  {n_concepts:,} concept(s) written')
+
+    print('\nPhase 11: Writing labels, sense, and ILI indexes...')
+    n_labels = builder.write_labels_index(data_dir / 'labels')
+    n_senses = builder.write_sense_index(data_dir / 'sense-index')
+    n_ilis = builder.write_ili_index(data_dir)
+    print(f'  {n_labels:,} label(s), {n_senses:,} sense(s), {n_ilis:,} ILI(s) indexed')
+
+    print('\nPhase 12: Writing build manifest...')
+    builder.write_manifest(data_dir, build_version)
+    print(f'  build version {build_version}')
+
     print('\nFinalising...')
-    builder.finalize(db_path, prov_db_path)
+    builder.finalize(db_path, prov_db_path, build_version)
     print('\nDone.')
 
 

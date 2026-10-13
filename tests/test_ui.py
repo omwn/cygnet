@@ -1356,3 +1356,56 @@ class TestTextContrast:
         page_ready.locator('nav button', has_text='Publications').click()
         page_ready.wait_for_selector('text=Wordnet Citations', timeout=5_000)
         assert _contrast_violations(page_ready) == []
+
+
+# ---------------------------------------------------------------------------
+# Static search/concept path (no DB loaded) — the dominant search-and-browse
+# path precomputed at build time by MergeBuilder.write_search_index() /
+# write_concept_details() (cyg/merge.py) must work end-to-end without the
+# full database ever loading. See the architecture plan this was built from
+# (~/.claude/plans/optimized-wondering-lighthouse.md) for the rationale.
+# ---------------------------------------------------------------------------
+
+class TestSearchWithoutLiveDb:
+    """The dominant path (search a word, view a concept) must work with no
+    DB configured at all — proving the precomputed static data is actually
+    sufficient on its own, not just present alongside a DB that quietly
+    still did the work."""
+
+    @pytest.fixture()
+    def page_no_db(self, page: Page, http_server_without_db):
+        page.goto(http_server_without_db)
+        page.wait_for_selector('input[placeholder*="word"]', timeout=_DB_LOAD_TIMEOUT)
+        return page
+
+    def test_db_never_loads_on_page_open(self, page_no_db: Page):
+        assert page_no_db.evaluate('window._dbTestHook.isLoaded()') is False
+
+    def test_search_returns_results_without_db(self, page_no_db: Page):
+        box = page_no_db.locator('input[placeholder*="word"]')
+        box.fill('dog')
+        box.press('Enter')
+        page_no_db.wait_for_selector('text=/\\d+ results?/', timeout=10_000)
+        expect(page_no_db.locator('text=a domesticated carnivorous animal')).to_be_visible()
+        assert page_no_db.evaluate('window._dbTestHook.isLoaded()') is False
+
+    def test_click_through_to_concept_view_without_db(self, page_no_db: Page):
+        box = page_no_db.locator('input[placeholder*="word"]')
+        box.fill('dog')
+        box.press('Enter')
+        page_no_db.wait_for_selector('text=a domesticated carnivorous animal', timeout=10_000)
+        page_no_db.locator('a.concept-inner, a[href*="concept"]').first.click()
+        page_no_db.wait_for_selector('text=Related Concepts', timeout=10_000)
+        expect(page_no_db.locator('text=a domesticated carnivorous animal')).to_be_visible()
+        assert page_no_db.evaluate('window._dbTestHook.isLoaded()') is False
+
+    def test_no_db_file_requests(self, page: Page, http_server_without_db):
+        requests = []
+        page.on('request', lambda r: requests.append(r.url) if '.db' in r.url else None)
+        page.goto(http_server_without_db)
+        page.wait_for_selector('input[placeholder*="word"]', timeout=_DB_LOAD_TIMEOUT)
+        box = page.locator('input[placeholder*="word"]')
+        box.fill('dog')
+        box.press('Enter')
+        page.wait_for_selector('text=a domesticated carnivorous animal', timeout=10_000)
+        assert requests == []
