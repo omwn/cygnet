@@ -1,0 +1,75 @@
+# Sites that deploy the Cygnet web UI.
+#
+# SITES.md is generated from this file:  uv run python scripts/sites.py render
+# Check local clones against web/:       uv run python scripts/sites.py status
+#
+# Fields per [[site]]:
+#   name       short name (also the local.json "name")
+#   title      full name of the resource
+#   url        public URL of the deployed site
+#   repo       GitHub repository (owner/name)
+#   branch     branch the site is deployed from
+#   web_dir    directory in the repo holding index.html and local.json
+#   clone      path to a local clone ("~" is expanded); optional
+#   languages  language codes the site is built around
+#   maintainer      who is responsible for the resource; reviews and merges
+#                   update PRs
+#   web_maintainer  who prepares updates to the web UI and opens the PRs
+#   notes      anything unusual about the deployment; optional
+
+[policy]
+# Files copied verbatim from cygnet's web/ into each site's web_dir.
+# Site-specific config (local.json, databases, wordnets.toml) is never copied.
+shared_files = ["index.html", "relations.json"]
+
+text = """
+* `web/index.html` is generic: all branding comes from each site's
+  `local.json`, so the shared files can be copied without editing.
+* Updates are never pushed directly to a site.  After a Cygnet change to a
+  shared file, the web maintainer copies it to each site on a new branch,
+  checks the site locally (`run.sh`), and opens a pull request naming the
+  Cygnet commit it came from, e.g. `Update index.html from cygnet (148b4ffd)`.
+  The site's maintainer reviews and merges it.
+* If a change needs a new `local.json` key, document it in `CUSTOMIZE.md`
+  and give it a default in `index.html`, so sites that have not updated
+  their config keep working.
+* Run `scripts/sites.py status` to see which sites are out of date.
+"""
+
+[[site]]
+name = "Cygnet"
+title = "Cygnet"
+url = "https://cygnet.maudslay.eu/"
+repo = "omwn/cygnet"
+branch = "main"
+web_dir = "web"
+languages = ["all"]
+maintainer = "Francis Bond"
+web_maintainer = "Francis Bond"
+notes = "Upstream: the source of the shared files."
+
+[[site]]
+name = "OJW"
+title = "Old Javanese Wordnet"
+url = "https://omwn.github.io/OJW/"
+repo = "omwn/OJW"
+branch = "master"
+web_dir = "docs"
+clone = "~/git/OJW"
+languages = ["kaw"]
+maintainer = "David Moeljadi, Zakariya Pamuji Aminullah"
+web_maintainer = "Francis Bond"
+notes = "Origin repository is davidmoeljadi/OJW; the site is deployed from the omwn/OJW fork."
+
+[[site]]
+name = "MOW"
+title = "Myanmar Open Wordnet"
+url = "https://wordnet.burmese.sg/"
+repo = "omwn/mow"
+branch = "master"
+web_dir = "docs"
+clone = "~/git/mow"
+languages = ["my"]
+maintainer = "Wenjie Wang, Francis Bond"
+web_maintainer = "Francis Bond"
+notes = "Also served at https://omwn.github.io/mow/."

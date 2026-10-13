@@ -49,6 +49,8 @@
 
   "exemplifies":           { "short": "exm",  "color": "#f59e0b", "en": "exemplifies",               "ja": "例示" },
   "is_exemplified_by":     { "short": "-exm", "color": "#fde68a", "en": "is exemplified by" },
+  "possessive":            { "short": "pss",  "color": "#14b8a6", "en": "possessive" },
+  "possessor":             { "short": "-pss", "color": "#99f6e4", "en": "possessor of" },
 
   "mero_location":         { "short": "lmer", "color": "#c026d3", "en": "location meronym" },
   "holo_location":         { "short": "-lmer","color": "#e879f9", "en": "location holonym" },
