@@ -166,6 +166,7 @@ def build_test_db(db_path: Path, prov_path: Path,
             )
     b.conn.commit()
 
+    b.write_wordnet_summaries(db_path.parent / 'summaries')
     b.finalize(db_path, prov_path)
     for path in (db_path, prov_path):
         subprocess.run(['gzip', '-k', '-9', '-f', str(path)], check=True)
@@ -189,6 +190,7 @@ def test_db_dir(tmp_path_factory):
     shutil.copy(web_dir / 'relations.json', serve_dir / 'relations.json')
     shutil.copy(db_path.with_suffix('.db.gz'), serve_dir / 'cygnet.db.gz')
     shutil.copy(prov_path.with_suffix('.db.gz'), serve_dir / 'provenance.db.gz')
+    shutil.copytree(db_path.parent / 'summaries', serve_dir / 'summaries')
     (serve_dir / 'local.json').write_text(json.dumps({
         'title': 'Cygnet',
         'icon': '🦢',
@@ -237,6 +239,22 @@ def _start_server(directory: str) -> tuple[HTTPServer, str]:
     return server, f'http://localhost:{port}'
 
 
+def _copy_serve_dir(src: Path, dst: Path, skip: set[str] = frozenset()) -> None:
+    """Copy a test-server directory's entries into *dst*, skipping *skip*.
+
+    test_db_dir contains a 'summaries/' subdirectory alongside plain files,
+    so this handles both rather than repeating the dir/file branch in every
+    fixture that clones it to swap out one file.
+    """
+    for f in src.iterdir():
+        if f.name in skip:
+            continue
+        if f.is_dir():
+            shutil.copytree(f, dst / f.name)
+        else:
+            shutil.copy(f, dst / f.name)
+
+
 @pytest.fixture(scope='session')
 def http_server(test_db_dir):
     """Session-scoped HTTP server serving the test DB directory."""
@@ -253,9 +271,7 @@ def http_server_with_config(test_db_dir, tmp_path_factory):
     can verify that local.json seeds the correct UI defaults on page load.
     """
     config_dir = tmp_path_factory.mktemp('serve_config')
-    for f in test_db_dir.iterdir():
-        if f.name != 'local.json':
-            shutil.copy(f, config_dir / f.name)
+    _copy_serve_dir(test_db_dir, config_dir, skip={'local.json'})
     (config_dir / 'local.json').write_text(json.dumps({
         'searchLanguage': 'fr',
         'displayLanguage': 'fr',
@@ -274,8 +290,7 @@ def http_server_with_broken_db(test_db_dir, tmp_path_factory):
     reaching the ready state (cachedExec() swallows query errors).
     """
     broken_dir = tmp_path_factory.mktemp('serve_broken_db')
-    for f in test_db_dir.iterdir():
-        shutil.copy(f, broken_dir / f.name)
+    _copy_serve_dir(test_db_dir, broken_dir)
     raw_path = broken_dir / 'cygnet_broken.db'
     conn = sqlite3.connect(raw_path)
     conn.execute('CREATE TABLE unrelated_table (x INTEGER)')
@@ -296,9 +311,7 @@ def http_server_with_broken_relations_json(test_db_dir, tmp_path_factory):
     an unexpected response shape.
     """
     broken_dir = tmp_path_factory.mktemp('serve_broken_relations')
-    for f in test_db_dir.iterdir():
-        if f.name != 'relations.json':
-            shutil.copy(f, broken_dir / f.name)
+    _copy_serve_dir(test_db_dir, broken_dir, skip={'relations.json'})
     server, url = _start_server(str(broken_dir))
     yield url
     server.shutdown()
@@ -312,9 +325,7 @@ def http_server_with_branding(test_db_dir, tmp_path_factory):
     name='TWN' so tests can verify both header sides are customisable.
     """
     branding_dir = tmp_path_factory.mktemp('serve_branding')
-    for f in test_db_dir.iterdir():
-        if f.name != 'local.json':
-            shutil.copy(f, branding_dir / f.name)
+    _copy_serve_dir(test_db_dir, branding_dir, skip={'local.json'})
     (branding_dir / 'local.json').write_text(json.dumps({
         'title': 'TestWN',
         'icon': '🧪',
@@ -341,9 +352,7 @@ def http_server_with_malicious_config(test_db_dir, tmp_path_factory):
     """
     payload = '<script>window.__config_xss_fired=true;</script><img src=x onerror="window.__config_xss_fired=true;"><em>legit</em>'
     config_dir = tmp_path_factory.mktemp('serve_malicious_config')
-    for f in test_db_dir.iterdir():
-        if f.name != 'local.json':
-            shutil.copy(f, config_dir / f.name)
+    _copy_serve_dir(test_db_dir, config_dir, skip={'local.json'})
     (config_dir / 'local.json').write_text(json.dumps({
         'header': payload,
         'footer': payload,

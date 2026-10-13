@@ -105,6 +105,34 @@ _POLYSEMY_BODY = """\
 """
 
 
+# One concept: entries use the same visible lemma "café" encoded two ways —
+# NFC (precomposed é) and NFD (e + combining acute) — as different source
+# wordnets might. Must be treated as the same lemma, not case/encoding variants.
+_UNICODE_VARIANT_BODY = """\
+<Concept id="cili.u1" ontological_category="NOUN" status="1">
+  <Provenance resource="wn-a" version="1.0"/>
+</Concept>
+<Gloss definiendum="cili.u1" language="en">
+  <AnnotatedSentence>a coffee shop</AnnotatedSentence>
+  <Provenance resource="wn-a" version="1.0"/>
+</Gloss>
+<Lexeme id="lex.en.cafe.nfc" language="en" grammatical_category="NOUN">
+  <Wordform form="café"/>
+  <Provenance resource="wn-a" version="1.0"/>
+</Lexeme>
+<Lexeme id="lex.en.cafe.nfd" language="en" grammatical_category="NOUN">
+  <Wordform form="café"/>
+  <Provenance resource="wn-a" version="1.0"/>
+</Lexeme>
+<Sense id="sense.cafe.nfc" signifier="lex.en.cafe.nfc" signified="cili.u1">
+  <Provenance resource="wn-a" version="1.0"/>
+</Sense>
+<Sense id="sense.cafe.nfd" signifier="lex.en.cafe.nfd" signified="cili.u1">
+  <Provenance resource="wn-a" version="1.0"/>
+</Sense>
+"""
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -127,6 +155,14 @@ def builder_case_variants(builder, tmp_path):
 @pytest.fixture()
 def builder_polysemy(builder, tmp_path):
     (tmp_path / 'wn.xml').write_text(wn_xml('wn-a', _POLYSEMY_BODY))
+    builder.process_file(tmp_path / 'wn.xml')
+    builder.create_indexes()
+    return builder
+
+
+@pytest.fixture()
+def builder_unicode_variants(builder, tmp_path):
+    (tmp_path / 'wn.xml').write_text(wn_xml('wn-a', _UNICODE_VARIANT_BODY))
     builder.process_file(tmp_path / 'wn.xml')
     builder.create_indexes()
     return builder
@@ -199,6 +235,24 @@ class TestMergeCaseVariants:
             'SELECT COUNT(*) FROM senses'
         ).fetchone()[0]
         assert n == 2
+
+    def test_nfc_and_nfd_lemma_stored_identically(self, builder_unicode_variants):
+        """_do_lexeme() normalizes wordforms to NFC, so an NFC- and an
+        NFD-encoded copy of "café" are stored as the same bytes, not two
+        distinct forms."""
+        forms = {r[0] for r in builder_unicode_variants.cur.execute(
+            'SELECT form FROM forms'
+        ).fetchall()}
+        assert forms == {'café'}
+
+    def test_nfc_and_nfd_variants_merged_to_one_sense(self, builder_unicode_variants):
+        """Same concept, same lemma once normalized — must be merged."""
+        removed = builder_unicode_variants.merge_case_variants()
+        assert removed == 1
+        n = builder_unicode_variants.cur.execute(
+            'SELECT COUNT(*) FROM senses'
+        ).fetchone()[0]
+        assert n == 1
 
 
 # ---------------------------------------------------------------------------

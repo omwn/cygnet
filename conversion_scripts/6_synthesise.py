@@ -172,6 +172,11 @@ def main() -> None:
     n_core = builder.load_core_synsets()
     print(f'  {n_core:,} core synsets loaded')
 
+    print('\nPhase 8: Writing per-wordnet summaries...')
+    summaries_dir = db_path.parent / 'summaries'
+    n_summaries = builder.write_wordnet_summaries(summaries_dir)
+    print(f'  {n_summaries:,} summary file(s) written to {summaries_dir}')
+
     print('\nFinalising...')
     builder.finalize(db_path, prov_db_path)
     print('\nDone.')

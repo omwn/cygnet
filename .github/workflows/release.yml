@@ -47,6 +47,9 @@ jobs:
       - name: Build databases
         run: bash build.sh --build-only --skip-tests
 
+      - name: Package wordnet summaries
+        run: tar czf web/summaries.tar.gz -C web summaries
+
       - name: Set release tag
         id: tag
         run: |
@@ -63,13 +66,14 @@ jobs:
           TAG="${{ steps.tag.outputs.value }}"
           if gh release view "$TAG" &>/dev/null; then
             echo "Release $TAG already exists, uploading assets only"
-            gh release upload "$TAG" web/cygnet.db.gz web/provenance.db.gz --clobber
+            gh release upload "$TAG" web/cygnet.db.gz web/provenance.db.gz web/summaries.tar.gz --clobber
           else
             gh release create "$TAG" \
               --title "Cygnet $TAG" \
               --generate-notes \
               --target "${{ github.sha }}" \
               web/cygnet.db.gz \
-              web/provenance.db.gz
+              web/provenance.db.gz \
+              web/summaries.tar.gz
           fi
 

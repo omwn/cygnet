@@ -1222,27 +1222,31 @@ class TestWordnetSummary:
         ).to_be_visible(timeout=5_000)
 
 
-class TestWordnetSummaryWithProvenance:
-    """Wordnet summary page — detailed stats that require the provenance DB."""
+class TestWordnetSummaryDetailedStats:
+    """Wordnet summary page — detailed stats (pos/ILI coverage, example
+    lemmas, relation-type distributions).
+
+    These come from a precomputed per-resource JSON file (see
+    MergeBuilder.write_wordnet_summaries()), not a live provenance.db
+    query, so no provenance auto-load is needed here.
+    """
 
     @pytest.fixture()
     def page_prov(self, page: Page, http_server):
-        """Page with provenance auto-load enabled via localStorage."""
-        page.add_init_script("localStorage.setItem('showProvenance', 'true')")
         page.goto(http_server)
         page.wait_for_selector('input[placeholder*="word"]', timeout=_DB_LOAD_TIMEOUT)
         return page
 
     def _open_summary(self, page: Page) -> None:
         _open_wordnet_summary(page)
-        # Wait for provenance-based stats to appear (ILI % card)
+        # Wait for the precomputed stats to load (ILI % card)
         page.wait_for_selector(
             '[data-testid="wordnet-summary"] div:has-text("ILI %")',
             timeout=30_000,
         )
 
     def test_pos_table_shown(self, page_prov: Page):
-        """With provenance DB, the summary shows a POS breakdown table."""
+        """The summary shows a POS breakdown table."""
         self._open_summary(page_prov)
         summary = page_prov.locator('[data-testid="wordnet-summary"]')
         expect(summary.locator('th', has_text='Part of speech')).to_be_visible()
@@ -1254,7 +1258,7 @@ class TestWordnetSummaryWithProvenance:
         expect(summary.locator('td', has_text='Noun').first).to_be_visible()
 
     def test_examples_column_shown(self, page_prov: Page):
-        """With provenance DB, the POS table includes an Examples column."""
+        """The POS table includes an Examples column."""
         self._open_summary(page_prov)
         summary = page_prov.locator('[data-testid="wordnet-summary"]')
         expect(summary.locator('th', has_text='Examples')).to_be_visible()
@@ -1267,13 +1271,13 @@ class TestWordnetSummaryWithProvenance:
         assert any(w in content for w in ('entity', 'animal', 'dog', 'brightness', 'dogfish'))
 
     def test_relations_section_shown(self, page_prov: Page):
-        """With provenance DB, the summary shows a Semantic relations table."""
+        """The summary shows a Semantic relations table."""
         self._open_summary(page_prov)
         summary = page_prov.locator('[data-testid="wordnet-summary"]')
         expect(summary.locator('text=Semantic relations')).to_be_visible()
 
     def test_sense_relations_section_shown(self, page_prov: Page):
-        """With provenance DB, the summary shows a Sense relations table (wn-en has antonyms)."""
+        """The summary shows a Sense relations table (wn-en has antonyms)."""
         self._open_summary(page_prov)
         summary = page_prov.locator('[data-testid="wordnet-summary"]')
         expect(summary.locator('text=Sense relations')).to_be_visible()
@@ -1286,7 +1290,7 @@ class TestWordnetSummaryWithProvenance:
         expect(summary.locator('td', has_text='opposite').first).to_be_visible()
 
     def test_ili_pct_shown(self, page_prov: Page):
-        """With provenance DB, ILI % card is shown in the coverage section."""
+        """ILI % card is shown in the coverage section."""
         self._open_summary(page_prov)
         summary = page_prov.locator('[data-testid="wordnet-summary"]')
         expect(summary.locator('div', has_text='ILI %').first).to_be_visible()

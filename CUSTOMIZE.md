@@ -307,6 +307,8 @@ cp "$CYGNET_DIR/web/omw-logo.svg"        "$PROJECT_DIR/docs/" 2>/dev/null || tru
 cp "$PROJECT_DIR/etc/local.json"         "$PROJECT_DIR/docs/"
 cp "$CYGNET_WORK/web/cygnet.db.gz"       "$PROJECT_DIR/docs/mywn.db.gz"
 cp "$CYGNET_WORK/web/provenance.db.gz"   "$PROJECT_DIR/docs/mywn-provenance.db.gz"
+rm -rf "$PROJECT_DIR/docs/summaries"
+cp -r "$CYGNET_WORK/web/summaries"       "$PROJECT_DIR/docs/summaries"
 ```
 
 The `--work-dir` flag tells cygnet's pipeline to use that directory for
@@ -350,9 +352,11 @@ external/
 docs/*.db.gz
 ```
 
-Commit `docs/index.html`, `docs/relations.json`, `docs/omw-logo.svg`, and
-`docs/local.json` — these are small and needed for GitHub Pages to serve the
-UI.
+Commit `docs/index.html`, `docs/relations.json`, `docs/omw-logo.svg`,
+`docs/local.json`, and `docs/summaries/` — these are small and needed for
+GitHub Pages to serve the UI. `docs/summaries/` holds one small precomputed
+JSON file per wordnet (powers the Wordnets tab's detail view); regenerate and
+re-commit it along with the databases whenever you rebuild.
 
 ---
 

@@ -574,160 +574,9 @@
             );
         }
 
-        function queryWordnetSummary(code, langCode) {
-            const _cacheKey = `${code}:${langCode}`;
-            if (_summaryCache[_cacheKey]) return _summaryCache[_cacheKey];
-            const result = { posStats: null, iliPct: null, defCount: null, exCount: null, examples: [], relDist: [], senseRelDist: [] };
-            if (!_provDb || !_db) return result;
-            try {
-                const sensesTableRow = cachedExecProv(`SELECT rowid FROM prov_tables WHERE name = 'senses'`)[0];
-                if (!sensesTableRow) { _summaryCache[_cacheKey] = result; return result; }
-                const sensesTable = sensesTableRow.rowid;
-                const senseRows = cachedExecProv(
-                    `SELECT p.item_rowid FROM provenance p
-                     JOIN prov_resources pr ON p.resource_rowid = pr.rowid
-                     WHERE p.table_rowid = ? AND pr.code = ?`,
-                    [sensesTable, code]
-                );
-                if (!senseRows.length) { _summaryCache[_cacheKey] = result; return result; }
-
-                _db.exec(`CREATE TEMP TABLE IF NOT EXISTS _wnsum_senses (id INTEGER PRIMARY KEY)`);
-                _db.exec(`DELETE FROM _wnsum_senses`);
-                const rowids = senseRows.map(r => r.item_rowid);
-                for (let i = 0; i < rowids.length; i += 500) {
-                    const vals = rowids.slice(i, i + 500).map(r => `(${r})`).join(',');
-                    _db.exec(`INSERT OR IGNORE INTO _wnsum_senses VALUES ${vals}`);
-                }
-
-                const posRows = cachedExec(`
-                    WITH src AS (
-                        SELECT DISTINCT s.synset_rowid
-                        FROM senses s WHERE s.rowid IN (SELECT id FROM _wnsum_senses)
-                    )
-                    SELECT syn.pos, COUNT(*) AS cnt,
-                           SUM(CASE WHEN syn.ili IS NOT NULL THEN 1 ELSE 0 END) AS with_ili
-                    FROM src JOIN synsets syn ON syn.rowid = src.synset_rowid
-                    GROUP BY syn.pos ORDER BY cnt DESC
-                `);
-                if (posRows.length) {
-                    result.posStats = posRows.map(r => ({ pos: r.pos, cnt: r.cnt, withIli: r.with_ili }));
-                    const total = posRows.reduce((s, r) => s + r.cnt, 0);
-                    const withIli = posRows.reduce((s, r) => s + r.with_ili, 0);
-                    result.iliPct = total > 0 ? Math.round(100 * withIli / total) : 0;
-                }
-
-                const countRow = cachedExec(`
-                    SELECT COUNT(*) AS ex_count
-                    FROM sense_examples se
-                    WHERE se.sense_rowid IN (SELECT id FROM _wnsum_senses)
-                `)[0];
-                if (countRow) result.exCount = countRow.ex_count;
-
-                const defTableRow = cachedExecProv(
-                    `SELECT rowid FROM prov_tables WHERE name = 'definitions'`
-                )[0];
-                if (defTableRow) {
-                    const defCountRow = cachedExecProv(
-                        `SELECT COUNT(*) AS cnt FROM provenance p
-                         JOIN prov_resources pr ON p.resource_rowid = pr.rowid
-                         WHERE p.table_rowid = ? AND pr.code = ?`,
-                        [defTableRow.rowid, code]
-                    )[0];
-                    if (defCountRow) result.defCount = defCountRow.cnt;
-                }
-
-                const hasCore = !!_hasCoreTable;
-                const coreExJoin = hasCore ? 'LEFT JOIN core_synsets cs ON cs.synset_rowid = syn.rowid' : '';
-                const coreExOrder = hasCore ? '(cs.synset_rowid IS NULL),' : '';
-                const coreRelJoin = hasCore ? 'LEFT JOIN core_synsets cs ON cs.synset_rowid = sr.source_rowid' : '';
-                const coreRelOrder = hasCore ? '(cs.synset_rowid IS NULL),' : '';
-
-                const lang = langCode || 'en';
-                result.examples = cachedExec(`
-                    WITH src_senses AS (
-                        SELECT s.rowid, s.synset_rowid, s.sense_index, s.entry_rowid
-                        FROM senses s WHERE s.rowid IN (SELECT id FROM _wnsum_senses)
-                    ),
-                    ranked AS (
-                        SELECT syn.pos, f.form, syn.rowid AS synset_rowid,
-                               ROW_NUMBER() OVER (
-                                   PARTITION BY syn.pos
-                                   ORDER BY ${coreExOrder}
-                                            (CASE WHEN UNICODE(SUBSTR(f.form,1,1)) BETWEEN 97 AND 122
-                                                       OR UNICODE(SUBSTR(f.form,1,1)) >= 128 THEN 0 ELSE 1 END),
-                                            ss.sense_index, f.form
-                               ) AS rn
-                        FROM src_senses ss
-                        JOIN synsets syn ON syn.rowid = ss.synset_rowid
-                        JOIN entries e ON e.rowid = ss.entry_rowid
-                        JOIN forms f ON f.entry_rowid = e.rowid AND f.rank = 0
-                        JOIN languages l ON l.rowid = e.language_rowid
-                        ${coreExJoin}
-                        WHERE l.code = ?
-                    )
-                    SELECT pos, form, synset_rowid FROM ranked WHERE rn <= 5 ORDER BY pos, rn
-                `, [lang]);
-
-                const inverseTypes = new Set(
-                    Object.entries(_relConfig)
-                        .filter(([, e]) => e.short?.startsWith('-'))
-                        .map(([name]) => name)
-                );
-                const relRows = cachedExec(`
-                    WITH src AS (
-                        SELECT DISTINCT s.synset_rowid
-                        FROM senses s WHERE s.rowid IN (SELECT id FROM _wnsum_senses)
-                    ),
-                    rels AS (
-                        SELECT rt.type, sr.source_rowid, sr.target_rowid,
-                               COUNT(*) OVER (PARTITION BY rt.type) AS cnt,
-                               ROW_NUMBER() OVER (
-                                   PARTITION BY rt.type
-                                   ORDER BY ${coreRelOrder}
-                                            (CASE WHEN NOT EXISTS(
-                                                SELECT 1 FROM senses s2
-                                                JOIN entries e2 ON e2.rowid = s2.entry_rowid
-                                                JOIN languages l2 ON l2.rowid = e2.language_rowid
-                                                WHERE s2.synset_rowid = sr.target_rowid AND l2.code = ?
-                                            ) THEN 1 ELSE 0 END),
-                                            sr.rowid
-                               ) AS rn
-                        FROM synset_relations sr
-                        JOIN src ON src.synset_rowid = sr.source_rowid
-                        JOIN relation_types rt ON rt.rowid = sr.type_rowid
-                        ${coreRelJoin}
-                    )
-                    SELECT type, cnt, source_rowid AS ex_src_rowid, target_rowid AS ex_tgt_rowid
-                    FROM rels WHERE rn = 1
-                    ORDER BY cnt DESC
-                `, [lang]);
-                result.relDist = relRows.filter(row => !inverseTypes.has(row.type));
-
-                const senseRelRows = cachedExec(`
-                    WITH rels AS (
-                        SELECT rt.type,
-                               sr.source_rowid, sr.target_rowid,
-                               COUNT(*) OVER (PARTITION BY rt.type) AS cnt,
-                               ROW_NUMBER() OVER (PARTITION BY rt.type ORDER BY sr.rowid) AS rn
-                        FROM sense_relations sr
-                        JOIN _wnsum_senses ws ON ws.id = sr.source_rowid
-                        JOIN relation_types rt ON rt.rowid = sr.type_rowid
-                    )
-                    SELECT r.type, r.cnt, r.source_rowid AS ex_src_rowid, r.target_rowid AS ex_tgt_rowid,
-                           (SELECT f.form FROM forms f WHERE f.entry_rowid =
-                               (SELECT entry_rowid FROM senses WHERE rowid = r.source_rowid) AND f.rank = 0 LIMIT 1) AS src_form,
-                           (SELECT f.form FROM forms f WHERE f.entry_rowid =
-                               (SELECT entry_rowid FROM senses WHERE rowid = r.target_rowid) AND f.rank = 0 LIMIT 1) AS tgt_form
-                    FROM rels r WHERE rn = 1
-                    ORDER BY cnt DESC
-                `);
-                result.senseRelDist = senseRelRows.filter(row => !inverseTypes.has(row.type));
-            } catch (e) {
-                console.error('queryWordnetSummary error:', e);
-            }
-            _summaryCache[_cacheKey] = result;
-            return result;
-        }
+        // Per-resource summary stats are precomputed at build time (see
+        // MergeBuilder.write_wordnet_summaries()) and fetched lazily; see the
+        // useEffect keyed on selectedWordnet, below, that populates this.
 
         // ========== INDEXEDDB CACHE ==========
         const IDB_NAME = 'cygnet-cache';
@@ -815,6 +664,7 @@
                 localStorage.getItem('showPronunciation') !== 'false'
             );
             const [selectedWordnet, setSelectedWordnet] = useState(null);
+            const [wordnetSummary, setWordnetSummary] = useState(null);
             const [searchTerm, setSearchTerm] = useState('');
             const [currentSearch, setCurrentSearch] = useState('');
             const [currentSearchSenseIds, setCurrentSearchSenseIds] = useState(new Set());
@@ -905,6 +755,31 @@
                         console.warn('relations.json fetch failed, using fallback relation labels:', e);
                     });
             }, []);
+
+            // Per-wordnet summary stats (pos/ILI coverage, example lemmas,
+            // relation-type distributions) are precomputed at build time —
+            // see MergeBuilder.write_wordnet_summaries() — and shipped as one
+            // small static JSON file per resource, fetched lazily only when
+            // that resource's detail page is opened. This avoids the live
+            // cross-database aggregation these pages used to run (and needing
+            // provenance.db loaded at all) for a view that's rarely visited.
+            useEffect(() => {
+                if (!selectedWordnet) { setWordnetSummary(null); return; }
+                if (selectedWordnet in _summaryCache) {
+                    setWordnetSummary(_summaryCache[selectedWordnet]);
+                    return;
+                }
+                let cancelled = false;
+                setWordnetSummary(null);
+                fetch(`summaries/${selectedWordnet}.json`)
+                    .then(r => r.ok ? r.json() : null)
+                    .catch(e => { console.warn('wordnet summary fetch failed:', e); return null; })
+                    .then(data => {
+                        _summaryCache[selectedWordnet] = data;
+                        if (!cancelled) setWordnetSummary(data);
+                    });
+                return () => { cancelled = true; };
+            }, [selectedWordnet]);
 
             useEffect(() => {
                 _configPromise.then(() => {
@@ -3258,7 +3133,7 @@
                             if (selectedWordnet) {
                                 const r = allResources.find(res => res.code === selectedWordnet);
                                 if (!r) return <p className="text-slate-600">Wordnet not found.</p>;
-                                const summary = provenanceReady ? queryWordnetSummary(r.code, r.language) : null;
+                                const summary = wordnetSummary;
                                 const extra = (() => { try { return r.extra ? JSON.parse(r.extra) : null; } catch(e) { return null; } })();
                                 const metaRows = [
                                     ['ID',         r.code],
@@ -3357,7 +3232,6 @@
                                             </table>
                                             </div>
                                         )}
-                                        {!provenanceReady && <p className="text-xs text-slate-500 mt-2">Load the provenance database for detailed statistics.</p>}
                                     </div>
 
                                     {summary && summary.relDist.length > 0 && (

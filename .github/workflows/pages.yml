@@ -38,14 +38,23 @@ jobs:
         id: cache-db
         uses: actions/cache@v4
         with:
-          path: web/*.db.gz
+          path: |
+            web/*.db.gz
+            summaries.tar.gz
           key: release-db-${{ steps.release.outputs.tag }}
 
       - name: Download release assets
         if: steps.cache-db.outputs.cache-hit != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release download ${{ steps.release.outputs.tag }} --repo ${{ github.repository }} --pattern "*.db.gz" --dir web/
+        run: |
+          gh release download ${{ steps.release.outputs.tag }} --repo ${{ github.repository }} \
+            --pattern "*.db.gz" --dir web/
+          gh release download ${{ steps.release.outputs.tag }} --repo ${{ github.repository }} \
+            --pattern "summaries.tar.gz" --dir .
+
+      - name: Extract wordnet summaries
+        run: tar xzf summaries.tar.gz -C web/
 
       - uses: actions/configure-pages@v5
 

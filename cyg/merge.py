@@ -303,6 +303,16 @@ def remove_accents(text: str) -> str:
     return _COMBINING_RE.sub('', unicodedata.normalize('NFD', text))
 
 
+def normalize_form(text: str) -> str:
+    """Canonicalize a wordform to NFC so byte-distinct encodings of the same
+    text (e.g. precomposed vs. combining-mark diacritics from different
+    source wordnets) are treated as identical for storage and deduplication.
+    """
+    if text.isascii():
+        return text
+    return unicodedata.normalize('NFC', text)
+
+
 def build_annotated_sentence(parent, text: str, annotations: list[tuple]) -> None:
     """Add an AnnotatedSentence child to *parent* with inline AnnotatedToken elements.
 
@@ -559,6 +569,7 @@ class MergeBuilder:
                 form = wf.get('form')
                 if not form:
                     continue
+                form = normalize_form(form)
                 if form not in existing:
                     fid = self._next_form_id
                     self._next_form_id += 1
@@ -626,6 +637,8 @@ class MergeBuilder:
         pron_rows: list[tuple] = []  # (fid, variety, text, audio)
         for wf in elem.findall('Wordform'):
             form = wf.get('form')
+            if form:
+                form = normalize_form(form)
             if form and form not in seen:
                 seen.add(form)
                 fid = self._next_form_id
@@ -1788,17 +1801,246 @@ class MergeBuilder:
         )
         return len(rows)
 
+    def write_wordnet_summaries(self, out_dir: Path) -> int:
+        """Precompute per-resource stats for the Wordnets-tab detail view.
+
+        This used to be a live query the browser ran every time a visitor
+        opened a wordnet's detail page: build a temp table of that
+        resource's sense rowids inside the WASM-loaded cygnet.db, having
+        first fetched them from the separately-loaded provenance.db, then
+        run several window-function queries against it. For a large
+        resource (millions of provenance rows) that was slow, and it
+        forced loading the (large) provenance database just to view a
+        handful of summary numbers that are rarely even looked at.
+
+        Doing it once here, natively, removes both costs: one JSON file
+        per resource is written to *out_dir*, and the browser no longer
+        needs provenance.db at all for this view.
+
+        Args:
+            out_dir: Directory to write ``<resource_code>.json`` files into.
+
+        Returns:
+            Number of summary files written.
+        """
+        # Symmetric relations (e.g. 'similar': 'similar') map to themselves
+        # and must be kept -- only exclude the *other* side of a genuinely
+        # directional pair (e.g. 'hypernym': 'hyponym' excludes 'hyponym').
+        inverse_synset_rels = {
+            v for k, v in INVERSE_CONCEPT_RELATIONS.items() if k != v
+        }
+        inverse_sense_rels = {
+            v for k, v in INVERSE_SENSE_RELATIONS.items() if k != v
+        }
+        has_core = self.cur.execute(
+            'SELECT COUNT(*) FROM core_synsets'
+        ).fetchone()[0] > 0
+        core_ex_join = (
+            'LEFT JOIN core_synsets cs ON cs.synset_rowid = syn.rowid' if has_core else ''
+        )
+        core_ex_order = '(cs.synset_rowid IS NULL),' if has_core else ''
+        core_rel_join = (
+            'LEFT JOIN core_synsets cs ON cs.synset_rowid = sr.source_rowid' if has_core else ''
+        )
+        core_rel_order = '(cs.synset_rowid IS NULL),' if has_core else ''
+
+        senses_table = self._prov_table_rowid('senses')
+        defs_table = self._prov_table_rowid('definitions')
+
+        # One pass over each provenance subset, grouped by resource in
+        # Python -- avoids re-scanning provenance.db once per resource
+        # (there is no index on resource_rowid).
+        resource_senses: dict[str, list[int]] = {}
+        for code, item_rowid in self.prov_cur.execute(
+            'SELECT pr.code, p.item_rowid FROM provenance p '
+            'JOIN prov_resources pr ON p.resource_rowid = pr.rowid '
+            'WHERE p.table_rowid = ?',
+            (senses_table,),
+        ):
+            resource_senses.setdefault(code, set()).add(item_rowid)
+
+        def_counts: dict[str, int] = dict(self.prov_cur.execute(
+            'SELECT pr.code, COUNT(*) FROM provenance p '
+            'JOIN prov_resources pr ON p.resource_rowid = pr.rowid '
+            'WHERE p.table_rowid = ? GROUP BY pr.code',
+            (defs_table,),
+        ).fetchall())
+
+        lang_by_code: dict[str, str] = dict(self.cur.execute(
+            'SELECT r.code, l.code FROM resources r '
+            'LEFT JOIN languages l ON l.rowid = r.language_rowid'
+        ).fetchall())
+
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for stale in out_dir.glob('*.json'):
+            stale.unlink()
+        self.cur.execute('CREATE TEMP TABLE _sum_senses (id INTEGER PRIMARY KEY)')
+        n_written = 0
+
+        for code, sense_rowids in resource_senses.items():
+            self.cur.execute('DELETE FROM _sum_senses')
+            self.cur.executemany(
+                'INSERT OR IGNORE INTO _sum_senses VALUES (?)',
+                [(r,) for r in sense_rowids],
+            )
+
+            pos_rows = self.cur.execute("""
+                WITH src AS (
+                    SELECT DISTINCT s.synset_rowid
+                    FROM senses s WHERE s.rowid IN (SELECT id FROM _sum_senses)
+                )
+                SELECT syn.pos, COUNT(*) AS cnt,
+                       SUM(CASE WHEN syn.ili IS NOT NULL THEN 1 ELSE 0 END) AS with_ili
+                FROM src JOIN synsets syn ON syn.rowid = src.synset_rowid
+                GROUP BY syn.pos ORDER BY cnt DESC
+            """).fetchall()
+            pos_stats = [
+                {'pos': pos, 'cnt': cnt, 'withIli': with_ili}
+                for pos, cnt, with_ili in pos_rows
+            ]
+            total = sum(r['cnt'] for r in pos_stats)
+            with_ili_total = sum(r['withIli'] for r in pos_stats)
+            ili_pct = round(100 * with_ili_total / total) if total else None
+
+            ex_count = self.cur.execute("""
+                SELECT COUNT(*) FROM sense_examples se
+                WHERE se.sense_rowid IN (SELECT id FROM _sum_senses)
+            """).fetchone()[0]
+
+            lang_code = lang_by_code.get(code) or 'en'
+
+            example_rows = self.cur.execute(f"""
+                WITH src_senses AS (
+                    SELECT s.rowid, s.synset_rowid, s.sense_index, s.entry_rowid
+                    FROM senses s WHERE s.rowid IN (SELECT id FROM _sum_senses)
+                ),
+                ranked AS (
+                    SELECT syn.pos, f.form, syn.rowid AS synset_rowid,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY syn.pos
+                               ORDER BY {core_ex_order}
+                                        (CASE WHEN UNICODE(SUBSTR(f.form,1,1)) BETWEEN 97 AND 122
+                                                   OR UNICODE(SUBSTR(f.form,1,1)) >= 128 THEN 0 ELSE 1 END),
+                                        ss.sense_index, f.form
+                           ) AS rn
+                    FROM src_senses ss
+                    JOIN synsets syn ON syn.rowid = ss.synset_rowid
+                    JOIN entries e ON e.rowid = ss.entry_rowid
+                    JOIN forms f ON f.entry_rowid = e.rowid AND f.rank = 0
+                    JOIN languages l ON l.rowid = e.language_rowid
+                    {core_ex_join}
+                    WHERE l.code = ?
+                )
+                SELECT pos, form, synset_rowid FROM ranked WHERE rn <= 5 ORDER BY pos, rn
+            """, (lang_code,)).fetchall()
+            examples = [
+                {'pos': pos, 'form': form, 'synset_rowid': syn_rowid}
+                for pos, form, syn_rowid in example_rows
+            ]
+
+            rel_rows = self.cur.execute(f"""
+                WITH src AS (
+                    SELECT DISTINCT s.synset_rowid
+                    FROM senses s WHERE s.rowid IN (SELECT id FROM _sum_senses)
+                ),
+                rels AS (
+                    SELECT rt.type, sr.source_rowid, sr.target_rowid,
+                           COUNT(*) OVER (PARTITION BY rt.type) AS cnt,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY rt.type
+                               ORDER BY {core_rel_order}
+                                        (CASE WHEN NOT EXISTS(
+                                            SELECT 1 FROM senses s2
+                                            JOIN entries e2 ON e2.rowid = s2.entry_rowid
+                                            JOIN languages l2 ON l2.rowid = e2.language_rowid
+                                            WHERE s2.synset_rowid = sr.target_rowid AND l2.code = ?
+                                        ) THEN 1 ELSE 0 END),
+                                        sr.rowid
+                           ) AS rn
+                    FROM synset_relations sr
+                    JOIN src ON src.synset_rowid = sr.source_rowid
+                    JOIN relation_types rt ON rt.rowid = sr.type_rowid
+                    {core_rel_join}
+                )
+                SELECT type, cnt, source_rowid, target_rowid
+                FROM rels WHERE rn = 1
+                ORDER BY cnt DESC
+            """, (lang_code,)).fetchall()
+            rel_dist = [
+                {'type': t, 'cnt': cnt, 'ex_src_rowid': src, 'ex_tgt_rowid': tgt}
+                for t, cnt, src, tgt in rel_rows if t not in inverse_synset_rels
+            ]
+
+            sense_rel_rows = self.cur.execute("""
+                WITH rels AS (
+                    SELECT rt.type,
+                           sr.source_rowid, sr.target_rowid,
+                           COUNT(*) OVER (PARTITION BY rt.type) AS cnt,
+                           ROW_NUMBER() OVER (PARTITION BY rt.type ORDER BY sr.rowid) AS rn
+                    FROM sense_relations sr
+                    JOIN _sum_senses ws ON ws.id = sr.source_rowid
+                    JOIN relation_types rt ON rt.rowid = sr.type_rowid
+                )
+                SELECT r.type, r.cnt, r.source_rowid, r.target_rowid,
+                       (SELECT f.form FROM forms f WHERE f.entry_rowid =
+                           (SELECT entry_rowid FROM senses WHERE rowid = r.source_rowid) AND f.rank = 0 LIMIT 1) AS src_form,
+                       (SELECT f.form FROM forms f WHERE f.entry_rowid =
+                           (SELECT entry_rowid FROM senses WHERE rowid = r.target_rowid) AND f.rank = 0 LIMIT 1) AS tgt_form
+                FROM rels r WHERE rn = 1
+                ORDER BY r.cnt DESC
+            """).fetchall()
+            sense_rel_dist = [
+                {
+                    'type': t, 'cnt': cnt, 'ex_src_rowid': src, 'ex_tgt_rowid': tgt,
+                    'src_form': src_form, 'tgt_form': tgt_form,
+                }
+                for t, cnt, src, tgt, src_form, tgt_form in sense_rel_rows
+                if t not in inverse_sense_rels
+            ]
+
+            summary = {
+                'posStats': pos_stats,
+                'iliPct': ili_pct,
+                'defCount': def_counts.get(code),
+                'exCount': ex_count,
+                'examples': examples,
+                'relDist': rel_dist,
+                'senseRelDist': sense_rel_dist,
+            }
+            (out_dir / f'{code}.json').write_text(
+                json.dumps(summary, ensure_ascii=False, separators=(',', ':')),
+                encoding='utf-8',
+            )
+            n_written += 1
+
+        self.cur.execute('DROP TABLE _sum_senses')
+        return n_written
+
     def create_indexes(self) -> None:
         """Create indexes before post-processing queries (critical for performance)."""
         self.cur.executescript(INDEXES)
 
     def finalize(self, db_path: Path, prov_db_path: Path) -> None:
-        """Run ANALYZE and commit both databases."""
+        """Drop build-only indexes, run ANALYZE/VACUUM, and commit both databases."""
+        # idx_forms_lower only speeds up merge_case_variants()/compute_sense_indices()
+        # during the build itself -- the shipped web UI never queries LOWER(form)
+        # (it uses the normalized_form column instead), so keeping this index in
+        # the exported database just costs ~87MB for every visitor to download.
+        print('Dropping build-only indexes...')
+        self.cur.execute('DROP INDEX IF EXISTS idx_forms_lower')
+
         print('Running ANALYZE...')
         self.cur.execute('ANALYZE')
-
         self.conn.commit()
         self.prov_conn.commit()
+
+        print('Running VACUUM...')
+        self.conn.isolation_level = None
+        self.conn.execute('VACUUM')
+        self.prov_conn.isolation_level = None
+        self.prov_conn.execute('VACUUM')
+
         self.conn.close()
         self.prov_conn.close()
 

@@ -3,7 +3,7 @@
 import pytest
 from lxml import etree as ET
 
-from cyg.merge import parse_annotated_sentence, remove_accents
+from cyg.merge import normalize_form, parse_annotated_sentence, remove_accents
 
 
 class TestRemoveAccents:
@@ -27,6 +27,28 @@ class TestRemoveAccents:
 
     def test_multiple_accents(self):
         assert remove_accents("naïve résumé") == "naive resume"
+
+
+class TestNormalizeForm:
+    def test_plain_ascii_unchanged(self):
+        assert normalize_form("hello") == "hello"
+
+    def test_empty_string(self):
+        assert normalize_form("") == ""
+
+    def test_nfd_input_composed_to_nfc(self):
+        # 'e' + combining acute accent (NFD) -> precomposed 'é' (NFC)
+        nfd = "é"
+        assert normalize_form(nfd) == "é"
+
+    def test_nfc_input_unchanged(self):
+        nfc = "é"
+        assert normalize_form(nfc) == nfc
+
+    def test_nfc_and_nfd_variants_become_identical(self):
+        nfc = "café"
+        nfd = "café"
+        assert normalize_form(nfc) == normalize_form(nfd)
 
 
 class TestParseAnnotatedSentence:
