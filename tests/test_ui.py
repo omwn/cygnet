@@ -176,12 +176,29 @@ class TestDatabaseErrorHandling:
     exception and returns [], so without an explicit startup sanity check
     a missing core table looks identical to "no rows". See the startup
     table check in web/index.html, right after `new SQL.Database(buf)`.
+
+    The dominant search-and-browse path no longer loads the main DB at
+    all (it's resolved from the precomputed static index instead), so a
+    broken main DB no longer blocks that path -- the error now only
+    surfaces once a power feature that actually needs loadMainDb() (here,
+    definition search) is used.
     """
 
-    def test_broken_db_shows_error_not_ready(self, page: Page, http_server_with_broken_db):
+    def test_broken_db_shows_error_only_when_power_feature_triggers_load(
+        self, page: Page, http_server_with_broken_db
+    ):
         page.goto(http_server_with_broken_db)
+        page.wait_for_selector('input[placeholder*="word"]', timeout=_DB_LOAD_TIMEOUT)
+        # Dominant path is untouched by the broken main DB.
+        _search(page, 'dog')
+        assert _result_count(page) == 1
+        expect(page.locator('text=no such table')).not_to_be_visible()
+        # def: search needs the full DB, which triggers the load and
+        # surfaces the schema mismatch.
+        box = page.locator('input[placeholder*="word"]')
+        box.fill('def:animal')
+        box.press('Enter')
         expect(page.locator('text=no such table')).to_be_visible(timeout=_DB_LOAD_TIMEOUT)
-        expect(page.locator('input[placeholder*="word"]')).to_have_count(0)
 
     def test_missing_relations_json_falls_back_without_crashing(
         self, page: Page, http_server_with_broken_relations_json
@@ -196,6 +213,44 @@ class TestDatabaseErrorHandling:
         label = page.evaluate("() => window._relTestHook.getLabel('hypernym')")
         assert label == 'hypernym'
         assert errors == []
+
+
+# ---------------------------------------------------------------------------
+# Lazy main-DB load: even with a DB configured, it must not load until a
+# power feature (def: search, non-prefix glob, path-finding) needs it.
+# ---------------------------------------------------------------------------
+
+class TestLazyMainDbLoad:
+    def test_main_db_not_loaded_after_page_open(self, page_ready: Page):
+        assert page_ready.evaluate('window._dbTestHook.isLoaded()') is False
+
+    def test_exact_and_ili_and_prefix_glob_dont_load_main_db(self, page_ready: Page):
+        """These three modes are servable from the static index -- none of
+        them should trigger loadMainDb()."""
+        _search(page_ready, 'dog')
+        assert page_ready.evaluate('window._dbTestHook.isLoaded()') is False
+        _search(page_ready, 'dog*')
+        assert page_ready.evaluate('window._dbTestHook.isLoaded()') is False
+        _search(page_ready, 'i3')
+        assert page_ready.evaluate('window._dbTestHook.isLoaded()') is False
+
+    def test_definition_search_loads_main_db_and_still_works(self, page_ready: Page):
+        _search(page_ready, 'def:animal')
+        assert _result_count(page_ready) == 3
+        assert page_ready.evaluate('window._dbTestHook.isLoaded()') is True
+
+    def test_leading_wildcard_glob_loads_main_db_and_still_works(self, page_ready: Page):
+        """'*ness' isn't a literal-prefix glob, so it needs the full DB."""
+        _search(page_ready, '*ness')
+        assert _result_count(page_ready) == 1
+        assert page_ready.evaluate('window._dbTestHook.isLoaded()') is True
+
+    def test_provenance_loads_independently_of_main_db(self, page_ready: Page):
+        """loadProvenanceDb() must not depend on loadMainDb() having run."""
+        page_ready.locator('button[title="Settings"]').click()
+        page_ready.locator('label', has_text='Show sources').locator('input').check()
+        expect(page_ready.locator('text=Loading...')).not_to_be_visible(timeout=_DB_LOAD_TIMEOUT)
+        assert page_ready.evaluate('window._dbTestHook.isLoaded()') is False
 
 
 # ---------------------------------------------------------------------------
@@ -449,6 +504,11 @@ class TestPathFinder:
         page.wait_for_selector(
             'text=All forms expressing this concept', timeout=10_000
         )
+        # Path-finding needs the full relational DB -- it's not servable
+        # from the static index, so it stays behind an explicit load
+        # action rather than triggering on every keystroke.
+        page.locator('button', has_text='Load full dataset to find a path').click()
+        page.wait_for_selector('input[placeholder*="ILI"]', timeout=_DB_LOAD_TIMEOUT)
 
     def test_path_found_shows_intermediate_step(self, page_ready: Page):
         """dog (i3) → entity (i1) path passes through animal (i2)."""

@@ -232,6 +232,33 @@
             }));
         }
 
+        // Numeric-bucket-sharded like the sense index -- the client already
+        // has the numeric synset_rowid from the URL/relation, so no manifest
+        // lookup is needed, just arithmetic on the bucket size the build
+        // used (write_labels_index()'s default).
+        const _labelsBucketCache = {};
+        function fetchLabelsBucket(bucket) {
+            if (!_labelsBucketCache[bucket]) {
+                _labelsBucketCache[bucket] = fetch(DATA_BASE + `labels/${bucket}.json`)
+                    .then(r => r.ok ? r.json() : {})
+                    .catch(() => ({}));
+            }
+            return _labelsBucketCache[bucket];
+        }
+
+        // Static equivalent of getConceptLabel() -- same requested-language
+        // -> English -> any-language-fallback resolution, but reading the
+        // precomputed fallback rather than guessing from object key order.
+        async function getConceptLabelStatic(synsetRowid, lang = 'en') {
+            const bucket = Math.floor(synsetRowid / 20000);
+            const data = await fetchLabelsBucket(bucket);
+            const entry = data[String(synsetRowid)];
+            if (!entry) return null;
+            if (entry.byLang[lang]) return { form: entry.byLang[lang], lang };
+            if (lang !== 'en' && entry.byLang.en) return { form: entry.byLang.en, lang: 'en' };
+            return entry.fallback ? { form: entry.fallback.label, lang: entry.fallback.lang } : null;
+        }
+
         // Build-time storage shapes (cr/sr) carry a raw relation_types.type
         // string, not RELATION_TO_SHORT's short code -- stay correct even if
         // relations.json changes without a DB rebuild. Map it at read time.
@@ -349,6 +376,19 @@
         let _db = null;
         let _SQL = null;
         let _provDb = null;
+        let _dbLoadPromise = null; // de-dupes concurrent loadMainDb() triggers
+
+        // sql.js's WASM runtime is shared by the main and provenance
+        // databases, but only loadMainDb() used to initialize it -- so
+        // loadProvenanceDb() couldn't run standalone. Both now call this
+        // first, so provenance can load independently of the main DB.
+        async function ensureSqlJs() {
+            if (_SQL) return _SQL;
+            _SQL = await initSqlJs({
+                locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/${file}`
+            });
+            return _SQL;
+        }
 
         function cachedExec(sql, params = []) {
             if (!_db) return [];
@@ -857,6 +897,12 @@
         // ========== MAIN COMPONENT ==========
         function DictionaryBrowser() {
             const [dbReady, setDbReady] = useState(false);
+            // dbReady means "the search/browse UI can render" -- true as
+            // soon as manifest.json resolves, independent of whether the
+            // full relational DB has loaded. mainDbReady tracks that
+            // separately, for power features (def: search, non-prefix
+            // glob, path-finding) that need _db specifically.
+            const [mainDbReady, setMainDbReady] = useState(false);
             const [relConfigLoaded, setRelConfigLoaded] = useState(0);
             const [dbError, setDbError] = useState(null);
             const [dbProgress, setDbProgress] = useState('');
@@ -889,6 +935,7 @@
             const [loadingResults, setLoadingResults] = useState(false);
             const [loadedSenses, setLoadedSenses] = useState({});
             const [loadedConcepts, setLoadedConcepts] = useState({});
+            const [loadedLabels, setLoadedLabels] = useState({});
             const [activeTab, setActiveTab] = useState('browser');
             const [collapsedSections, setCollapsedSections] = useState({});
             const [synonymsCollapsed, setSynonymsCollapsed] = useState({});
@@ -911,6 +958,7 @@
             const [pathResult, setPathResult] = useState(null);
             const [pathNotFound, setPathNotFound] = useState(false);
             const [pathWordSuggestions, setPathWordSuggestions] = useState([]);
+            const [pathDbLoading, setPathDbLoading] = useState(false);
             const isPopStateRef = useRef(false);
             const isInitialLoadRef = useRef(true);
             const initialUrlHandledRef = useRef(false);
@@ -1017,20 +1065,24 @@
                 });
             }, []);
 
-            // Initialize database
-            useEffect(() => {
-                (async () => {
-                    try {
-                        await _configPromise;
-                        const dbFile = _siteConfig.databases?.main?.filename;
-                        if (!dbFile) { setDbReady(true); return; }
-                        setDbProgress('Loading sql.js...');
-                        const SQL = await initSqlJs({
-                            locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/${file}`
-                        });
+            // loadMainDb() -- downloads/decompresses/opens the full relational
+            // DB. Called eagerly below only as a fallback when no precomputed
+            // static data is available; otherwise it's deferred until a power
+            // feature (def: search, non-prefix glob, path-finding) actually
+            // needs it. _dbLoadPromise de-dupes concurrent callers and lets a
+            // failed load be retried (a fresh call after a rejected one
+            // starts over, rather than returning the same failed promise).
+            const loadMainDb = useCallback(() => {
+                if (_dbLoadPromise) return _dbLoadPromise;
+                _dbLoadPromise = (async () => {
+                    await _configPromise;
+                    const dbFile = _siteConfig.databases?.main?.filename;
+                    if (!dbFile) return;
+                    setDbProgress('Loading sql.js...');
+                    await ensureSqlJs();
 
-                        // Check IndexedDB cache, validating against filename and server mtime
-                        let buf;
+                    // Check IndexedDB cache, validating against filename and server mtime
+                    let buf;
                         try {
                             const cached = await idbGet('db');
                             if (cached) {
@@ -1134,29 +1186,56 @@
                             }
                         }
 
-                        setDbProgress('Opening database...');
-                        _SQL = SQL;
-                        _db = new SQL.Database(buf);
-                        // Fail loudly on a schema mismatch/corrupt DB rather than letting
-                        // every cachedExec() call below catch it internally, return [],
-                        // and silently reach setDbReady(true) with a broken database.
-                        for (const table of ['synsets', 'senses', 'entries', 'languages', 'resources']) {
-                            _db.exec(`SELECT 1 FROM ${table} LIMIT 1`);
-                        }
-                        _hasCoreTable = cachedExec(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='core_synsets'`).length > 0;
-                        _hasTranslatedFrom = cachedExec(`PRAGMA table_info(definitions)`).some(c => c.name === 'translated_from_rowid');
-                        buildLangNames();
-                        setAllLanguages(getAllLanguages());
-                        setAllResources(queryResources());
-                        setDbStats(queryStats());
-                        setDbReady(true);
-
-                    } catch (e) {
-                        console.error('DB init error:', e);
-                        setDbError(e.message);
+                    setDbProgress('Opening database...');
+                    _db = new _SQL.Database(buf);
+                    // Fail loudly on a schema mismatch/corrupt DB rather than letting
+                    // every cachedExec() call below catch it internally, return [],
+                    // and silently reach setMainDbReady(true) with a broken database.
+                    for (const table of ['synsets', 'senses', 'entries', 'languages', 'resources']) {
+                        _db.exec(`SELECT 1 FROM ${table} LIMIT 1`);
                     }
-                })();
+                    _hasCoreTable = cachedExec(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='core_synsets'`).length > 0;
+                    _hasTranslatedFrom = cachedExec(`PRAGMA table_info(definitions)`).some(c => c.name === 'translated_from_rowid');
+                    buildLangNames();
+                    setAllLanguages(getAllLanguages());
+                    setAllResources(queryResources());
+                    setDbStats(queryStats());
+                    setMainDbReady(true);
+                })().catch(e => {
+                    console.error('DB init error:', e);
+                    setDbError(e.message);
+                    _db = null;
+                    _dbLoadPromise = null; // allow a retry on a later trigger
+                    throw e;
+                });
+                return _dbLoadPromise;
             }, []);
+
+            // Resolves from manifest.json alone when precomputed static data
+            // is present (the dominant path never needs the full DB); falls
+            // back to eagerly loading it when there's no manifest to read,
+            // so a deployment that hasn't run the precompute build phase
+            // still works exactly as before.
+            useEffect(() => {
+                (async () => {
+                    const manifest = await _manifestPromise;
+                    if (manifest) {
+                        _langNames = {};
+                        manifest.languages.forEach(l => { _langNames[l.code] = l.name || l.code.toUpperCase(); });
+                        setAllLanguages(manifest.languages.map(l => l.code));
+                        setAllResources(manifest.resources);
+                        setDbStats(manifest.stats);
+                        _hasCoreTable = manifest.hasCoreTable;
+                        _hasTranslatedFrom = manifest.hasTranslatedFrom;
+                        setDbReady(true);
+                        return;
+                    }
+                    try {
+                        await loadMainDb();
+                        setDbReady(true);
+                    } catch (_) { /* dbError already set by loadMainDb() */ }
+                })();
+            }, [loadMainDb]);
 
             const getLangName = (langCode) => langCode ? (_langNames[langCode] || langCode.toUpperCase()) : '';
             const getLangFullName = getLangName;
@@ -1186,25 +1265,39 @@
 
             const loadConcept = useCallback((conceptId) => {
                 const cid = conceptId.toString();
-                if (loadedConcepts[cid]) return loadedConcepts[cid];
+                // undefined = never requested/still pending; null = confirmed
+                // not found; an object = found. Call sites that need to tell
+                // "still loading" apart from "confirmed missing" check
+                // loadedConcepts[cid] directly rather than this return value.
+                if (loadedConcepts[cid] !== undefined) return loadedConcepts[cid];
                 if (_db) {
-                    const data = queryConcept(parseInt(cid));
-                    if (data) {
-                        setLoadedConcepts(prev => ({ ...prev, [cid]: data }));
-                    }
+                    const data = queryConcept(parseInt(cid)) ?? null;
+                    setLoadedConcepts(prev => prev[cid] !== undefined ? prev : { ...prev, [cid]: data });
                     return data;
                 }
                 // Static mode: the fetch is inherently async, so this call
-                // returns null on the first render -- the call sites already
-                // tolerate "not loaded yet" via loadedConcepts[cid] ||
-                // loadConcept(cid) -- and the fetch populates loadedConcepts
-                // in the background, the same fetch-and-cache idiom
-                // wordnetSummary's useEffect already established.
+                // returns null on the first render -- the fetch populates
+                // loadedConcepts in the background, the same fetch-and-cache
+                // idiom wordnetSummary's useEffect already established.
                 getConceptStatic(cid).then(data => {
-                    if (data) setLoadedConcepts(prev => prev[cid] ? prev : { ...prev, [cid]: data });
+                    setLoadedConcepts(prev => prev[cid] !== undefined ? prev : { ...prev, [cid]: data });
                 });
                 return null;
             }, [loadedConcepts]);
+
+            // Dual-mode getConceptLabel() -- live SQL when _db is loaded,
+            // else the same fetch-and-cache idiom as loadConcept()/
+            // loadSenseData() against the precomputed labels index.
+            const getConceptLabelDual = useCallback((conceptId, lang) => {
+                if (conceptId == null) return null;
+                if (_db) return getConceptLabel(parseInt(conceptId), lang);
+                const key = `${conceptId}-${lang}`;
+                if (loadedLabels[key] !== undefined) return loadedLabels[key];
+                getConceptLabelStatic(parseInt(conceptId), lang).then(result => {
+                    setLoadedLabels(prev => prev[key] !== undefined ? prev : { ...prev, [key]: result });
+                });
+                return null;
+            }, [loadedLabels]);
 
             const getConceptData = (conceptId) => {
                 const cid = conceptId?.toString();
@@ -1293,18 +1386,21 @@
 
             const loadSenseData = useCallback((senseId, ownerConceptId) => {
                 const sid = senseId.toString();
-                if (loadedSenses[sid]?.l) return loadedSenses[sid];
+                // A partial search-result entry (has `.l` but not `.sr`/`.ex`)
+                // is still truthy/defined here -- that's fine, because
+                // performSearch()'s loadBatch() always upgrades it to the
+                // full object shortly after, for every sense id that ever
+                // came from a search result. Callers that need to tell
+                // "still loading" apart from "confirmed missing" (the sense
+                // view below) check loadedSenses[sid] directly.
+                if (loadedSenses[sid] !== undefined) return loadedSenses[sid];
                 if (_db) {
-                    const data = querySense(parseInt(sid));
-                    if (data) {
-                        setLoadedSenses(prev => ({ ...prev, [sid]: data }));
-                    }
+                    const data = querySense(parseInt(sid)) ?? null;
+                    setLoadedSenses(prev => prev[sid] !== undefined ? prev : { ...prev, [sid]: data });
                     return data;
                 }
-                // Static mode: async, same background-fetch-and-cache
-                // pattern as loadConcept() above.
                 getSenseStatic(parseInt(sid), ownerConceptId).then(data => {
-                    if (data) setLoadedSenses(prev => prev[sid]?.l ? prev : { ...prev, [sid]: data });
+                    setLoadedSenses(prev => prev[sid] !== undefined ? prev : { ...prev, [sid]: data });
                 });
                 return null;
             }, [loadedSenses]);
@@ -1392,6 +1488,7 @@
                     await _configPromise;
                     const provFile = _siteConfig.databases?.provenance?.filename;
                     if (!provFile) { setProvLoading(false); return; }
+                    await ensureSqlJs();
                     let buf;
                     try {
                         const cached = await idbGet('provdb');
@@ -1575,21 +1672,36 @@
                 const t = term.trim();
                 const mode = detectSearchMode(t);
                 const globPrefix = mode === 'glob' ? staticGlobPrefix(t) : null;
-                // Static mode (no DB loaded): exact term, ILI lookup, and a
-                // literal-prefix glob (e.g. "hot*") are all servable from the
-                // precomputed index. Definition search and any other glob
-                // shape (leading wildcard, infix, '?') still need the full
-                // DB -- loadMainDb() wiring for those is a follow-up, not
-                // yet implemented in this prototype slice.
-                const results = !_db
-                    ? (mode === 'exact' ? await searchWordformStatic(t)
+                // Exact term, ILI lookup, and a literal-prefix glob (e.g.
+                // "hot*") are all servable from the precomputed static index.
+                // Definition search and any other glob shape (leading
+                // wildcard, infix, '?') need the full relational engine --
+                // trigger loadMainDb() on demand rather than the old eager
+                // load, same as any other power feature.
+                const needsFullDb = mode === 'definition' || (mode === 'glob' && globPrefix == null);
+                let results;
+                if (needsFullDb) {
+                    if (!_db) {
+                        try {
+                            await loadMainDb();
+                        } catch (_) {
+                            setLoadingResults(false);
+                            setCurrentSearchSenseIds(new Set());
+                            return;
+                        }
+                    }
+                    if (searchRequestIdRef.current !== requestId) return; // superseded while loading
+                    results = mode === 'definition' ? searchDefinition(t.slice(4).trim(), lang) : searchGlob(t);
+                } else if (_db) {
+                    // Full DB already loaded (e.g. from an earlier power
+                    // feature) -- keep using it for every mode, unchanged
+                    // from before static-mode support existed.
+                    results = mode === 'ili' ? searchByIli(t) : mode === 'glob' ? searchGlob(t) : searchWordform(t);
+                } else {
+                    results = mode === 'exact' ? await searchWordformStatic(t)
                         : mode === 'ili' ? await searchByIliStatic(t)
-                        : globPrefix != null ? await searchGlobStatic(globPrefix)
-                        : [])
-                    : mode === 'ili'        ? searchByIli(t)
-                    : mode === 'definition' ? searchDefinition(t.slice(4).trim(), lang)
-                    : mode === 'glob'       ? searchGlob(t)
-                    : searchWordform(t);
+                        : await searchGlobStatic(globPrefix);
+                }
                 const senseMap = {};
 
                 results.forEach(r => {
@@ -2001,7 +2113,7 @@
                         if (nodesMap.has(id)) return;
                         const concept = loadedConcepts[id] || loadConcept(id);
                         const pos = getPosName(concept?.oc || '');
-                        const lblInfo = getConceptLabel(parseInt(id), definitionLanguage);
+                        const lblInfo = getConceptLabelDual(parseInt(id), definitionLanguage);
                         const labelBase = lblInfo?.form || concept?.d?.[definitionLanguage] || concept?.d?.en || '';
                         const labelActualLang = lblInfo?.lang;
                         const label = (labelActualLang && labelActualLang !== definitionLanguage)
@@ -2557,7 +2669,7 @@
                                                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                                                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
                                                 </svg>
-                                                <span>Searching{detectSearchMode(currentSearch) !== 'exact' ? ' — this may take a moment…' : '…'}</span>
+                                                <span>{!mainDbReady && !_db && dbProgress ? dbProgress : `Searching${detectSearchMode(currentSearch) !== 'exact' ? ' — this may take a moment…' : '…'}`}</span>
                                             </div>
                                         )}
 
@@ -2646,7 +2758,7 @@
                                                                                                                     style={{textDecoration:'none',color:'inherit'}}
                                                                                                                     className="rounded-lg p-2 hover:bg-indigo-50/60 transition-colors text-left cursor-pointer w-full min-w-0 sm:flex-1 concept-inner flex items-start gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">
                                                                                                                     <span className="text-base flex-1 break-words leading-6">
-                                                                                                                        {(() => { const li = getConceptLabel(parseInt(group.conceptId), definitionLanguage); return li ? <><span className="font-semibold text-slate-800">{li.form}</span>{<LangBadge lang={li.lang} currentLang={definitionLanguage} ml="ml-0.5" />}{' · '}</> : null; })()}
+                                                                                                                        {(() => { const li = getConceptLabelDual(parseInt(group.conceptId), definitionLanguage); return li ? <><span className="font-semibold text-slate-800">{li.form}</span>{<LangBadge lang={li.lang} currentLang={definitionLanguage} ml="ml-0.5" />}{' · '}</> : null; })()}
                                                                                                                         <span className="text-slate-600 italic">{getPosName(pos)}</span>
                                                                                                                         {' · '}<span className="text-slate-700">{definition}</span>{<LangBadge lang={defLang} currentLang={definitionLanguage} />}
                                                                                                                     </span>
@@ -2710,12 +2822,14 @@
                                                                                                                                 <span className="font-medium">{getRelLabel(relType)}:</span>
                                                                                                                                 {shown.map((rel, i) => {
                                                                                                                                     const toId = rel.to.toString();
-                                                                                                                                    const toSense = loadedSenses[toId] ?? querySense(parseInt(toId));
+                                                                                                                                    if (loadedSenses[toId] === undefined) loadSenseData(toId, rel.toConcept);
+                                                                                                                                    const toSense = loadedSenses[toId] || (_db ? querySense(parseInt(toId)) : null);
+                                                                                                                                    const targetLabel = toSense?.l || rel.toForm || '…';
                                                                                                                                     return (
                                                                                                                                         <button key={i}
-                                                                                                                                            onClick={(e) => { e.stopPropagation(); if (toSense?.l) handleWordformClickWithSense(toSense.l, toId); }}
+                                                                                                                                            onClick={(e) => { e.stopPropagation(); if (targetLabel !== '…') handleWordformClickWithSense(targetLabel, toId); }}
                                                                                                                                             className="text-indigo-600 hover:underline">
-                                                                                                                                            {toSense?.l || '…'}
+                                                                                                                                            {targetLabel}
                                                                                                                                         </button>
                                                                                                                                     );
                                                                                                                                 })}
@@ -2748,21 +2862,22 @@
 
                                 {view === 'concept' && selectedConcept && dbReady && (() => {
                                     const concept = getConceptData(selectedConcept) || loadConcept(selectedConcept);
-                                    // In static mode (_db still null -- dbReady was already true
-                                    // because no DB is configured at all), loadConcept() kicks off an
-                                    // async fetch and returns null on the first call -- this isn't yet
-                                    // a confirmed miss the way it is in live-DB mode (a synchronous SQL
-                                    // lookup), just "still loading"; a real miss resolves to null from
-                                    // the fetch too, so this still falls through to the same message,
-                                    // briefly, before the next render once state resolves either way.
-                                    if (!concept) return _db ? (
-                                        <div className="text-slate-600">
-                                            <p>Concept not found (id: {selectedConcept}).</p>
-                                            <button onClick={handleBackToSearch} className="mt-2 text-indigo-600 hover:underline">← Back to search</button>
-                                        </div>
-                                    ) : (
-                                        <div className="text-slate-500">Loading…</div>
-                                    );
+                                    if (!concept) {
+                                        // loadedConcepts[cid] is `undefined` while a static fetch is
+                                        // still in flight, and explicitly `null` once it resolves to a
+                                        // confirmed 404 -- that's the only way to tell "still loading"
+                                        // apart from "confirmed missing" in static mode, since (unlike
+                                        // the live-DB branch) loadConcept() can't resolve synchronously.
+                                        const stillLoading = !_db && loadedConcepts[selectedConcept.toString()] === undefined;
+                                        return stillLoading ? (
+                                            <div className="text-slate-500">Loading…</div>
+                                        ) : (
+                                            <div className="text-slate-600">
+                                                <p>Concept not found (id: {selectedConcept}).</p>
+                                                <button onClick={handleBackToSearch} className="mt-2 text-indigo-600 hover:underline">← Back to search</button>
+                                            </div>
+                                        );
+                                    }
 
                                     // Load senses
                                     if (concept.s) {
@@ -2850,7 +2965,10 @@
                                                     sd.sr.forEach(rel => {
                                                         const toId = rel.to.toString();
                                                         if (!senseRelsByType[rel.t]) senseRelsByType[rel.t] = [];
-                                                        senseRelsByType[rel.t].push({ fromLemma: sd.l, toSenseId: toId, rid: rel.rid });
+                                                        senseRelsByType[rel.t].push({
+                                                            fromLemma: sd.l, toSenseId: toId, rid: rel.rid,
+                                                            toForm: rel.toForm, toConcept: rel.toConcept,
+                                                        });
                                                     });
                                                 });
                                                 const hasSenseRels = Object.keys(senseRelsByType).length > 0;
@@ -2933,7 +3051,7 @@
                                                                 <div key={relType} className="flex gap-2 flex-wrap items-baseline">
                                                                     <span className="text-slate-500 italic flex-shrink-0">{getRelLabel(relType)}:</span>
                                                                     {shown.map(rel => {
-                                                                        const li = getConceptLabel(parseInt(rel.to), definitionLanguage);
+                                                                        const li = getConceptLabelDual(parseInt(rel.to), definitionLanguage);
                                                                         return (
                                                                             <span key={rel.to} className="inline-flex items-baseline gap-0.5">
                                                                                 <a href={conceptHref(rel.to)}
@@ -2967,15 +3085,20 @@
                                                                 return (
                                                                 <div key={`sr-${relType}`} className="flex gap-2 flex-wrap items-baseline">
                                                                     <span className="text-slate-500 italic flex-shrink-0">{getRelLabel(relType)}:</span>
-                                                                    {shown.map(({ fromLemma, toSenseId, rid }, i) => {
-                                                                        const toSense = loadedSenses[toSenseId] ?? querySense(parseInt(toSenseId));
-                                                                        const cid = toSense?.c?.toString();
-                                                                        const li = cid ? getConceptLabel(parseInt(cid), definitionLanguage) : null;
+                                                                    {shown.map(({ fromLemma, toSenseId, rid, toForm, toConcept }, i) => {
+                                                                        // toForm/toConcept are precomputed on the relation itself
+                                                                        // (mirroring write_wordnet_summaries()'s src_form/tgt_form) so
+                                                                        // the target label never waits on a separate sense fetch --
+                                                                        // still kick one off for the richer fields (provenance, etc).
+                                                                        if (loadedSenses[toSenseId] === undefined) loadSenseData(toSenseId, toConcept);
+                                                                        const toSense = loadedSenses[toSenseId] || (_db ? querySense(parseInt(toSenseId)) : null);
+                                                                        const cid = (toSense?.c ?? toConcept)?.toString();
+                                                                        const li = cid ? getConceptLabelDual(parseInt(cid), definitionLanguage) : null;
                                                                         const conceptLabel = li?.form;
-                                                                        const targetLabel = toSense?.l || '…';
+                                                                        const targetLabel = toSense?.l || toForm || '…';
                                                                         return (
                                                                             <span key={i} className="inline-flex items-baseline gap-0.5 whitespace-nowrap">
-                                                                                <button onClick={() => toSense?.l && handleWordformClickWithSense(toSense.l, toSenseId)}
+                                                                                <button onClick={() => targetLabel !== '…' && handleWordformClickWithSense(targetLabel, toSenseId)}
                                                                                     className="text-indigo-600 hover:underline">
                                                                                     {targetLabel}
                                                                                 </button>
@@ -3015,10 +3138,21 @@
                                                     setPathResult(result);
                                                     setPathNotFound(result === null);
                                                 };
-                                                const targetLabel = pathTargetRowid ? getConceptLabel(pathTargetRowid, definitionLanguage) : null;
+                                                const targetLabel = pathTargetRowid ? getConceptLabelDual(pathTargetRowid, definitionLanguage) : null;
                                                 return (
                                                 <div className="mb-4">
                                                     <h3 className="font-semibold mb-2 text-base">Path to concept</h3>
+                                                    {!mainDbReady ? (
+                                                        <button
+                                                            onClick={() => {
+                                                                setPathDbLoading(true);
+                                                                loadMainDb().catch(() => {}).finally(() => setPathDbLoading(false));
+                                                            }}
+                                                            disabled={pathDbLoading}
+                                                            className="px-3 py-1.5 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed">
+                                                            {pathDbLoading ? (dbProgress || 'Loading…') : 'Load full dataset to find a path'}
+                                                        </button>
+                                                    ) : (
                                                     <div className="flex gap-2 mb-2 items-center flex-wrap">
                                                         <div className="relative">
                                                             <input
@@ -3087,11 +3221,12 @@
                                                             Find path
                                                         </button>
                                                     </div>
+                                                    )}
                                                     {pathNotFound && <p className="text-sm text-slate-500 italic">No path found within 12 steps.</p>}
                                                     {pathResult && (
                                                         <div className="flex flex-wrap items-center gap-1 text-sm">
                                                             {pathResult.map((step, i) => {
-                                                                const li = getConceptLabel(step.node, definitionLanguage);
+                                                                const li = getConceptLabelDual(step.node, definitionLanguage);
                                                                 return (
                                                                     <React.Fragment key={i}>
                                                                         {i > 0 && step.rel && (
@@ -3160,15 +3295,22 @@
 
                                 {view === 'sense' && selectedSense && dbReady && (() => {
                                     const sense = loadedSenses[selectedSense] || loadSenseData(selectedSense);
-                                    // querySense() is a synchronous SQL lookup (dbReady is already
-                                    // guaranteed above) — a falsy result is a confirmed miss, not a
-                                    // pending async load.
-                                    if (!sense?.l) return (
-                                        <div className="text-slate-600">
-                                            <p>Sense not found (id: {selectedSense}).</p>
-                                            <button onClick={handleBackToSearch} className="mt-2 text-indigo-600 hover:underline">← Back to search</button>
-                                        </div>
-                                    );
+                                    if (!sense?.l) {
+                                        // In live-DB mode, querySense() is synchronous, so a falsy
+                                        // result is always a confirmed miss. In static mode,
+                                        // loadedSenses[sid] stays `undefined` while the fetch is
+                                        // still in flight, and becomes explicitly `null` once it
+                                        // resolves to a confirmed 404.
+                                        const stillLoading = !_db && loadedSenses[selectedSense] === undefined;
+                                        return stillLoading ? (
+                                            <div className="text-slate-500">Loading…</div>
+                                        ) : (
+                                            <div className="text-slate-600">
+                                                <p>Sense not found (id: {selectedSense}).</p>
+                                                <button onClick={handleBackToSearch} className="mt-2 text-indigo-600 hover:underline">← Back to search</button>
+                                            </div>
+                                        );
+                                    }
                                     return (
                                         <div>
                                             <button onClick={handleBackToSearch} className="mb-4 text-indigo-600 hover:underline">← Back to search</button>
@@ -3200,7 +3342,7 @@
                                                 <h3 className="font-semibold mb-2">Concept:</h3>
                                                 {(() => {
                                                     const cid = sense.c?.toString();
-                                                    const li = cid ? getConceptLabel(parseInt(cid), definitionLanguage) : null;
+                                                    const li = cid ? getConceptLabelDual(parseInt(cid), definitionLanguage) : null;
                                                     const cd = cid ? (getConceptData(cid) || loadConcept(cid)) : null;
                                                     const [def] = cd ? selectDef(cd.d, definitionLanguage, '') : [''];
                                                     return (
@@ -3230,14 +3372,16 @@
                                                     <h3 className="font-semibold mb-2">Sense Relations:</h3>
                                                     <div className="ml-2 space-y-1 text-sm">
                                                         {sense.sr.map((rel, i) => {
-                                                            const toSense = loadedSenses[rel.to.toString()] ?? querySense(parseInt(rel.to));
+                                                            const toId = rel.to.toString();
+                                                            if (loadedSenses[toId] === undefined) loadSenseData(toId, rel.toConcept);
+                                                            const toSense = loadedSenses[toId] || (_db ? querySense(parseInt(toId)) : null);
                                                             return (
                                                                 <div key={i}>
                                                                     <span className="text-slate-600">{getRelLabel(rel.t)}:</span>{' '}
                                                                     <a href={senseHref(rel.to)}
                                                                         onClick={e => onSenseLinkClick(e, rel.to)}
                                                                         className="text-indigo-600 hover:underline">
-                                                                        {toSense?.l || rel.to}
+                                                                        {toSense?.l || rel.toForm || rel.to}
                                                                     </a>
                                                                 </div>
                                                             );
@@ -3532,8 +3676,8 @@
                                                 </thead>
                                                 <tbody>
                                                     {summary.relDist.map((row, i) => {
-                                                        const srcLabel = row.ex_src_rowid ? getConceptLabel(row.ex_src_rowid, r.language)?.form : null;
-                                                        const tgtLabel = row.ex_tgt_rowid ? getConceptLabel(row.ex_tgt_rowid, r.language)?.form : null;
+                                                        const srcLabel = row.ex_src_rowid ? getConceptLabelDual(row.ex_src_rowid, r.language)?.form : null;
+                                                        const tgtLabel = row.ex_tgt_rowid ? getConceptLabelDual(row.ex_tgt_rowid, r.language)?.form : null;
                                                         return (
                                                         <tr key={row.type} className={`border-b border-slate-100 last:border-b-0 hover:bg-indigo-50/40 ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}`}>
                                                             <td className="px-3 py-2">{getRelLabel(row.type)}</td>
@@ -3720,7 +3864,7 @@
                     const concept = getConceptData(ct.id.toString());
                     if (!concept) return null;
                     const [def] = selectDef(concept.d, definitionLanguage, '');
-                    const li = getConceptLabel(ct.id, definitionLanguage);
+                    const li = getConceptLabelDual(ct.id, definitionLanguage);
                     const allSenseIds = concept.s ? Object.values(concept.s).flat().map(s => s.toString()) : [];
                     const firstEx = allSenseIds.map(sid => loadedSenses[sid]?.ex?.[0]).find(Boolean);
                     // Clamp both axes -- the pointer-relative offset alone can place the
