@@ -126,22 +126,28 @@
             return ai.length - bi.length;
         }
 
-        // Binary-search the search-index manifest for the single shard an
-        // exact term (or the start of a glob prefix) falls in.
-        function findShardForTerm(term) {
+        // Binary-search the search-index manifest for the index of the
+        // single shard an exact term (or the start of a glob prefix) falls
+        // in -- the rightmost shard whose `first` is <= term.
+        function findShardIndexForTerm(term) {
             if (!_searchManifest || _searchManifest.shards.length === 0) return null;
             const shards = _searchManifest.shards;
-            let lo = 0, hi = shards.length - 1, result = shards[0];
+            let lo = 0, hi = shards.length - 1, resultIdx = 0;
             while (lo <= hi) {
                 const mid = (lo + hi) >> 1;
                 if (codePointCompare(shards[mid].first, term) <= 0) {
-                    result = shards[mid];
+                    resultIdx = mid;
                     lo = mid + 1;
                 } else {
                     hi = mid - 1;
                 }
             }
-            return result;
+            return resultIdx;
+        }
+
+        function findShardForTerm(term) {
+            const idx = findShardIndexForTerm(term);
+            return idx === null ? null : _searchManifest.shards[idx];
         }
 
         // Compact shard row -> the full field names performSearch() consumes.
@@ -160,6 +166,70 @@
             const data = await fetchShard(shard.file);
             const rows = data[normalized] || [];
             return rows.map(adaptStaticSearchRow);
+        }
+
+        // A literal prefix with exactly one trailing '*' and no other
+        // wildcards (e.g. "hot*") is servable from the alphabetic-range
+        // search shards without loading the full DB -- leading wildcards,
+        // '?', or an infix '*' still need loadMainDb() (out of scope here,
+        // same as def: search). Returns the normalized prefix, or null if
+        // `term` isn't this shape.
+        function staticGlobPrefix(term) {
+            if (!/^[^*?]+\*$/.test(term)) return null;
+            return remove_accents(term.slice(0, -1).toLowerCase());
+        }
+
+        // Every shard whose range can hold a form starting with `prefix`
+        // forms one contiguous run starting at the shard found for `prefix`
+        // itself -- walk forward until a shard's `first` is both greater
+        // than `prefix` and not itself prefixed by it, which proves (by the
+        // same ordering the manifest was built with) that no later shard
+        // can contain a match either.
+        async function searchGlobStatic(prefix) {
+            await _searchManifestPromise;
+            if (!_searchManifest || _searchManifest.shards.length === 0) return [];
+            const shards = _searchManifest.shards;
+            const startIdx = findShardIndexForTerm(prefix);
+            const matching = [];
+            for (let i = startIdx; i < shards.length; i++) {
+                const s = shards[i];
+                if (codePointCompare(s.first, prefix) > 0 && !s.first.startsWith(prefix)) break;
+                matching.push(s);
+            }
+            const datas = await Promise.all(matching.map(s => fetchShard(s.file)));
+            const rows = [];
+            for (const data of datas) {
+                for (const form of Object.keys(data).sort(codePointCompare)) {
+                    if (!form.startsWith(prefix)) continue;
+                    rows.push(...data[form]);
+                    if (rows.length >= 2000) break;
+                }
+                if (rows.length >= 2000) break;
+            }
+            return rows.slice(0, 2000).map(adaptStaticSearchRow);
+        }
+
+        let _iliIndexPromise = null;
+        function fetchIliIndex() {
+            if (!_iliIndexPromise) {
+                _iliIndexPromise = fetch(DATA_BASE + 'ili-index.json')
+                    .then(r => r.ok ? r.json() : {})
+                    .catch(() => ({}));
+            }
+            return _iliIndexPromise;
+        }
+
+        async function searchByIliStatic(term) {
+            const norm = term.replace(/^cili\./, '');
+            const index = await fetchIliIndex();
+            const synsetId = index[norm];
+            if (synsetId == null) return [];
+            const concept = await fetchConceptStatic(synsetId);
+            if (!concept || !concept.senses) return [];
+            return Object.values(concept.senses).map(s => ({
+                sense_id: parseInt(s.id, 10), synset_id: s.c, lemma: s.l,
+                matched_rank: 0, lg: s.lg, pos: s.ontological_category, ind: s.ind,
+            }));
         }
 
         // Build-time storage shapes (cr/sr) carry a raw relation_types.type
@@ -1504,12 +1574,18 @@
                 if (searchRequestIdRef.current !== requestId) return; // superseded by a newer search
                 const t = term.trim();
                 const mode = detectSearchMode(t);
-                // Static mode (no DB loaded): only exact-term lookup is served
-                // from the precomputed index so far -- ili/definition/glob
-                // still need the full DB (loadMainDb() wiring is a follow-up,
-                // not yet implemented in this prototype slice).
+                const globPrefix = mode === 'glob' ? staticGlobPrefix(t) : null;
+                // Static mode (no DB loaded): exact term, ILI lookup, and a
+                // literal-prefix glob (e.g. "hot*") are all servable from the
+                // precomputed index. Definition search and any other glob
+                // shape (leading wildcard, infix, '?') still need the full
+                // DB -- loadMainDb() wiring for those is a follow-up, not
+                // yet implemented in this prototype slice.
                 const results = !_db
-                    ? (mode === 'exact' ? await searchWordformStatic(t) : [])
+                    ? (mode === 'exact' ? await searchWordformStatic(t)
+                        : mode === 'ili' ? await searchByIliStatic(t)
+                        : globPrefix != null ? await searchGlobStatic(globPrefix)
+                        : [])
                     : mode === 'ili'        ? searchByIli(t)
                     : mode === 'definition' ? searchDefinition(t.slice(4).trim(), lang)
                     : mode === 'glob'       ? searchGlob(t)

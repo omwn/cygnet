@@ -1399,6 +1399,21 @@ class TestSearchWithoutLiveDb:
         expect(page_no_db.locator('text=a domesticated carnivorous animal')).to_be_visible()
         assert page_no_db.evaluate('window._dbTestHook.isLoaded()') is False
 
+    def test_glob_search_without_db(self, page_no_db: Page):
+        """'dog*' matches 'dog' and 'dogfish' via the alphabetic-range
+        search shards -- no loadMainDb() fallback needed for this shape."""
+        _search(page_no_db, 'dog*')
+        assert _result_count(page_no_db) == 2
+        assert page_no_db.evaluate('window._dbTestHook.isLoaded()') is False
+
+    def test_ili_search_without_db(self, page_no_db: Page, valid_ili: str):
+        """ILI i3 = dog synset -> en:dog + fr:chien, served from
+        ili-index.json + the concept's own precomputed senses."""
+        _search(page_no_db, valid_ili)
+        assert _result_count(page_no_db) == 2
+        assert _language_count(page_no_db) == 2
+        assert page_no_db.evaluate('window._dbTestHook.isLoaded()') is False
+
     def test_no_db_file_requests(self, page: Page, http_server_without_db):
         requests = []
         page.on('request', lambda r: requests.append(r.url) if '.db' in r.url else None)
