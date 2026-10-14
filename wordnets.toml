@@ -73,7 +73,7 @@ it = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-it-2.0.tar.xz
 #"https://github.com/valeq/IWN-OMW/raw/refs/heads/main/data/LMF-XML/IWN-OMW_LMF_v1.0.xml"
 
 # Irish 
-ga = ["https://github.com/kscanne/wordnet-gaeilge/releases/download/v1.1/lsg-lmf.zip"]
+ga = ["http://irishwn.teanga.io/downloads/gfong-0.1.xml.gz"]
 
 # Hungarian - Hungarian WordNet
 hu = ["https://github.com/igamasniak/omw-converters/releases/download/v0.1/HungarianWordNet.xml.xz"]
@@ -238,3 +238,6 @@ la = ["https://github.com/igamasniak/omw-converters/releases/download/v0.1/Latin
 
 # Ancient Greek - Ancient Greek WordNet
 grc = ["https://github.com/igamasniak/omw-converters/releases/download/v0.1/AncientGreekWordNet.xml.xz"]
+
+# Old Irish - GréasánFocal Oscailte na Gaeilge (Old Irish Wordnet)
+sga = ["https://goidelc.teanga.io/downloads/sga-wordnet-0.1.xml.gz"]
