@@ -403,6 +403,20 @@ class TestCheckInternalReversedRelations:
         data = _parse(tmp_path, body)
         assert check_internal_reversed_relations(data) is None
 
+    def test_symmetric_other_not_flagged(self, tmp_path):
+        """'other' is symmetric like antonym — both directions in the same
+        file is not a conflict."""
+        body = """\
+<ConceptRelation relation_type="other" source="cili.i1" target="cili.i2">
+  <Provenance resource="wn-test" version="1.0"/>
+</ConceptRelation>
+<ConceptRelation relation_type="other" source="cili.i2" target="cili.i1">
+  <Provenance resource="wn-test" version="1.0"/>
+</ConceptRelation>
+"""
+        data = _parse(tmp_path, body)
+        assert check_internal_reversed_relations(data) is None
+
 
 # ---------------------------------------------------------------------------
 # check_dangling_senses
@@ -512,6 +526,21 @@ class TestCheckNonStandardRelations:
         issue = check_non_standard_relations(data)
         assert issue is not None
         assert any("rhymes_with" in item for item in issue.items)
+
+    def test_other_relation_type_is_standard(self, tmp_path):
+        """'other' is a GWA-standard relation type (a generic catch-all), not a
+        non-standard one — see https://globalwordnet.github.io/gwadoc/#other.
+        """
+        body = """\
+<ConceptRelation relation_type="other" source="cili.i1" target="cili.i2">
+  <Provenance resource="wn-test" version="1.0"/>
+</ConceptRelation>
+<SenseRelation relation_type="other" source="sense.a" target="sense.b">
+  <Provenance resource="wn-test" version="1.0"/>
+</SenseRelation>
+"""
+        data = _parse(tmp_path, body)
+        assert check_non_standard_relations(data) is None
 
 
 # ---------------------------------------------------------------------------

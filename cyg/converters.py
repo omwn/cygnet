@@ -10,6 +10,7 @@ import logging
 import lzma
 import sys
 from collections import defaultdict
+from pathlib import Path
 from lxml import etree
 
 from cyg.multilex import (
@@ -169,6 +170,62 @@ CONCEPT_RELATIONS_REQUIRING_SAME_CATEGORY = {
     'entails',
 }
 
+# Default location of the direction-swap config written by
+# scripts/check_all_relation_directions.py --write-swap-config, read by
+# WordNetToCygnetConverter when its caller doesn't pass an explicit config.
+DIRECTION_SWAP_CONFIG_FILENAME = 'relation_direction_swaps.json'
+
+
+def load_direction_swap_config(
+    path: Path,
+) -> tuple[dict[str, frozenset[str]], dict[str, dict[str, dict]]]:
+    """Load a direction-swap config written by
+    scripts/check_all_relation_directions.py --write-swap-config.
+
+    Several resources' exports have a relation type (sometimes several)
+    with source and target systematically swapped relative to every other
+    wordnet in Cygnet -- e.g. plWordnet's mero_part/mero_member (925/935
+    and 398/398 comparable pairs reversed vs OEWN) or own-pt's hypernym
+    (30,496/30,498 reversed). scripts/check_all_relation_directions.py
+    finds these automatically by comparing each candidate wordnet's
+    relations against OEWN on shared ILI concepts, and writes the
+    resources/relation-types that cleared its reversal threshold here
+    (including each flagged type's GWA inverse, e.g. mero_part's
+    holo_part, which must be swapped alongside it or per-file
+    inverse-generation regenerates the original bugged direction from the
+    untouched side -- see build_swap_config() in that script).
+
+    Args:
+        path: Path to the swap config JSON. Missing is not an error (e.g.
+            running the converter standalone, without the pre-check step)
+            -- it just means nothing gets swapped.
+
+    Returns:
+        (swap_sets, stats): swap_sets maps a lexicon id to the relation
+        types to swap source/target for; stats maps a lexicon id to
+        {relation_type: {reversed, comparable, reversed_share}} for the
+        types that were directly measured (not the paired inverse added
+        only because its forward type was flagged), for logging.
+    """
+    if not path.exists():
+        return {}, {}
+    data = json.loads(path.read_text(encoding='utf-8'))
+    swap_sets = {
+        lexicon_id: frozenset(
+            rel_type for rel_type, info in relations.items() if info.get('swapped')
+        )
+        for lexicon_id, relations in data.items()
+    }
+    stats = {
+        lexicon_id: {
+            rel_type: {k: v for k, v in info.items() if k != 'swapped'}
+            for rel_type, info in relations.items()
+            if info.get('comparable') is not None
+        }
+        for lexicon_id, relations in data.items()
+    }
+    return swap_sets, stats
+
 # Languages where spaCy's primary small model uses the 'web' corpus rather
 # than 'news'.  All other languages follow {lang}_core_news_sm.
 _SPACY_WEB_LANGS = {'en', 'zh'}
@@ -197,7 +254,8 @@ class WordNetToCygnetConverter:
     _relations_cache: dict[str, frozenset[tuple[str, str, str]]] = {}
 
     def __init__(self, cili_path: str, relations_path: str | None = None, skip_cili_defns=False,
-                 shared: SharedConcepts | None = None, language: str | None = None):
+                 shared: SharedConcepts | None = None, language: str | None = None,
+                 direction_swap_config: dict[str, frozenset[str]] | None = None):
         """Set up a converter.
 
         Args:
@@ -209,6 +267,12 @@ class WordNetToCygnetConverter:
                 synsets are matched to concepts by dc:identifier
             language: Language code to use instead of the Lexicon's own
                 (e.g. the code an existing wordnet already uses)
+            direction_swap_config: {lexicon_id: relation types to swap
+                source/target for}. None (the default) auto-loads
+                DIRECTION_SWAP_CONFIG_FILENAME next to *cili_path*, if
+                present; pass an explicit dict (including {}) to bypass
+                that file entirely -- tests do this to avoid filesystem
+                coupling. See load_direction_swap_config().
         """
         self.skip_cili_defns = skip_cili_defns
         self.shared = shared
@@ -216,6 +280,12 @@ class WordNetToCygnetConverter:
 
         self.cili_path = cili_path
         self.relations_path = relations_path
+        if direction_swap_config is None:
+            direction_swap_config, self._direction_swap_stats = load_direction_swap_config(
+                Path(cili_path).parent / DIRECTION_SWAP_CONFIG_FILENAME)
+        else:
+            self._direction_swap_stats = {}
+        self.direction_swap_config = direction_swap_config
 
         # Mapping dictionaries
         self.synset_to_concept: dict[str, str] = {}
@@ -324,7 +394,8 @@ class WordNetToCygnetConverter:
                     'count': 0,
                     'note': 'Source XML contains double-encoded HTML entities '
                             '(e.g. &amp;#39;); consider reporting to upstream.'
-                }
+                },
+                'direction_swaps': {}
             }
         }
 
@@ -1503,6 +1574,13 @@ class WordNetToCygnetConverter:
         for lexicon in root.findall('Lexicon') + root.findall('LexiconExtension'):
             # Load Concept Relations (from Synsets)
             synsets = lexicon.findall('Synset') + lexicon.findall('ExternalSynset')
+            swapped_types = self.direction_swap_config.get(self.lexicon_id, frozenset())
+            if swapped_types:
+                lexicon_stats = self._direction_swap_stats.get(self.lexicon_id, {})
+                self.log['statistics']['direction_swaps'] = {
+                    rel_type: lexicon_stats.get(rel_type)
+                    for rel_type in sorted(swapped_types)
+                }
             for synset in synsets:
                 synset_id = synset.get('id')
                 if synset_id not in self.synset_to_concept:
@@ -1514,7 +1592,10 @@ class WordNetToCygnetConverter:
                     rel_type = self._relation_type(rel)
                     if target_synset in self.synset_to_concept:
                         target_concept = self.synset_to_concept[target_synset]
-                        raw_concept_relations.append((source_concept, target_concept, rel_type))
+                        src, tgt = source_concept, target_concept
+                        if rel_type in swapped_types:
+                            src, tgt = tgt, src
+                        raw_concept_relations.append((src, tgt, rel_type))
 
             # Load Sense Relations
             lexical_entries = lexicon.findall('LexicalEntry') + lexicon.findall('ExternalLexicalEntry')

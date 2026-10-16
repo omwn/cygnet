@@ -98,6 +98,31 @@ class TestSynsetRelationConflict:
 
         assert builder.n_rel_conflicts == 0
 
+    def test_symmetric_other_relation_not_flagged(self, builder, tmp_path, caplog):
+        """
+        'other' (GWA's generic catch-all relation type, used e.g. by plWordnet)
+        is symmetric like antonym; both directions explicitly asserted should
+        NOT trigger a conflict warning.
+        """
+        wn_a = tmp_path / 'wn-a.xml'
+        wn_a.write_text(wn_xml('wn-a', BASE_CONCEPTS + BASE_LEXEMES_AND_SENSES + """\
+<ConceptRelation relation_type="other" source="cili.i1" target="cili.i2">
+  <Provenance resource="wn-a" version="1.0"/>
+</ConceptRelation>
+"""))
+        wn_b = tmp_path / 'wn-b.xml'
+        wn_b.write_text(wn_xml('wn-b', """\
+<ConceptRelation relation_type="other" source="cili.i2" target="cili.i1">
+  <Provenance resource="wn-b" version="1.0"/>
+</ConceptRelation>
+"""))
+
+        with caplog.at_level(logging.WARNING, logger='synthesise'):
+            builder.process_file(wn_a)
+            builder.process_file(wn_b)
+
+        assert builder.n_rel_conflicts == 0
+
     def test_no_conflict_on_normal_relations(self, builder, tmp_path, caplog):
         """Single-source wordnet with correct hypernym should produce zero conflicts."""
         wn_a = tmp_path / 'wn-a.xml'
@@ -181,6 +206,31 @@ class TestSenseRelationConflict:
         wn_b = tmp_path / 'wn-b.xml'
         wn_b.write_text(wn_xml('wn-b', """\
 <SenseRelation relation_type="antonym" source="sense.running" target="sense.run">
+  <Provenance resource="wn-b" version="1.0"/>
+</SenseRelation>
+"""))
+
+        with caplog.at_level(logging.WARNING, logger='synthesise'):
+            builder.process_file(wn_a)
+            builder.process_file(wn_b)
+
+        assert builder.n_rel_conflicts == 0
+
+    def test_symmetric_other_sense_relation_not_flagged(self, builder, tmp_path, caplog):
+        """
+        'other' sense relations (GWA's generic catch-all, used e.g. by
+        plWordnet for relations it doesn't map to a standard type) are
+        symmetric; both directions explicitly asserted should not conflict.
+        """
+        wn_a = tmp_path / 'wn-a.xml'
+        wn_a.write_text(wn_xml('wn-a', BASE_CONCEPTS_SENSE_REL + """\
+<SenseRelation relation_type="other" source="sense.run" target="sense.running">
+  <Provenance resource="wn-a" version="1.0"/>
+</SenseRelation>
+"""))
+        wn_b = tmp_path / 'wn-b.xml'
+        wn_b.write_text(wn_xml('wn-b', """\
+<SenseRelation relation_type="other" source="sense.running" target="sense.run">
   <Provenance resource="wn-b" version="1.0"/>
 </SenseRelation>
 """))

@@ -134,3 +134,35 @@ class TestWriteWordnetSummaries:
         """A resource with zero senses (e.g. CILI-only) gets no file."""
         n = builder.write_wordnet_summaries(tmp_path / 'summaries')
         assert n == 0
+
+    def test_direction_swaps_empty_without_config_path(self, builder_summaries, tmp_path):
+        summary = _write_and_load(builder_summaries, tmp_path / 'summaries')
+        assert summary['directionSwaps'] == []
+
+    def test_direction_swaps_empty_when_config_missing(self, builder_summaries, tmp_path):
+        out_dir = tmp_path / 'summaries'
+        builder_summaries.write_wordnet_summaries(out_dir, tmp_path / 'nope.json')
+        summary = json.loads((out_dir / 'wn-a.json').read_text())
+        assert summary['directionSwaps'] == []
+
+    def test_direction_swaps_populated_from_config(self, builder_summaries, tmp_path):
+        swaps_path = tmp_path / 'relation_direction_swaps.json'
+        swaps_path.write_text(json.dumps({
+            'wn-a': {
+                'hypernym': {'reversed': 30496, 'comparable': 30498,
+                             'reversed_share': 0.9999, 'swapped': True},
+                'hyponym': {'reversed': None, 'comparable': None,
+                            'reversed_share': None, 'swapped': True},
+            },
+            'other-resource': {
+                'mero_part': {'reversed': 10, 'comparable': 10,
+                              'reversed_share': 1.0, 'swapped': True},
+            },
+        }))
+        out_dir = tmp_path / 'summaries'
+        builder_summaries.write_wordnet_summaries(out_dir, swaps_path)
+        summary = json.loads((out_dir / 'wn-a.json').read_text())
+        assert summary['directionSwaps'] == [
+            {'relationType': 'hypernym', 'reversed': 30496, 'comparable': 30498,
+             'reversedShare': 0.9999},
+        ]

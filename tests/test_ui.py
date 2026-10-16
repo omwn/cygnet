@@ -1355,6 +1355,29 @@ class TestWordnetSummaryDetailedStats:
         summary = page_prov.locator('[data-testid="wordnet-summary"]')
         expect(summary.locator('div', has_text='ILI %').first).to_be_visible()
 
+    def test_direction_corrections_not_shown_when_absent(self, page_prov: Page):
+        """No Direction corrections card when directionSwaps is empty
+        (the normal case -- wn-en wasn't auto-corrected)."""
+        self._open_summary(page_prov)
+        summary = page_prov.locator('[data-testid="wordnet-summary"]')
+        expect(summary.locator('text=Direction corrections')).not_to_be_visible()
+
+    def test_direction_corrections_shown_when_present(
+        self, page: Page, http_server_with_direction_swaps,
+    ):
+        """A resource whose precomputed summary has a directionSwaps
+        entry (see http_server_with_direction_swaps) shows a Direction
+        corrections card with the relation type and its reversed share."""
+        page.goto(http_server_with_direction_swaps)
+        page.wait_for_selector('input[placeholder*="word"]', timeout=_DB_LOAD_TIMEOUT)
+        _open_wordnet_summary(page)
+        page.wait_for_selector(
+            '[data-testid="wordnet-summary"] div:has-text("ILI %")', timeout=30_000,
+        )
+        summary = page.locator('[data-testid="wordnet-summary"]')
+        expect(summary.locator('text=Direction corrections')).to_be_visible()
+        expect(summary.locator('td', has_text='92.2%')).to_be_visible()
+
 
 # ---------------------------------------------------------------------------
 # Accessibility: text contrast (WCAG 2.x AA)

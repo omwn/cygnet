@@ -310,6 +310,29 @@ def http_server_with_config(test_db_dir, tmp_path_factory):
 
 
 @pytest.fixture(scope='session')
+def http_server_with_direction_swaps(test_db_dir, tmp_path_factory):
+    """HTTP server like http_server but wn-en's precomputed summary also
+    has a directionSwaps entry, as if the pre-merge check
+    (scripts/check_all_relation_directions.py) had found and corrected a
+    reversed relation type for it -- lets UI tests verify the "Direction
+    corrections" card without needing a resource that's actually
+    reversed in the tiny test corpus.
+    """
+    swaps_dir = tmp_path_factory.mktemp('serve_direction_swaps')
+    _copy_serve_dir(test_db_dir, swaps_dir, skip={'summaries'})
+    shutil.copytree(test_db_dir / 'summaries', swaps_dir / 'summaries')
+    summary_path = swaps_dir / 'summaries' / 'wn-en.json'
+    summary = json.loads(summary_path.read_text())
+    summary['directionSwaps'] = [
+        {'relationType': 'hypernym', 'reversed': 71, 'comparable': 77, 'reversedShare': 0.922},
+    ]
+    summary_path.write_text(json.dumps(summary))
+    server, url = _start_server(str(swaps_dir))
+    yield url
+    server.shutdown()
+
+
+@pytest.fixture(scope='session')
 def http_server_with_broken_db(test_db_dir, tmp_path_factory):
     """HTTP server whose cygnet.db.gz is a valid SQLite file missing the
     core tables (synsets, senses, etc.) — simulates a schema mismatch, so

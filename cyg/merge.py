@@ -201,6 +201,7 @@ CILI_RESOURCE = {
 }
 
 INVERSE_SENSE_RELATIONS: dict[str, str] = {
+    'other':             'other',
     'antonym':           'antonym',
     'also':              'also',
     'similar':           'similar',
@@ -223,12 +224,23 @@ INVERSE_SENSE_RELATIONS: dict[str, str] = {
 }
 
 # Resources with a documented, systematic hypernym-direction bug in their
-# source data (upstream bug reports pending/filed), ordered WORST FIRST.
-# Per-file cycle removal already catches most of these when the reversed
-# edge closes a cycle against relations from files merged before it; this
-# list only affects resolve_residual_cycles()'s tie-break, for the cases
-# that only become cyclic once a later file supplies the correct-direction
-# edge for the same concept pair.
+# source data, ordered WORST FIRST, that ISN'T corrected automatically by
+# cyg.converters.load_direction_swap_config() (e.g. a resource whose
+# reversal rate falls short of that mechanism's threshold, or some other
+# low-trust reason unrelated to a clean directional swap). Per-file cycle
+# removal already catches most direction bugs when the reversed edge
+# closes a cycle against relations from files merged before it; this list
+# only affects resolve_residual_cycles()'s tie-break, for the cases that
+# only become cyclic once a later file supplies the correct-direction edge
+# for the same concept pair.
+#
+# Previously held ('UzWordnet-uz', 'own-pt'): both had ~100% reversed
+# hypernym/instance_hypernym vs OEWN. Once scripts/check_all_relation_
+# directions.py's pre-merge check and the automatic swap it drives were
+# built (2026-10), both resources' hypernym direction is corrected before
+# this stage ever runs, and a full rebuild confirmed neither originates a
+# single cycle any more (bin/relation_conflicts.json: 0 entries in
+# "cycles" for either, down from thousands) -- so they were removed.
 #
 # This list is curated by hand, not derived automatically: a resource's
 # raw cycle/conflict count is not a reliable trust signal on its own, since
@@ -237,10 +249,12 @@ INVERSE_SENSE_RELATIONS: dict[str, str] = {
 # module docstring for a worked example of this trap). Add an entry only
 # after reviewing that script's report across multiple builds and manually
 # confirming the direction error via the per-SCC edge dump, not from the
-# aggregate rate table alone.
-LOW_TRUST_RESOURCES: tuple[str, ...] = ('UzWordnet-uz', 'own-pt')
+# aggregate rate table alone -- and check first whether the automatic
+# swap (above) should fix it at the source instead.
+LOW_TRUST_RESOURCES: tuple[str, ...] = ()
 
 INVERSE_CONCEPT_RELATIONS: dict[str, str] = {
+    'other':             'other',
     'hypernym':          'hyponym',
     'instance_hypernym': 'instance_hyponym',
     'meronym':           'holonym',
@@ -1808,7 +1822,9 @@ class MergeBuilder:
         )
         return len(rows)
 
-    def write_wordnet_summaries(self, out_dir: Path) -> int:
+    def write_wordnet_summaries(
+        self, out_dir: Path, direction_swaps_path: Path | None = None,
+    ) -> int:
         """Precompute per-resource stats for the Wordnets-tab detail view.
 
         This used to be a live query the browser ran every time a visitor
@@ -1826,10 +1842,31 @@ class MergeBuilder:
 
         Args:
             out_dir: Directory to write ``<resource_code>.json`` files into.
+            direction_swaps_path: Optional path to the swap config written
+                by scripts/check_all_relation_directions.py
+                --write-swap-config (see cyg.converters.
+                load_direction_swap_config). When given, each resource's
+                summary gets a ``directionSwaps`` list disclosing which
+                relation types were auto-corrected before merging, and
+                why (reversed/comparable counts vs. OEWN).
 
         Returns:
             Number of summary files written.
         """
+        direction_swaps_by_code: dict[str, list[dict]] = {}
+        if direction_swaps_path is not None and direction_swaps_path.exists():
+            swap_data = json.loads(direction_swaps_path.read_text(encoding='utf-8'))
+            for res_code, relations in swap_data.items():
+                direction_swaps_by_code[res_code] = [
+                    {
+                        'relationType': rel_type,
+                        'reversed': info['reversed'],
+                        'comparable': info['comparable'],
+                        'reversedShare': info['reversed_share'],
+                    }
+                    for rel_type, info in relations.items()
+                    if info.get('comparable') is not None
+                ]
         # Symmetric relations (e.g. 'similar': 'similar') map to themselves
         # and must be kept -- only exclude the *other* side of a genuinely
         # directional pair (e.g. 'hypernym': 'hyponym' excludes 'hyponym').
@@ -2014,6 +2051,7 @@ class MergeBuilder:
                 'examples': examples,
                 'relDist': rel_dist,
                 'senseRelDist': sense_rel_dist,
+                'directionSwaps': direction_swaps_by_code.get(code, []),
             }
             (out_dir / f'{code}.json').write_text(
                 json.dumps(summary, ensure_ascii=False, separators=(',', ':')),

@@ -117,6 +117,12 @@ run_pipeline() {
         python "$PROJECT_DIR/conversion_scripts/$1" "${@:2}")
 }
 
+# Same, but for a one-off script under scripts/ rather than conversion_scripts/.
+run_script() {
+    (cd "$DATA_DIR" && uv run --project "$PROJECT_DIR" \
+        python "$PROJECT_DIR/scripts/$1" "${@:2}")
+}
+
 # Download a wordnet archive and extract its XML files into bin/raw_wns/ (flat).
 download_standalone() {
     local name="$1" url="$2"
@@ -292,6 +298,20 @@ if $DO_BUILD; then
 
     echo "=== Step 1: Extract CILI ==="
     run_pipeline 1_extract_cili.py
+    echo
+
+    echo "=== Step 1.5: Check relation directions ==="
+    # Compares every candidate wordnet's relations against OEWN to find
+    # any relation type with source/target systematically reversed (e.g.
+    # plWordnet's mero_part/mero_member, own-pt's hypernym), and writes
+    # bin/cygnets_presynth/relation_direction_swaps.json, which Step 2
+    # reads to auto-correct the direction during conversion (see
+    # cyg.converters.load_direction_swap_config). The per-file cache
+    # (.direction_check_cache.json) means only new/changed raw_wns files
+    # get re-run through this on subsequent builds.
+    run_script check_all_relation_directions.py \
+        --write-swap-config bin/cygnets_presynth/relation_direction_swaps.json \
+        --cache bin/cygnets_presynth/.direction_check_cache.json
     echo
 
     echo "=== Step 2: Convert wordnets ==="

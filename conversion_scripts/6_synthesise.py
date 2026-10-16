@@ -14,6 +14,7 @@ from pathlib import Path
 
 from lxml import etree
 
+from cyg.converters import DIRECTION_SWAP_CONFIG_FILENAME
 from cyg.merge import MergeBuilder
 
 
@@ -175,7 +176,8 @@ def main() -> None:
 
     print('\nPhase 8: Writing per-wordnet summaries...')
     summaries_dir = db_path.parent / 'summaries'
-    n_summaries = builder.write_wordnet_summaries(summaries_dir)
+    direction_swaps_path = input_dir / DIRECTION_SWAP_CONFIG_FILENAME
+    n_summaries = builder.write_wordnet_summaries(summaries_dir, direction_swaps_path)
     print(f'  {n_summaries:,} summary file(s) written to {summaries_dir}')
 
     # One build version for everything this run produces -- generated here
