@@ -521,6 +521,20 @@
             );
         }
 
+        // Rowid of the synset a source wordnet called originalId (its LMF
+        // synset id), so that links stay stable across rebuilds.
+        function findSynsetByOriginalId(originalId) {
+            const rows = cachedExecProv(
+                `SELECT p.item_rowid
+                 FROM provenance p
+                 JOIN prov_tables pt ON p.table_rowid = pt.rowid
+                 WHERE pt.name = 'synsets' AND p.original_id = ?
+                 LIMIT 1`,
+                [originalId]
+            );
+            return rows.length ? rows[0].item_rowid : null;
+        }
+
         function queryWordnetSummary(code, langCode) {
             const _cacheKey = `${code}:${langCode}`;
             if (_summaryCache[_cacheKey]) return _summaryCache[_cacheKey];
@@ -755,6 +769,7 @@
             const [provenanceReady, setProvenanceReady] = useState(false);
             const [provLoading, setProvLoading] = useState(false);
             const [provError, setProvError] = useState(null);
+            const [pendingOriginalId, setPendingOriginalId] = useState(null);
             const [showProvenance, setShowProvenance] = useState(() =>
                 localStorage.getItem('showProvenance') === 'true'
             );
@@ -1296,6 +1311,7 @@
                         const urlSense = params.get('sense');
                         const urlSenseFilter = params.get('s');
                         const urlConcept = params.get('concept');
+                        const urlId = params.get('id');
 
                         if (urlSearchLang !== null) setLanguageFilter(urlSearchLang);
                         if (urlDisplayLang) setDefinitionLanguage(urlDisplayLang);
@@ -1303,7 +1319,10 @@
                         setSenseFilter(urlSenseFilter);
                         setSynonymsCollapsed({});
 
-                        if (urlConcept) {
+                        if (urlId) {
+                            // Resolved once the provenance DB is loaded.
+                            setPendingOriginalId(urlId);
+                        } else if (urlConcept) {
                             setSelectedConcept(urlConcept);
                             setSelectedSense(null);
                             setView('concept');
@@ -1343,6 +1362,36 @@
                 window.addEventListener('popstate', handlePopState);
                 return () => window.removeEventListener('popstate', handlePopState);
             }, [dbReady, loadConceptWithRelations, loadSenseData]);
+
+            // #/search?id=<original synset id>: load the provenance DB, find the
+            // synset, and show it as an ordinary concept URL.
+            useEffect(() => {
+                if (!pendingOriginalId || !dbReady) return;
+                if (!provenanceReady) {
+                    if (!_siteConfig.databases?.provenance?.filename) {
+                        console.warn('No provenance database to resolve id:', pendingOriginalId);
+                        setPendingOriginalId(null);
+                        setView('search');
+                    } else if (!provLoading) {
+                        loadProvenanceDb();
+                    }
+                    return;
+                }
+                const rowid = findSynsetByOriginalId(pendingOriginalId);
+                setPendingOriginalId(null);
+                if (rowid === null) {
+                    console.warn('No synset with original id:', pendingOriginalId);
+                    setView('search');
+                    return;
+                }
+                const cid = String(rowid);
+                window.history.replaceState({}, '', '#/search?concept=' + cid);
+                isPopStateRef.current = true;
+                setSelectedConcept(cid);
+                setSelectedSense(null);
+                setView('concept');
+                loadConceptWithRelations(cid);
+            }, [pendingOriginalId, dbReady, provenanceReady, provLoading, loadProvenanceDb, loadConceptWithRelations]);
 
             // Search
             const performSearch = useCallback((term, lang, pos, sense) => {

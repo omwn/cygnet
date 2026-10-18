@@ -332,6 +332,34 @@ class TestConceptNavigation:
 
 
 # ---------------------------------------------------------------------------
+# Stable links by original synset id
+# ---------------------------------------------------------------------------
+
+class TestOriginalIdLink:
+    def test_id_link_opens_concept(self, page: Page, http_server):
+        """#/search?id=oewn-dog-n opens dog (i3) via the provenance DB."""
+        page.goto(http_server + '#/search?id=oewn-dog-n')
+        page.wait_for_selector(
+            'text=All forms expressing this concept', timeout=_DB_LOAD_TIMEOUT
+        )
+        expect(page.locator('text=⟪i3⟫')).to_be_visible()
+
+    def test_id_link_becomes_concept_url(self, page: Page, http_server):
+        page.goto(http_server + '#/search?id=oewn-dog-n')
+        page.wait_for_selector(
+            'text=All forms expressing this concept', timeout=_DB_LOAD_TIMEOUT
+        )
+        assert '#/search?concept=' in page.url
+
+    def test_unknown_id_stays_on_search(self, page: Page, http_server):
+        page.goto(http_server + '#/search?id=no-such-synset')
+        page.wait_for_selector('input[placeholder*="word"]', timeout=_DB_LOAD_TIMEOUT)
+        expect(
+            page.locator('text=All forms expressing this concept')
+        ).not_to_be_visible()
+
+
+# ---------------------------------------------------------------------------
 # Path finder
 # ---------------------------------------------------------------------------
 

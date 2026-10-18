@@ -62,6 +62,7 @@ Key `useEffect` hooks (in order):
 3. **DB init** — runs on mount; awaits `_configPromise`, loads sql.js, fetches/decompresses the DB (with IndexedDB caching keyed by filename + mtime), sets up the DB
 4. **Provenance DB** — loads provenance DB on demand when user clicks "Load provenance data"
 5. **URL sync** — keeps `window.location.hash` in sync with current view/search/concept/filters
+6. **Original-id links** — `#/search?id=<synset id>` loads the provenance DB, finds the synset whose source wordnet gave it that id (`provenance.original_id`), and replaces the hash with its `#/search?concept=<rowid>`.  Rowids change with every build; source ids do not, so this is the form to use in links from outside (e.g. a CILI proposal's `dc:source`)
 
 ---
 
