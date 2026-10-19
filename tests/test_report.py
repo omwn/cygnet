@@ -761,6 +761,14 @@ class TestIssuesFromJsonLog:
         result = issues_from_json_log(log)
         assert any(i.severity == "INFO" and i.total == 7 for i in result)
 
+    def test_repeated_ili(self):
+        log = {"repeated_ili": {"count": 1, "synsets": {
+            "i52256": ["wnuk-1482-n", "wnuk-28629-n"]}}}
+        result = issues_from_json_log(log)
+        issue = next(i for i in result if i.title.startswith("ILIs shared"))
+        assert issue.severity == "WARNING" and issue.total == 1
+        assert issue.items == ["i52256: wnuk-1482-n, wnuk-28629-n"]
+
     def test_skipped_examples_with_failed_matches(self):
         log = {
             "statistics": {

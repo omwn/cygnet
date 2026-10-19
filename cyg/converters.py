@@ -278,6 +278,10 @@ class WordNetToCygnetConverter:
             'missing_cili_concepts': {
                 'count': 0
             },
+            'repeated_ili': {
+                'count': 0,
+                'synsets': {}  # ili -> ids of the synsets sharing it
+            },
             'missing_lemmas': {
                 'count': 0
             },
@@ -975,8 +979,25 @@ class WordNetToCygnetConverter:
         """
         logger.info("\nPass 1: Converting Synsets to Concepts and Glosses...")
 
+        lexicons = root.findall('Lexicon') + root.findall('LexiconExtension')
+
+        # An ILI identifies one synset.  If several synsets share one we
+        # cannot tell which is right, so none of them is linked to it.
+        repeated = self.log['repeated_ili']['synsets']
+        if self.shared is None:
+            by_ili: dict[str, list[str]] = {}
+            for lexicon in lexicons:
+                for synset in lexicon.findall('Synset'):
+                    ili = synset.get('ili')
+                    if ili not in (None, '', 'in'):
+                        by_ili.setdefault(ili, []).append(synset.get('id'))
+            repeated.update({i: ids for i, ids in by_ili.items() if len(ids) > 1})
+            for ili, ids in repeated.items():
+                logger.warning(f"  ILI {ili} shared by {', '.join(ids)}: dropped")
+            self.log['repeated_ili']['count'] = len(repeated)
+
         # Process all lexicons (including extensions)
-        for lexicon in root.findall('Lexicon') + root.findall('LexiconExtension'):
+        for lexicon in lexicons:
             if self.lexicon_id is None:
                 self.lexicon_id = lexicon.get('id')
                 self._set_language(lexicon.get('language'))
@@ -1005,6 +1026,8 @@ class WordNetToCygnetConverter:
 
                 # Check if ILI is valid
                 is_valid_ili = ili and ili not in ['', 'in']
+                if ili in repeated:
+                    is_valid_ili = False
 
                 if shared_id is not None and not shared_id.startswith('cili.'):
                     # Concepts lexicon: a stable id shared with its members.

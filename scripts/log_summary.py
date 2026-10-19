@@ -50,6 +50,7 @@ METRICS: list[tuple[str, str, str]] = [
     ("Data quality",   "POS mismatches synset↔CILI",        "synset_concept_pos_mismatches.total_count"),
     ("Data quality",   "POS mismatches lexeme↔concept",     "lexeme_concept_pos_mismatches.total_count"),
     ("Data quality",   "missing CILI concepts",             "missing_cili_concepts.count"),
+    ("Data quality",   "repeated ILIs dropped",             "repeated_ili.count"),
     ("Data quality",   "missing lemmas",                    "missing_lemmas.count"),
     ("Data quality",   "sense missing synset",              "sense_missing_synset.count"),
     ("Data quality",   "synset not found",                  "synset_not_found.count"),

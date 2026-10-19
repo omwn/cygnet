@@ -874,6 +874,28 @@ def issues_from_json_log(log: dict, log_path: Path | None = None) -> list[Issue]
             items=[],
         ))
 
+    # ILIs given to more than one synset; dropped from all of them
+    repeated = log.get("repeated_ili", {}).get("synsets", {})
+    if repeated:
+        _add(Issue(
+            severity="WARNING",
+            title="ILIs shared by more than one synset",
+            total=len(repeated),
+            explanation=(
+                f"{len(repeated):,} ILI(s) are each assigned to more than one synset. "
+                "An ILI identifies a single concept, and it is not clear which synset "
+                "is right, so none of them is linked to it: each is stored under a "
+                "wordnet-local identifier instead."
+            ),
+            recommendation=(
+                "Keep each ILI on exactly one synset: merge synsets that are true "
+                "duplicates, and remove or correct the ILI on the others."
+            ),
+            items=[f"{ili}: {', '.join(ids)}"
+                   for ili, ids in list(repeated.items())[:MAX_EXAMPLES]],
+            source_hint=f"{log_path.name} (repeated_ili)" if log_path else "",
+        ))
+
     # Senses whose synset could not be resolved during conversion
     sense_miss = log.get("sense_missing_synset", {}).get("count", 0)
     if sense_miss:
