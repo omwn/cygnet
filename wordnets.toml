@@ -102,6 +102,9 @@ kmr = ["https://github.com/sinaahmadi/kurdnet/releases/download/kurdnet-1.0.tar.
 # Lithuanian — OMW Lithuanian
 lt = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-lt-2.0.tar.xz"]
 
+# White Hmong — Hmong Ontology Wordnet (hmnont)
+mww = ["https://github.com/fcbond/hmong-ontology/releases/download/v2026-10-20/hmnont.xml.gz"]
+
 # Norwegian Bokmål — OMW Norwegian Bokmål
 nb = ["https://github.com/igamasniak/omw-converters/releases/download/v0.1/NorwegianWordNet.xml.xz"]
 
