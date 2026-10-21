@@ -353,12 +353,17 @@ if $DO_BUILD; then
     gzip -k -9 -f "$DATA_DIR/web/provenance.db"
     echo
 
+    echo "=== Step 13: Split provenance by resource ==="
+    run_pipeline 13_split_provenance.py
+    echo
+
     echo "=== Build complete! ==="
     echo "Output:"
     echo "  $DATA_DIR/web/cygnet.db         - SQLite database for web interface"
     echo "  $DATA_DIR/web/cygnet.db.gz      - compressed"
     echo "  $DATA_DIR/web/provenance.db     - provenance database"
     echo "  $DATA_DIR/web/provenance.db.gz  - compressed"
+    echo "  $DATA_DIR/web/provenance/       - one compressed provenance database per resource"
     if $WITH_XML; then
         echo "  $DATA_DIR/cygnet.xml            - full merged resource (with provenance)"
         echo "  $DATA_DIR/cygnet_small.xml      - without provenance metadata"

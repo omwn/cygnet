@@ -1,5 +1,6 @@
 """Shared pytest fixtures and test-data helpers for the Cygnet test suite."""
 
+import importlib.util
 import json
 import shutil
 import subprocess
@@ -18,6 +19,16 @@ _DEFAULT_DATABASES = {
     'main':       {'filename': 'cygnet.db.gz'},
     'provenance': {'filename': 'provenance.db.gz'},
 }
+
+
+def load_split_provenance():
+    """The split_provenance function of conversion_scripts/13_split_provenance.py."""
+    script = (Path(__file__).parent.parent / 'conversion_scripts'
+              / '13_split_provenance.py')
+    spec = importlib.util.spec_from_file_location('split_provenance', script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.split_provenance
 
 
 # ---------------------------------------------------------------------------
@@ -187,10 +198,15 @@ def test_db_dir(tmp_path_factory):
     shutil.copy(web_dir / 'relations.json', serve_dir / 'relations.json')
     shutil.copy(db_path.with_suffix('.db.gz'), serve_dir / 'cygnet.db.gz')
     shutil.copy(prov_path.with_suffix('.db.gz'), serve_dir / 'provenance.db.gz')
+    load_split_provenance()(prov_path, serve_dir / 'provenance')
+    databases = {
+        **_DEFAULT_DATABASES,
+        'provenance': {**_DEFAULT_DATABASES['provenance'], 'byResource': 'provenance/'},
+    }
     (serve_dir / 'local.json').write_text(json.dumps({
         'title': 'Cygnet',
         'icon': '🦢',
-        'databases': _DEFAULT_DATABASES,
+        'databases': databases,
         'about': {
             'citation': 'Please cite <a href="#">Test Author (2025)</a> when using this resource.',
         },
@@ -252,7 +268,7 @@ def http_server_with_config(test_db_dir, tmp_path_factory):
     """
     config_dir = tmp_path_factory.mktemp('serve_config')
     for f in test_db_dir.iterdir():
-        if f.name != 'local.json':
+        if f.is_file() and f.name != 'local.json':
             shutil.copy(f, config_dir / f.name)
     (config_dir / 'local.json').write_text(json.dumps({
         'searchLanguage': 'fr',
@@ -273,7 +289,7 @@ def http_server_with_branding(test_db_dir, tmp_path_factory):
     """
     branding_dir = tmp_path_factory.mktemp('serve_branding')
     for f in test_db_dir.iterdir():
-        if f.name != 'local.json':
+        if f.is_file() and f.name != 'local.json':
             shutil.copy(f, branding_dir / f.name)
     (branding_dir / 'local.json').write_text(json.dumps({
         'title': 'TestWN',

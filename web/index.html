@@ -521,18 +521,69 @@
             );
         }
 
+        const SYNSET_BY_ORIGINAL_ID =
+            `SELECT p.item_rowid
+             FROM provenance p
+             JOIN prov_tables pt ON p.table_rowid = pt.rowid
+             WHERE pt.name = 'synsets' AND p.original_id = ?
+             LIMIT 1`;
+
         // Rowid of the synset a source wordnet called originalId (its LMF
         // synset id), so that links stay stable across rebuilds.
         function findSynsetByOriginalId(originalId) {
-            const rows = cachedExecProv(
-                `SELECT p.item_rowid
-                 FROM provenance p
-                 JOIN prov_tables pt ON p.table_rowid = pt.rowid
-                 WHERE pt.name = 'synsets' AND p.original_id = ?
-                 LIMIT 1`,
-                [originalId]
-            );
+            const rows = cachedExecProv(SYNSET_BY_ORIGINAL_ID, [originalId]);
             return rows.length ? rows[0].item_rowid : null;
+        }
+
+        // Per-resource provenance (databases.provenance.byResource): a
+        // directory with index.json and one small <resource>.db.gz each, as
+        // written by 13_split_provenance.py.  An id link then needs only the
+        // database of the resource it names, not the whole provenance DB.
+        let _provIndexPromise = null;
+        const _resourceProvDbs = {};
+
+        async function fetchGzipDb(url) {
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(`Failed to fetch ${url}: ${response.status}`);
+            const stream = response.body.pipeThrough(new DecompressionStream('gzip'));
+            return new _SQL.Database(new Uint8Array(await new Response(stream).arrayBuffer()));
+        }
+
+        // The resource to look in: wn if given, else the longest resource code
+        // that originalId starts with (LMF ids begin with their lexicon's id).
+        function resourceForId(index, originalId, wn) {
+            if (wn) return index[wn] ? wn : null;
+            let best = null;
+            for (const code of Object.keys(index)) {
+                if (originalId.startsWith(code + '-') && (!best || code.length > best.length)) {
+                    best = code;
+                }
+            }
+            return best;
+        }
+
+        async function findSynsetInResourceProvenance(originalId, wn) {
+            let dir = _siteConfig.databases?.provenance?.byResource;
+            if (!dir) return null;
+            if (!dir.endsWith('/')) dir += '/';
+            try {
+                if (!_provIndexPromise) {
+                    _provIndexPromise = fetch(DB_BASE + dir + 'index.json')
+                        .then(r => r.ok ? r.json() : {});
+                }
+                const index = await _provIndexPromise;
+                const code = resourceForId(index, originalId, wn);
+                if (!code) return null;
+                if (!_resourceProvDbs[code]) {
+                    _resourceProvDbs[code] = fetchGzipDb(DB_BASE + dir + index[code].file);
+                }
+                const db = await _resourceProvDbs[code];
+                const res = db.exec(SYNSET_BY_ORIGINAL_ID, [originalId]);
+                return res.length && res[0].values.length ? res[0].values[0][0] : null;
+            } catch (e) {
+                console.warn('Per-resource provenance lookup failed:', e);
+                return null;
+            }
         }
 
         function queryWordnetSummary(code, langCode) {
@@ -1320,8 +1371,8 @@
                         setSynonymsCollapsed({});
 
                         if (urlId) {
-                            // Resolved once the provenance DB is loaded.
-                            setPendingOriginalId(urlId);
+                            // Resolved from the provenance DB(s) by the effect below.
+                            setPendingOriginalId({ id: urlId, wn: params.get('wn') });
                         } else if (urlConcept) {
                             setSelectedConcept(urlConcept);
                             setSelectedSense(null);
@@ -1363,13 +1414,38 @@
                 return () => window.removeEventListener('popstate', handlePopState);
             }, [dbReady, loadConceptWithRelations, loadSenseData]);
 
-            // #/search?id=<original synset id>: load the provenance DB, find the
-            // synset, and show it as an ordinary concept URL.
+            // #/search?id=<original synset id>[&wn=<resource>]: find the synset
+            // in the provenance DB, and show it as an ordinary concept URL.  The
+            // resource's own small DB is tried first, if the site has them;
+            // otherwise, or if it is not there, the whole provenance DB is loaded.
             useEffect(() => {
                 if (!pendingOriginalId || !dbReady) return;
+                const { id, wn, triedByResource } = pendingOriginalId;
+                const show = (rowid) => {
+                    const cid = String(rowid);
+                    window.history.replaceState({}, '', '#/search?concept=' + cid);
+                    isPopStateRef.current = true;
+                    setSelectedConcept(cid);
+                    setSelectedSense(null);
+                    setView('concept');
+                    loadConceptWithRelations(cid);
+                };
+                if (!triedByResource && _siteConfig.databases?.provenance?.byResource) {
+                    let cancelled = false;
+                    findSynsetInResourceProvenance(id, wn).then(rowid => {
+                        if (cancelled) return;
+                        if (rowid !== null) {
+                            setPendingOriginalId(null);
+                            show(rowid);
+                        } else {
+                            setPendingOriginalId({ id, wn, triedByResource: true });
+                        }
+                    });
+                    return () => { cancelled = true; };
+                }
                 if (!provenanceReady) {
                     if (!_siteConfig.databases?.provenance?.filename) {
-                        console.warn('No provenance database to resolve id:', pendingOriginalId);
+                        console.warn('No provenance database to resolve id:', id);
                         setPendingOriginalId(null);
                         setView('search');
                     } else if (!provLoading) {
@@ -1377,20 +1453,14 @@
                     }
                     return;
                 }
-                const rowid = findSynsetByOriginalId(pendingOriginalId);
+                const rowid = findSynsetByOriginalId(id);
                 setPendingOriginalId(null);
                 if (rowid === null) {
-                    console.warn('No synset with original id:', pendingOriginalId);
+                    console.warn('No synset with original id:', id);
                     setView('search');
                     return;
                 }
-                const cid = String(rowid);
-                window.history.replaceState({}, '', '#/search?concept=' + cid);
-                isPopStateRef.current = true;
-                setSelectedConcept(cid);
-                setSelectedSense(null);
-                setView('concept');
-                loadConceptWithRelations(cid);
+                show(rowid);
             }, [pendingOriginalId, dbReady, provenanceReady, provLoading, loadProvenanceDb, loadConceptWithRelations]);
 
             // Search

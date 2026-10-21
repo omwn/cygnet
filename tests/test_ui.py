@@ -351,6 +351,28 @@ class TestOriginalIdLink:
         )
         assert '#/search?concept=' in page.url
 
+    def test_wn_link_uses_resource_provenance_only(self, page: Page, http_server):
+        """With &wn=, only that resource's small provenance DB is fetched."""
+        fetched = []
+        page.on('request', lambda r: fetched.append(r.url))
+        page.goto(http_server + '#/search?id=oewn-dog-n&wn=wn-en')
+        page.wait_for_selector(
+            'text=All forms expressing this concept', timeout=_DB_LOAD_TIMEOUT
+        )
+        expect(page.locator('text=⟪i3⟫')).to_be_visible()
+        assert any(u.endswith('/provenance/wn-en.db.gz') for u in fetched)
+        assert not any(u.endswith('/provenance.db.gz') for u in fetched)
+
+    def test_id_without_resource_prefix_falls_back(self, page: Page, http_server):
+        """oewn-dog-n names no resource (it is in wn-en): use the whole DB."""
+        fetched = []
+        page.on('request', lambda r: fetched.append(r.url))
+        page.goto(http_server + '#/search?id=oewn-dog-n')
+        page.wait_for_selector(
+            'text=All forms expressing this concept', timeout=_DB_LOAD_TIMEOUT
+        )
+        assert any(u.endswith('/provenance.db.gz') for u in fetched)
+
     def test_unknown_id_stays_on_search(self, page: Page, http_server):
         page.goto(http_server + '#/search?id=no-such-synset')
         page.wait_for_selector('input[placeholder*="word"]', timeout=_DB_LOAD_TIMEOUT)
