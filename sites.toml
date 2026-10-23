@@ -73,3 +73,42 @@ languages = ["my"]
 maintainer = "Wenjie Wang, Francis Bond"
 web_maintainer = "Francis Bond"
 notes = "Also served at https://omwn.github.io/mow/."
+
+[[site]]
+name = "omw-kin"
+title = "OMW Kinship"
+url = "https://omwn.github.io/omw-kinship/"
+repo = "omwn/omw-kinship"
+branch = "main"
+web_dir = "docs"
+clone = "~/git/omw-kinship"
+languages = ["mul"]
+maintainer = "Francis Bond"
+web_maintainer = "Francis Bond"
+notes = "A 'mul' release built with --all-languages. Not yet deployed: the repository and its first release are still to be published."
+
+[[site]]
+name = "omw-pronoun"
+title = "OMW Pronouns"
+url = "https://omwn.github.io/omw-pronoun/"
+repo = "omwn/omw-pronoun"
+branch = "main"
+web_dir = "docs"
+clone = "~/git/omw-pronoun"
+languages = ["mul"]
+maintainer = "Francis Bond"
+web_maintainer = "Francis Bond"
+notes = "A 'mul' release built with --all-languages. Not yet deployed: the site needs its first release with the databases attached."
+
+[[site]]
+name = "OWN-PT"
+title = "OpenWordnet-PT"
+url = "https://own-pt.github.io/openWordnet-PT/"
+repo = "own-pt/openWordnet-PT"
+branch = "master"
+web_dir = "docs"
+clone = "~/git/openWordnet-PT"
+languages = ["pt"]
+maintainer = "Alexandre Rademaker, Valeria de Paiva"
+web_maintainer = "Francis Bond"
+notes = "Deployed by a Pages workflow on each release. The local clone's origin is the omwn/openWordnet-PT fork; open update PRs against own-pt, adding --head omwn:cygnet-$C to gh pr create."
