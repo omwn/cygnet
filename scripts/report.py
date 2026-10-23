@@ -642,27 +642,21 @@ def load_json_log(xml_path: Path) -> dict:
 
 def parse_conflicts_json(
     resource_id: str, xml_stem: str
-) -> tuple[list[dict], list[dict], list[dict]]:
+) -> tuple[list[dict], list[dict]]:
     """Load conflict records for this resource from the structured JSON conflict log.
-
-    Cycle records come from two distinct checks and are kept separate: a
-    per-file check (``check_and_remove_new_cycles``, runs right after this
-    file is merged) and a final whole-graph check
-    (``resolve_residual_cycles``, runs once after every file is merged) that
-    catches cross-resource cycles no single per-file check could see — see
-    that function's docstring in cyg/merge.py for why a per-file check alone
-    isn't sufficient.
 
     Args:
         resource_id: The wordnet's resource ID (e.g. ``'dn'``).
         xml_stem: The pre-synth filename stem (e.g. ``'dn-2025-07-03'``).
 
     Returns:
-        ``(reversed_rels, file_cycles, residual_cycles)`` — record dicts for
-        this resource, with cycles split by which check found them.
+        ``(reversed_rels, cycles)`` — record dicts for this resource.
+        Reversed relations are matched on resource ID; cycles on the
+        pre-synth filename stem, which is what check_and_remove_new_cycles()
+        logs them under.
     """
     if not CONFLICTS_JSON.exists():
-        return [], [], []
+        return [], []
 
     with open(CONFLICTS_JSON, encoding='utf-8') as fh:
         data = json.load(fh)
@@ -671,23 +665,11 @@ def parse_conflicts_json(
         r for r in data.get('reversed_relations', [])
         if r.get('resource_id') == resource_id
     ]
-    all_cycles = data.get('cycles', [])
-    # Per-file cycles are logged under the pre-synth filename stem (with
-    # version, e.g. 'UzWordnet-uz-1.0') since that's what check_and_remove_
-    # new_cycles() is called with. Residual cycles are logged under the bare
-    # resource code (e.g. 'UzWordnet-uz', no version) since resolve_residual_
-    # cycles() attributes them via provenance lookup, not the source
-    # filename — so residual records must be matched against resource_id,
-    # not xml_stem, or they never attach to any wordnet's report.
-    file_cycles = [
-        c for c in all_cycles
-        if not c.get('residual') and c.get('xml_stem') == xml_stem
+    cycles = [
+        c for c in data.get('cycles', [])
+        if c.get('xml_stem') == xml_stem
     ]
-    residual_cycles = [
-        c for c in all_cycles
-        if c.get('residual') and c.get('xml_stem') == resource_id
-    ]
-    return reversed_rels, file_cycles, residual_cycles
+    return reversed_rels, cycles
 
 
 # ---------------------------------------------------------------------------
@@ -963,7 +945,6 @@ def issues_from_json_log(log: dict, log_path: Path | None = None) -> list[Issue]
 def issues_from_conflicts_log(
     reversed_rels: list[dict],
     file_cycles: list[dict],
-    residual_cycles: list[dict],
     data: WordnetData,
     xml_stem: str = "",
 ) -> list[Issue]:
@@ -1033,33 +1014,6 @@ def issues_from_conflicts_log(
             ),
             items=_cycle_items(file_cycles),
             source_hint=f"{CONFLICTS_JSON.name} (cycles, xml_stem={xml_stem or data.resource_id})",
-        ))
-
-    if residual_cycles:
-        issues.append(Issue(
-            severity="CRITICAL",
-            title="Hypernym cycles found only after the full build (residual)",
-            total=len(residual_cycles),
-            explanation=(
-                f"Cygnet removed {len(residual_cycles):,} more hypernym relation(s) from "
-                "this wordnet during a final whole-graph check that runs once every "
-                "wordnet has been merged. These cycles involve resources merged both "
-                "before AND after this file, so no single per-file check — including "
-                "the one that produces the 'Hypernym cycles spanning multiple wordnets' "
-                "section above — could have caught them earlier. This wordnet's relation "
-                "was judged the more likely error (see cyg.merge.LOW_TRUST_RESOURCES) "
-                "and removed to keep the merged hierarchy acyclic."
-            ),
-            recommendation=(
-                "Check the hypernym direction for the relation on the left of each entry "
-                "below. If this wordnet is right and the chain is wrong, report it to the "
-                "other wordnet's maintainers instead."
-            ),
-            items=_cycle_items(residual_cycles),
-            source_hint=(
-                f"{CONFLICTS_JSON.name} (cycles, xml_stem={xml_stem or data.resource_id}, "
-                "residual=true)"
-            ),
         ))
 
     return issues
@@ -1176,11 +1130,9 @@ def collect_issues(path: Path) -> tuple[WordnetData, list[Issue], dict] | None:
     issues.extend(issues_from_json_log(json_log, log_path if log_path.exists() else None))
 
     # Augment with merge-time relation conflicts log
-    reversed_rels, file_cycles, residual_cycles = parse_conflicts_json(
-        data.resource_id, path.stem
-    )
+    reversed_rels, file_cycles = parse_conflicts_json(data.resource_id, path.stem)
     issues.extend(issues_from_conflicts_log(
-        reversed_rels, file_cycles, residual_cycles, data, xml_stem=path.stem
+        reversed_rels, file_cycles, data, xml_stem=path.stem
     ))
 
     return data, issues, json_log
@@ -1216,7 +1168,6 @@ _DENOMINATOR_KEY_FOR_TITLE = {
     # concepts rather than creating new ones (e.g. odwn-nl).
     "Hypernym loops (cycles in the is-a hierarchy)": "relation_graph_nodes",
     "Hypernym cycles spanning multiple wordnets": "relations",
-    "Hypernym cycles found only after the full build (residual)": "relations",
     "Relations reversed relative to another wordnet": "relations",
     "Contradictory relation directions within this file": "relations",
     "Self-referential relations": "relations",

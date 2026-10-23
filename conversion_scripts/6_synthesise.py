@@ -13,7 +13,7 @@ from pathlib import Path
 
 from lxml import etree
 
-from cyg.merge import MergeBuilder
+from cyg.merge import LOW_TRUST_RESOURCES, MergeBuilder
 
 
 MANIFEST_NAME = 'manifest.txt'  # written by 2_batch_convert_lmfs.py
@@ -64,6 +64,48 @@ def is_concepts_lexicon(path: Path) -> bool:
     return False
 
 
+def low_trust_rank(path: Path) -> int | None:
+    """Position of the file's resource in LOW_TRUST_RESOURCES, or None.
+
+    A pre-synth stem is the resource code plus a version ('UzWordnet-uz-1.0').
+    """
+    for i, code in enumerate(LOW_TRUST_RESOURCES):
+        if path.stem == code or path.stem.startswith(code + '-'):
+            return i
+    return None
+
+
+def merge_order(all_files: list[Path]) -> list[Path]:
+    """Order pre-synth files for merging.
+
+    When two wordnets disagree, the one merged first wins: a reversed
+    relation is skipped, and a cycle is broken by removing the edge from the
+    file that closed it. So the order is: CILI, the English base (most
+    trusted), the 'mul' concept lexicons (their members need their concepts),
+    every other wordnet, then LOW_TRUST_RESOURCES with the worst last, and
+    finally the machine-translated glosses (mtg).
+    """
+    cili_files = [f for f in all_files if 'cili' in f.stem]
+    oewn_files = [f for f in all_files if 'oewn' in f.stem]
+    # Machine-translated glosses (mtg) reference definiendum concepts from
+    # every other resource — _do_gloss() silently drops a Gloss if its
+    # concept isn't registered yet, so mtg must be processed last.
+    mtg_files = [f for f in all_files if 'mtg' in f.stem]
+    rest = [
+        f for f in all_files
+        if f not in cili_files and f not in oewn_files and f not in mtg_files
+    ]
+    concept_files = [f for f in rest if is_concepts_lexicon(f)]
+    rest = [f for f in rest if f not in concept_files]
+    low_trust = sorted(
+        (f for f in rest if low_trust_rank(f) is not None),
+        key=lambda f: -low_trust_rank(f),  # list is worst first; merge worst last
+    )
+    other_files = [f for f in rest if f not in low_trust]
+    return (cili_files + oewn_files + concept_files + other_files
+            + low_trust + mtg_files)
+
+
 def main() -> None:
     sys.stdout.reconfigure(line_buffering=True)
 
@@ -80,20 +122,7 @@ def main() -> None:
 
     db_path.parent.mkdir(exist_ok=True)
 
-    all_files = select_files(input_dir)
-    cili_files = [f for f in all_files if 'cili' in f.stem]
-    oewn_files = [f for f in all_files if 'oewn' in f.stem]
-    # Machine-translated glosses (mtg) reference definiendum concepts from
-    # every other resource — _do_gloss() silently drops a Gloss if its
-    # concept isn't registered yet, so mtg must be processed last.
-    mtg_files = [f for f in all_files if 'mtg' in f.stem]
-    rest = [
-        f for f in all_files
-        if f not in cili_files and f not in oewn_files and f not in mtg_files
-    ]
-    concept_files = [f for f in rest if is_concepts_lexicon(f)]
-    other_files = [f for f in rest if f not in concept_files]
-    xml_files = cili_files + oewn_files + concept_files + other_files + mtg_files
+    xml_files = merge_order(select_files(input_dir))
     print(f'Found {len(xml_files)} pre-synth files to merge')
 
     builder = MergeBuilder(db_path, prov_db_path)
@@ -131,15 +160,11 @@ def main() -> None:
     print('\nCreating indexes...')
     builder.create_indexes()
 
-    print('\nPhase 1b: Resolving residual cycles...')
-    n_resolved = builder.resolve_residual_cycles()
-    if n_resolved:
-        print(f'  Removed {n_resolved:,} residual cycle-causing relation(s)'
-              f' (see {conflicts_path})')
-
+    # The per-file check above should leave no cycles; this is a release gate.
+    print('\nPhase 1b: Checking that no cycles remain...')
     n_cycles = builder.detect_cycles()
     if n_cycles:
-        print(f'  ERROR: {n_cycles:,} cycle(s) remain after resolution — '
+        print(f'  ERROR: {n_cycles:,} cycle(s) remain after per-file removal — '
               f'refusing to build a release with a cyclic hypernym hierarchy')
         builder.write_conflicts_json(conflicts_path)
         sys.exit(1)

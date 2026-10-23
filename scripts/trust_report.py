@@ -7,27 +7,24 @@ plus web/cygnet.db and web/provenance.db from the last build, and prints:
 
   1. An aggregate problem-rate ranking per non-English resource, to suggest
      WHICH resources might belong in LOW_TRUST_RESOURCES.
-  2. A full edge-by-edge breakdown of every residual cross-resource cycle
-     found in the last build, to let a human confirm WHICH resource's edge
-     is actually the reversed one before adding it.
+  2. A full edge-by-edge breakdown of every cross-resource cycle broken in
+     the last build, to let a human confirm WHICH resource's edge is
+     actually the reversed one before adding it.
 
 Table 1 alone is not sufficient to decide. A resource can accumulate a high
 raw count simply by intersecting a lot with one genuinely bad resource — it
 does not follow that it, too, has a directionality bug. Concretely: in this
-project's data, odwn-nl ranked #3 by aggregate rate, close behind the two
-confirmed-bad resources. But every residual SCC it appears in also contains
+project's data, odwn-nl once ranked #3 by aggregate rate, close behind the
+two confirmed-bad resources. But every cycle it appeared in also contained
 an oewn (or estwn) edge agreeing with its direction, with UzWordnet-uz's
-edge the lone contradiction — odwn-nl is an innocent bystander that happens
-to often complete a triangle with UzWordnet-uz's already-reversed edge.
-Naively adding it to LOW_TRUST_RESOURCES does not just do nothing: because
-the residual-cycle tie-break falls back to merge-order rowid within the
-low-trust group, and UzWordnet-uz happens to merge earlier than odwn-nl (an
-accident of alphabetical filename sort), doing so would have *flipped*
-which edge gets removed in all 8 existing residual cycles — sacrificing
-correct odwn-nl edges to protect the actual reversed UzWordnet-uz ones.
+edge the lone contradiction — odwn-nl was an innocent bystander that often
+completed a triangle with UzWordnet-uz's already-reversed edge.
 
-Only add a resource to LOW_TRUST_RESOURCES after reading Table 2 for every
-SCC it appears in and confirming its edge is the outlier, not the majority.
+Wordnets in LOW_TRUST_RESOURCES are merged last, so they lose every
+conflict they take part in. Wrongly adding a resource therefore sacrifices
+its correct edges whenever they clash with a genuinely bad one merged
+before it. Only add a resource after reading Table 2 for every cycle it
+appears in and confirming its edge is the outlier, not the majority.
 Re-run this report after each such change (and after any build that adds
 new source wordnets) — a resource that looks fine today can start showing
 up once a new resource supplies the missing link that closes a cycle
@@ -75,14 +72,9 @@ def print_rate_table(conflicts: dict, resources: list) -> None:
     en_rowid = english_language_rowid(con.cursor())
     con.close()
 
-    file_cycles: Counter = Counter()
-    residual_cycles: Counter = Counter()
+    cycles: Counter = Counter()
     for rec in conflicts['cycles']:
-        code = resolve_resource_code(rec['xml_stem'], codes_by_length)
-        if rec.get('residual'):
-            residual_cycles[code] += 1
-        else:
-            file_cycles[code] += 1
+        cycles[resolve_resource_code(rec['xml_stem'], codes_by_length)] += 1
 
     reversed_rel: Counter = Counter()
     for rec in conflicts['reversed_relations']:
@@ -91,29 +83,29 @@ def print_rate_table(conflicts: dict, resources: list) -> None:
             continue
         reversed_rel[resolve_resource_code(rid, codes_by_length)] += 1
 
-    all_codes = set(file_cycles) | set(residual_cycles) | set(reversed_rel)
+    all_codes = set(cycles) | set(reversed_rel)
     rows = []
     for code in all_codes:
         if lang_of.get(code) == en_rowid:
             continue
         size = size_of.get(code) or 1
-        total = file_cycles[code] + residual_cycles[code] + reversed_rel[code]
+        total = cycles[code] + reversed_rel[code]
         rank = LOW_TRUST_RESOURCES.index(code) + 1 if code in LOW_TRUST_RESOURCES else None
-        rows.append((total / size, total, file_cycles[code], residual_cycles[code],
-                     reversed_rel[code], size, code, rank))
+        rows.append((total / size, total, cycles[code], reversed_rel[code],
+                     size, code, rank))
 
     rows.sort(reverse=True)
-    print(f"{'rate':>8} {'total':>6} {'file-cyc':>8} {'resid-cyc':>9} "
+    print(f"{'rate':>8} {'total':>6} {'cycles':>8} "
           f"{'reversed':>8} {'synsets':>8}  resource")
-    for rate, total, filecyc, residcyc, rev, size, code, rank in rows:
+    for rate, total, cyc, rev, size, code, rank in rows:
         tag = f'  <- LOW_TRUST_RESOURCES #{rank}' if rank else ''
-        print(f'{rate:8.4f} {total:6d} {filecyc:8d} {residcyc:9d} '
+        print(f'{rate:8.4f} {total:6d} {cyc:8d} '
               f'{rev:8d} {size:8d}  {code}{tag}')
 
 
-def group_residual_sccs(conflicts: dict) -> list[list[dict]]:
-    """Cluster residual-cycle records into the SCC each belongs to."""
-    residual = [r for r in conflicts['cycles'] if r.get('residual')]
+def group_cycle_sccs(conflicts: dict) -> list[list[dict]]:
+    """Cluster cycle records into the SCC each belongs to."""
+    records = conflicts['cycles']
     parent: dict[str, str] = {}
 
     def find(x: str) -> str:
@@ -128,13 +120,13 @@ def group_residual_sccs(conflicts: dict) -> list[list[dict]]:
         if ra != rb:
             parent[ra] = rb
 
-    for rec in residual:
+    for rec in records:
         nodes = [rec['src'], rec['tgt'], *rec['chain']]
         for a, b in pairwise(nodes):
             union(a, b)
 
     groups: dict[str, list[dict]] = defaultdict(list)
-    for rec in residual:
+    for rec in records:
         groups[find(rec['src'])].append(rec)
     return list(groups.values())
 
@@ -166,9 +158,9 @@ def edge_resources(cur: sqlite3.Cursor, tbl_rowid: int,
 
 
 def print_scc_detail(conflicts: dict) -> None:
-    groups = group_residual_sccs(conflicts)
+    groups = group_cycle_sccs(conflicts)
     if not groups:
-        print('No residual cross-resource cycles in the last build.')
+        print('No hypernym cycles in the last build.')
         return
 
     con = sqlite3.connect(DB_PATH)
@@ -178,7 +170,7 @@ def print_scc_detail(conflicts: dict) -> None:
         "SELECT rowid FROM prov.prov_tables WHERE name = 'synset_relations'"
     ).fetchone()[0]
 
-    print(f'{len(groups)} residual cross-resource cycle(s) found in the last build:\n')
+    print(f'{len(groups)} hypernym cycle group(s) broken in the last build:\n')
     for i, recs in enumerate(groups, 1):
         removed_by = {(r['src'], r['tgt']): r['xml_stem'] for r in recs}
         edges: set[tuple[str, str]] = set(removed_by)
@@ -212,8 +204,8 @@ def main() -> None:
     print(' see Table 2 and this script\'s module docstring before acting on it)\n')
     print_rate_table(conflicts, resources)
 
-    print('\n=== Table 2: residual cross-resource cycle detail ===')
-    print('(every edge in every residual SCC, with resource attribution —')
+    print('\n=== Table 2: hypernym cycle detail ===')
+    print('(every edge in every broken cycle, with resource attribution —')
     print(' use this to confirm which resource is actually the outlier)\n')
     print_scc_detail(conflicts)
 
