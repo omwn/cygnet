@@ -231,7 +231,7 @@ INVERSE_SENSE_RELATIONS: dict[str, str] = {
 # after reviewing that script's report across multiple builds and manually
 # confirming the direction error via the per-SCC edge dump, not from the
 # aggregate rate table alone.
-LOW_TRUST_RESOURCES: tuple[str, ...] = ('UzWordnet-uz', 'own-pt')
+LOW_TRUST_RESOURCES: tuple[str, ...] = ('UzWordnet-uz',)
 
 INVERSE_CONCEPT_RELATIONS: dict[str, str] = {
     'hypernym':          'hyponym',
