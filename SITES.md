@@ -7,8 +7,8 @@
 | [Cygnet](https://cygnet.maudslay.eu/) | [omwn/cygnet](https://github.com/omwn/cygnet) (`main`) | all | Francis Bond | Francis Bond | Upstream: the source of the shared files. |
 | [Old Javanese Wordnet](https://omwn.github.io/OJW/) | [omwn/OJW](https://github.com/omwn/OJW) (`master`) | kaw | David Moeljadi, Zakariya Pamuji Aminullah | Francis Bond | Origin repository is davidmoeljadi/OJW; the site is deployed from the omwn/OJW fork. |
 | [Myanmar Open Wordnet](https://wordnet.burmese.sg/) | [omwn/mow](https://github.com/omwn/mow) (`master`) | my | Wenjie Wang, Francis Bond | Francis Bond | Also served at https://omwn.github.io/mow/. |
-| [OMW Kinship](https://omwn.github.io/omw-kinship/) | [omwn/omw-kinship](https://github.com/omwn/omw-kinship) (`main`) | mul | Francis Bond | Francis Bond | A 'mul' release built with --all-languages. Not yet deployed: the repository and its first release are still to be published. |
-| [OMW Pronouns](https://omwn.github.io/omw-pronoun/) | [omwn/omw-pronoun](https://github.com/omwn/omw-pronoun) (`main`) | mul | Francis Bond | Francis Bond | A 'mul' release built with --all-languages. Not yet deployed: the site needs its first release with the databases attached. |
+| [OMW Kinship](https://omwn.org/omw-kinship/) | [omwn/omw-kinship](https://github.com/omwn/omw-kinship) (`main`) | mul | Francis Bond | Francis Bond | A 'mul' release built with --all-languages. v0.1 is a draft: synset ids may still change. |
+| [OMW Pronouns](https://omwn.org/omw-pronoun/) | [omwn/omw-pronoun](https://github.com/omwn/omw-pronoun) (`main`) | mul | Francis Bond | Francis Bond | A 'mul' release built with --all-languages. v0.1 is a draft: synset ids may still change. |
 | [OpenWordnet-PT](https://own-pt.github.io/openWordnet-PT/) | [own-pt/openWordnet-PT](https://github.com/own-pt/openWordnet-PT) (`master`) | pt | Alexandre Rademaker, Valeria de Paiva | Francis Bond | Deployed by a Pages workflow on each release. The local clone's origin is the omwn/openWordnet-PT fork; open update PRs against own-pt, adding --head omwn:cygnet-$C to gh pr create. |
 
 ## Update policy

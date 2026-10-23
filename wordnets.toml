@@ -118,8 +118,8 @@ nn = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-nn-2.0.tar.xz
 pl = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-pl-2.0.tar.xz"]
 
 # Portuguese — OpenWordNet-PT
-pt = [ "https://github.com/own-pt/openWordnet-PT/releases/download/v1.0.0/own-pt.tar.gz",
-"https://github.com/omwn/tufs/releases/download/v2026.04.06/tufs-pt-2026.04.06.tar.xz"]
+pt = ["https://github.com/own-pt/openWordnet-PT/releases/download/v1.1.0/own-pt-2026.04.07.tar.xz",
+"https://github.com/omwn/tufs/releases/download/v2026.04.06/tufs-pt-2026.04.076.tar.xz"]
 
 # Romanian — OMW Romanian
 ro = ["https://github.com/igamasniak/omw-converters/releases/download/v0.1/RomanianWordNet.xml.xz"]
@@ -244,3 +244,7 @@ grc = ["https://github.com/igamasniak/omw-converters/releases/download/v0.1/Anci
 
 # Old Irish - GréasánFocal Oscailte na Gaeilge (Old Irish Wordnet)
 sga = ["https://goidelc.teanga.io/downloads/sga-wordnet-0.1.xml.gz"]
+
+# Multilingual — OMW Kinship and OMW Pronouns (concept lexicon + per-language lexicons)
+mul = ["https://github.com/omwn/omw-kinship/releases/download/v0.1/omw-kin-0.1.tar.xz",
+       "https://github.com/omwn/omw-pronoun/releases/download/v0.1/omw-pronoun-0.1.tar.xz"]

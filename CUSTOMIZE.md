@@ -91,14 +91,14 @@ all three.
 
 ### Multi-lexicon releases (`mul`)
 
-Some releases, such as omw-pronoun and kindiv, bundle a *concepts* lexicon
+Some releases, such as omw-pronoun and omw-kin, bundle a *concepts* lexicon
 (`language="mul"`) with one lexicon per language.  The concepts lexicon holds
 unlexicalized synsets with the definitions and the hierarchy.  Each synset's
 `dc:identifier` (e.g. `KinDiv:Fa;Br;So`) links it to its concept, since most of
 these concepts have no ILI yet.  List such releases under the key `mul`:
 
 ```toml
-mul = ["https://github.com/fcbond/KinDiv/releases/download/v0.1/kindiv-0.1.tar.xz"]
+mul = ["https://github.com/omwn/omw-kinship/releases/download/v0.1/omw-kin-0.1.tar.xz"]
 ```
 
 Cygnet then:

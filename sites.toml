@@ -77,7 +77,7 @@ notes = "Also served at https://omwn.github.io/mow/."
 [[site]]
 name = "omw-kin"
 title = "OMW Kinship"
-url = "https://omwn.github.io/omw-kinship/"
+url = "https://omwn.org/omw-kinship/"
 repo = "omwn/omw-kinship"
 branch = "main"
 web_dir = "docs"
@@ -85,12 +85,12 @@ clone = "~/git/omw-kinship"
 languages = ["mul"]
 maintainer = "Francis Bond"
 web_maintainer = "Francis Bond"
-notes = "A 'mul' release built with --all-languages. Not yet deployed: the repository and its first release are still to be published."
+notes = "A 'mul' release built with --all-languages. v0.1 is a draft: synset ids may still change."
 
 [[site]]
 name = "omw-pronoun"
 title = "OMW Pronouns"
-url = "https://omwn.github.io/omw-pronoun/"
+url = "https://omwn.org/omw-pronoun/"
 repo = "omwn/omw-pronoun"
 branch = "main"
 web_dir = "docs"
@@ -98,7 +98,7 @@ clone = "~/git/omw-pronoun"
 languages = ["mul"]
 maintainer = "Francis Bond"
 web_maintainer = "Francis Bond"
-notes = "A 'mul' release built with --all-languages. Not yet deployed: the site needs its first release with the databases attached."
+notes = "A 'mul' release built with --all-languages. v0.1 is a draft: synset ids may still change."
 
 [[site]]
 name = "OWN-PT"
