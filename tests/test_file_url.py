@@ -141,3 +141,37 @@ def test_file_url_skips_if_already_present(work):
     )
     assert result.returncode == 0, result.stderr
     assert dest.read_bytes() == sentinel
+
+
+# ---------------------------------------------------------------------------
+# Archive extraction — run download_standalone from build.sh itself
+# ---------------------------------------------------------------------------
+
+_BUILD_SH = Path(__file__).parent.parent / "build.sh"
+
+
+def _download_standalone_source() -> str:
+    """Return the download_standalone function definition from build.sh."""
+    m = re.search(r"^download_standalone\(\) \{\n.*?^\}\n", _BUILD_SH.read_text(),
+                  re.MULTILINE | re.DOTALL)
+    assert m, "download_standalone not found in build.sh"
+    return m.group(0)
+
+
+def test_archive_skips_appledouble_files(work):
+    """macOS ._* metadata files in an archive are not copied to raw_wns."""
+    pkg = work / "pkg" / "own-pt"
+    pkg.mkdir(parents=True)
+    (pkg / "own-pt-1.0.xml").write_bytes((_WN_DIR / "wn-fr.xml").read_bytes())
+    (pkg / "._own-pt-1.0.xml").write_bytes(b"\x00\x05\x16\x07 not xml")
+    subprocess.run(["tar", "cJf", str(work / "own-pt-1.0.tar.xz"),
+                    "-C", str(work / "pkg"), "own-pt"], check=True)
+    script = (f"set -euo pipefail\nDATA_DIR={work}\n"
+              + _download_standalone_source()
+              + "download_standalone own-pt file://own-pt-1.0.tar.xz\n")
+
+    result = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+
+    assert result.returncode == 0, result.stderr
+    names = sorted(p.name for p in (work / "bin" / "raw_wns").iterdir())
+    assert names == ["own-pt-1.0.xml"]

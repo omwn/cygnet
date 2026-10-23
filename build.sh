@@ -146,7 +146,9 @@ download_standalone() {
         else
             tar xf "$tmpdir/archive" -C "$tmpdir/" || exit 1
         fi
+        # Skip macOS AppleDouble metadata (._*) that some archives carry.
         find "$tmpdir" \( -name '*.xml' -o -name '*.xml.gz' -o -name '*.xml.xz' \) \
+            ! -name '._*' \
             -exec cp --update=none {} "$DATA_DIR/bin/raw_wns/" \;
     )
 }
