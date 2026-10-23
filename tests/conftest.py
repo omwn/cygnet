@@ -196,9 +196,11 @@ def test_db_dir(tmp_path_factory):
     web_dir = Path(__file__).parent.parent / 'web'
     shutil.copy(web_dir / 'index.html', serve_dir / 'index.html')
     shutil.copy(web_dir / 'relations.json', serve_dir / 'relations.json')
+    # As in build.sh: split (which stamps the build id) before compressing.
+    load_split_provenance()(db_path, prov_path, serve_dir / 'provenance')
+    subprocess.run(['gzip', '-k', '-9', '-f', str(db_path)], check=True)
     shutil.copy(db_path.with_suffix('.db.gz'), serve_dir / 'cygnet.db.gz')
     shutil.copy(prov_path.with_suffix('.db.gz'), serve_dir / 'provenance.db.gz')
-    load_split_provenance()(prov_path, serve_dir / 'provenance')
     databases = {
         **_DEFAULT_DATABASES,
         'provenance': {**_DEFAULT_DATABASES['provenance'], 'byResource': 'provenance/'},
@@ -255,6 +257,24 @@ def _start_server(directory: str) -> tuple[HTTPServer, str]:
 def http_server(test_db_dir):
     """Session-scoped HTTP server serving the test DB directory."""
     server, url = _start_server(str(test_db_dir))
+    yield url
+    server.shutdown()
+
+
+@pytest.fixture(scope='session')
+def http_server_with_stale_split(test_db_dir, tmp_path_factory):
+    """HTTP server whose per-resource provenance is from another build.
+
+    The split index's build id no longer matches cygnet.db's, as when a
+    browser holds files from before a redeploy; the UI must not use them.
+    """
+    stale_dir = tmp_path_factory.mktemp('serve_stale_split')
+    shutil.copytree(test_db_dir, stale_dir, dirs_exist_ok=True)
+    index_path = stale_dir / 'provenance' / 'index.json'
+    index = json.loads(index_path.read_text())
+    index['build'] += 1
+    index_path.write_text(json.dumps(index))
+    server, url = _start_server(str(stale_dir))
     yield url
     server.shutdown()
 

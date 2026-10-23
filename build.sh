@@ -348,13 +348,14 @@ if $DO_BUILD; then
         echo
     fi
 
+    # Before compression: this stamps the build id into cygnet.db.
+    echo "=== Step 13: Split provenance by resource ==="
+    run_pipeline 13_split_provenance.py
+    echo
+
     echo "=== Step 12: Compress databases ==="
     gzip -k -9 -f "$DATA_DIR/web/cygnet.db"
     gzip -k -9 -f "$DATA_DIR/web/provenance.db"
-    echo
-
-    echo "=== Step 13: Split provenance by resource ==="
-    run_pipeline 13_split_provenance.py
     echo
 
     echo "=== Build complete! ==="

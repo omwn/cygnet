@@ -62,7 +62,7 @@ Key `useEffect` hooks (in order):
 3. **DB init** — runs on mount; awaits `_configPromise`, loads sql.js, fetches/decompresses the DB (with IndexedDB caching keyed by filename + mtime), sets up the DB
 4. **Provenance DB** — loads provenance DB on demand when user clicks "Load provenance data"
 5. **URL sync** — keeps `window.location.hash` in sync with current view/search/concept/filters
-6. **Original-id links** — `#/search?id=<synset id>` loads the provenance DB, finds the synset whose source wordnet gave it that id (`provenance.original_id`), and replaces the hash with its `#/search?concept=<rowid>`.  If the site sets `databases.provenance.byResource`, it first fetches just the resource's own DB (named by `&wn=`, or the longest resource code the id starts with), and loads the whole provenance DB only if the id is not there.  Rowids change with every build; source ids do not, so this is the form to use in links from outside (e.g. a CILI proposal's `dc:source`)
+6. **Original-id links** — `#/search?id=<synset id>` loads the provenance DB, finds the synset whose source wordnet gave it that id (`provenance.original_id`), and replaces the hash with its `#/search?concept=<rowid>`.  If the site sets `databases.provenance.byResource`, it first fetches just the resource's own DB (named by `&wn=`, or the longest resource code the id starts with), and loads the whole provenance DB only if the id is not there, or if the split files are from another build than the main DB (their `user_version` build ids differ).  Rowids change with every build; source ids do not, so this is the form to use in links from outside (e.g. a CILI proposal's `dc:source`)
 
 ---
 

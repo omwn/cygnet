@@ -8,6 +8,7 @@ from pathlib import Path
 from conftest import load_split_provenance
 
 split_provenance = load_split_provenance()
+build_id = split_provenance.__globals__["build_id"]
 
 PROV_SCHEMA = """
 CREATE TABLE prov_resources (rowid INTEGER PRIMARY KEY, code TEXT NOT NULL UNIQUE);
@@ -51,6 +52,25 @@ def _make_provenance(path: Path) -> None:
     conn.close()
 
 
+def _make_main(path: Path, synsets: int = 3) -> None:
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE synsets (rowid INTEGER PRIMARY KEY)")
+    conn.executemany("INSERT INTO synsets VALUES (?)", [(i,) for i in range(synsets)])
+    conn.commit()
+    conn.close()
+
+
+def _split(tmp_path: Path) -> dict:
+    _make_main(tmp_path / "cygnet.db")
+    _make_provenance(tmp_path / "provenance.db")
+    return split_provenance(
+        tmp_path / "cygnet.db", tmp_path / "provenance.db", tmp_path / "out")
+
+
+def _user_version(conn: sqlite3.Connection) -> int:
+    return conn.execute("PRAGMA user_version").fetchone()[0]
+
+
 def _open(path: Path) -> sqlite3.Connection:
     raw = path.with_suffix("")
     raw.write_bytes(gzip.decompress(path.read_bytes()))
@@ -58,18 +78,16 @@ def _open(path: Path) -> sqlite3.Connection:
 
 
 def test_one_file_per_resource_with_rows(tmp_path):
-    _make_provenance(tmp_path / "provenance.db")
-    index = split_provenance(tmp_path / "provenance.db", tmp_path / "out")
-    assert set(index) == {"oewn", "omw-kin", "omw-kin-cmn-Hant", "a/b"}
-    assert index["oewn"]["rows"] == 2
+    index = _split(tmp_path)
+    assert set(index["resources"]) == {"oewn", "omw-kin", "omw-kin-cmn-Hant", "a/b"}
+    assert index["resources"]["oewn"]["rows"] == 2
     on_disk = json.loads((tmp_path / "out" / "index.json").read_text())
     assert on_disk == index
 
 
 def test_resource_db_keeps_rowids_and_original_ids(tmp_path):
-    _make_provenance(tmp_path / "provenance.db")
-    index = split_provenance(tmp_path / "provenance.db", tmp_path / "out")
-    conn = _open(tmp_path / "out" / index["omw-kin"]["file"])
+    index = _split(tmp_path)
+    conn = _open(tmp_path / "out" / index["resources"]["omw-kin"]["file"])
     row = conn.execute(
         "SELECT p.item_rowid FROM provenance p "
         "JOIN prov_tables pt ON p.table_rowid = pt.rowid "
@@ -83,15 +101,28 @@ def test_resource_db_keeps_rowids_and_original_ids(tmp_path):
 
 
 def test_unsafe_codes_get_safe_file_names(tmp_path):
-    _make_provenance(tmp_path / "provenance.db")
-    index = split_provenance(tmp_path / "provenance.db", tmp_path / "out")
-    assert index["a/b"]["file"] == "a_b.db.gz"
+    index = _split(tmp_path)
+    assert index["resources"]["a/b"]["file"] == "a_b.db.gz"
     assert (tmp_path / "out" / "a_b.db.gz").exists()
 
 
 def test_rerun_replaces_old_files(tmp_path):
-    _make_provenance(tmp_path / "provenance.db")
     (tmp_path / "out").mkdir()
     (tmp_path / "out" / "stale.db.gz").write_bytes(b"")
-    split_provenance(tmp_path / "provenance.db", tmp_path / "out")
+    _split(tmp_path)
     assert not (tmp_path / "out" / "stale.db.gz").exists()
+
+
+def test_build_id_stamped_in_main_and_split_dbs(tmp_path):
+    index = _split(tmp_path)
+    build = index["build"]
+    assert build > 0
+    assert _user_version(sqlite3.connect(tmp_path / "cygnet.db")) == build
+    for entry in index["resources"].values():
+        assert _user_version(_open(tmp_path / "out" / entry["file"])) == build
+
+
+def test_build_id_differs_between_builds(tmp_path):
+    _make_main(tmp_path / "a.db", synsets=3)
+    _make_main(tmp_path / "b.db", synsets=4)
+    assert build_id(tmp_path / "a.db") != build_id(tmp_path / "b.db")

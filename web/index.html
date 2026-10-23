@@ -562,25 +562,47 @@
             return best;
         }
 
+        // The build id stamped into a DB's user_version by 13_split_provenance.py
+        // (0 if it has none).  Provenance rows point into the main DB by rowid,
+        // so split files are only used with the main DB of the same build.
+        function buildId(db) {
+            try { return db.exec('PRAGMA user_version')[0].values[0][0]; }
+            catch (e) { return 0; }
+        }
+
         async function findSynsetInResourceProvenance(originalId, wn) {
             let dir = _siteConfig.databases?.provenance?.byResource;
             if (!dir) return null;
             if (!dir.endsWith('/')) dir += '/';
+            const build = _db ? buildId(_db) : 0;
+            if (!build) return null;
+            let code = null;
             try {
                 if (!_provIndexPromise) {
-                    _provIndexPromise = fetch(DB_BASE + dir + 'index.json')
-                        .then(r => r.ok ? r.json() : {});
+                    // Revalidate, so that a cached index of an earlier build is not used.
+                    _provIndexPromise = fetch(DB_BASE + dir + 'index.json', { cache: 'no-cache' })
+                        .then(r => {
+                            if (!r.ok) throw new Error(`Failed to fetch index.json: ${r.status}`);
+                            return r.json();
+                        });
                 }
                 const index = await _provIndexPromise;
-                const code = resourceForId(index, originalId, wn);
+                if (index.build !== build || !index.resources) return null;
+                code = resourceForId(index.resources, originalId, wn);
                 if (!code) return null;
                 if (!_resourceProvDbs[code]) {
-                    _resourceProvDbs[code] = fetchGzipDb(DB_BASE + dir + index[code].file);
+                    // The build id in the URL keeps cached files of earlier builds out.
+                    _resourceProvDbs[code] = fetchGzipDb(
+                        `${DB_BASE}${dir}${index.resources[code].file}?v=${build}`);
                 }
                 const db = await _resourceProvDbs[code];
+                if (buildId(db) !== build) return null;
                 const res = db.exec(SYNSET_BY_ORIGINAL_ID, [originalId]);
                 return res.length && res[0].values.length ? res[0].values[0][0] : null;
             } catch (e) {
+                // Forget the failure, so that the next link tries again.
+                _provIndexPromise = null;
+                if (code) delete _resourceProvDbs[code];
                 console.warn('Per-resource provenance lookup failed:', e);
                 return null;
             }

@@ -338,6 +338,11 @@ The resource is the longest resource code the id starts with (LMF ids begin
 with their lexicon's id); give it explicitly with `&wn=<resource code>` if the
 ids do not.  If the id is not found there, the whole provenance DB is loaded.
 
+The split files point into the main DB by rowid, so they only work with the
+main DB from the same build: `build.sh` stamps a build id into both, and the
+page ignores split files from another build (falling back to the whole
+provenance DB).  Always deploy `provenance/` together with the main DB.
+
 A release may have at most 1,000 assets, so attach the directory as a single
 archive (`tar -cf mywn-provenance-by-resource.tar -C docs provenance`) and
 extract it in the Pages workflow after downloading the databases

@@ -360,8 +360,37 @@ class TestOriginalIdLink:
             'text=All forms expressing this concept', timeout=_DB_LOAD_TIMEOUT
         )
         expect(page.locator('text=⟪i3⟫')).to_be_visible()
-        assert any(u.endswith('/provenance/wn-en.db.gz') for u in fetched)
+        assert any('/provenance/wn-en.db.gz?v=' in u for u in fetched)
         assert not any(u.endswith('/provenance.db.gz') for u in fetched)
+
+    def test_split_from_another_build_is_not_used(
+        self, page: Page, http_server_with_stale_split
+    ):
+        """Split files whose build id differs from cygnet.db's are skipped."""
+        fetched = []
+        page.on('request', lambda r: fetched.append(r.url))
+        page.goto(http_server_with_stale_split + '#/search?id=oewn-dog-n&wn=wn-en')
+        page.wait_for_selector(
+            'text=All forms expressing this concept', timeout=_DB_LOAD_TIMEOUT
+        )
+        expect(page.locator('text=⟪i3⟫')).to_be_visible()
+        assert not any('/provenance/wn-en.db.gz' in u for u in fetched)
+        assert any(u.endswith('/provenance.db.gz') for u in fetched)
+
+    def test_failed_index_fetch_is_retried(self, page: Page, http_server):
+        """A failed index.json fetch is not remembered: the next link retries."""
+        page.route('**/provenance/index.json', lambda route: route.abort(), times=1)
+        page.goto(http_server + '#/search?id=oewn-dog-n&wn=wn-en')
+        page.wait_for_selector(
+            'text=All forms expressing this concept', timeout=_DB_LOAD_TIMEOUT
+        )
+        fetched = []
+        page.on('request', lambda r: fetched.append(r.url))
+        page.goto(http_server + '#/search?q=dog')
+        page.goto(http_server + '#/search?id=oewn-dog-n&wn=wn-en')
+        page.wait_for_url('**/#/search?concept=*', timeout=_DB_LOAD_TIMEOUT)
+        assert any(u.endswith('/provenance/index.json') for u in fetched)
+        assert any('/provenance/wn-en.db.gz?v=' in u for u in fetched)
 
     def test_id_without_resource_prefix_falls_back(self, page: Page, http_server):
         """oewn-dog-n names no resource (it is in wn-en): use the whole DB."""
