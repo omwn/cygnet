@@ -25,8 +25,8 @@ bg = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-bg-2.0.tar.xz
 # Catalan — OMW Catalan
 ca = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-ca-2.0.tar.xz"]
 
-# Chinese (Mandarin) — OMW Chinese
-cmn = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-cmn-2.0.tar.xz",
+# Chinese (Mandarin) — Chinese Open Wordnet (COW)
+cmn = ["https://github.com/bond-lab/cow/releases/download/v1.1/cow-1.1.tar.xz",
 "https://github.com/omwn/tufs/releases/download/v2026.04.06/tufs-zh-2026.04.06.tar.xz"]
 
 # Danish — DanNet
@@ -81,19 +81,16 @@ hu = ["https://github.com/igamasniak/omw-converters/releases/download/v0.1/Hunga
 # Estonian 
 et = ["https://gitlab.keeleressursid.ee/avalik/data/-/raw/master/estwn/estwn-et-2.7/estwn-et-2.7.0.xml?inline=false"]
 
-# Japanese
-# ToDo get better
-ja = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-ja-2.0.tar.xz",
+# Japanese — Japanese WordNet (wnja)
+ja = ["https://github.com/bond-lab/wnja/releases/download/v2.1/wnja-2.1.tar.xz",
 "https://github.com/omwn/tufs/releases/download/v2026.04.06/tufs-ja-2026.04.06.tar.xz"]
 
-# Malay
-# ToDo get better
-zsm = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-zsm-2.0.tar.xz",
+# Malay — Wordnet Bahasa (Malaysian Malay)
+zsm = ["https://github.com/bond-lab/Bahasa-Wordnet/releases/download/v1.4/wnb-zsm-1.4.tar.xz",
 "https://github.com/omwn/tufs/releases/download/v2026.04.06/tufs-ms-2026.04.06.tar.xz"]
 
-# Indonesian
-# ToDo get better
-id = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-id-2.0.tar.xz",
+# Indonesian — Wordnet Bahasa (Indonesian)
+id = ["https://github.com/bond-lab/Bahasa-Wordnet/releases/download/v1.4/wnb-id-1.4.tar.xz",
 "https://github.com/omwn/tufs/releases/download/v2026.04.06/tufs-id-2026.04.06.tar.xz"]
 
 # Kurdish (Kurmanji) — KurdNet

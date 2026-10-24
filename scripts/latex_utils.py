@@ -9,6 +9,7 @@ import re
 WORDNET_NAMES: dict[str, str] = {
     "abwn":        "Abui Wordnet",
     "cantown-yue": "Cantonese Wordnet",
+    "cow":         "Chinese Open Wordnet",
     "dn":          "DanNet",
     "kurdnet":     "KurdNet",
     "oewn":        "Open English Wordnet",
@@ -43,6 +44,9 @@ WORDNET_NAMES: dict[str, str] = {
     "omw-th":      "Thai Wordnet",
     "omw-zsm":     "Wordnet Bahasa (Malaysian)",
     "own-pt":      "OpenWordnet-PT",
+    "wnb-id":      "Wordnet Bahasa (Indonesian)",
+    "wnb-zsm":     "Wordnet Bahasa (Malaysian)",
+    "wnja":        "Japanese Wordnet",
     "tufs-as":     "TUFS Assamese",
     "tufs-km":     "TUFS Khmer",
     "tufs-ko":     "TUFS Korean",
