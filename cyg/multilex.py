@@ -10,6 +10,7 @@ This module also holds the language-code fix-ups shared by all sources.
 """
 import gzip
 import lzma
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -127,11 +128,39 @@ def match_language(code: str, known: set[str]) -> str | None:
     return min(candidates, key=lambda k: (len(k), k)) if candidates else None
 
 
-def _open(path: Path):
-    """Open a possibly compressed XML file for binary reading."""
-    if path.name.endswith(".gz"):
+def url_stem(url: str) -> str:
+    """The file-name prefix of the wordnet a download URL provides.
+
+    Args:
+        url: A source URL from wordnets.toml.
+
+    Returns:
+        The archive or file name without extension or version, e.g.
+        ``omw-kin`` for ``.../omw-kin-0.1.tar.xz``.
+    """
+    name = url.split("?")[0].rstrip("/").split("/")[-1]
+    for ext in (".tar.xz", ".tar.gz", ".tar.bz2", ".zip", ".xz", ".gz"):
+        if name.endswith(ext):
+            name = name[: -len(ext)]
+            break
+    if name.endswith(".xml"):
+        name = name[:-4]
+    return re.sub(r"[-_]\d[\d.]*$", "", name)
+
+
+def open_xml(path: Path | str):
+    """Open a possibly compressed (.gz or .xz) XML file for binary reading.
+
+    Args:
+        path: The file to open.
+
+    Returns:
+        A binary file object.
+    """
+    name = str(path)
+    if name.endswith(".gz"):
         return gzip.open(path, "rb")
-    if path.name.endswith(".xz"):
+    if name.endswith(".xz"):
         return lzma.open(path, "rb")
     return open(path, "rb")
 
@@ -145,7 +174,7 @@ def read_lexicon_header(path: Path) -> LexiconHeader:
     Returns:
         The header; fields are None if no Lexicon is found
     """
-    with _open(path) as f:
+    with open_xml(path) as f:
         for _event, elem in etree.iterparse(f, events=("start",), load_dtd=False,
                                             no_network=True, resolve_entities=False):
             if etree.QName(elem).localname == "Lexicon":
@@ -205,7 +234,7 @@ def build_concept_map(path: Path) -> dict[str, tuple[str | None, str]]:
     Returns:
         dc:identifier -> (ILI, or None for '' and 'in'; local concept id)
     """
-    with _open(path) as f:
+    with open_xml(path) as f:
         root = etree.parse(f).getroot()
     lexicon = next(e for e in root.iter() if etree.QName(e).localname == "Lexicon")
     lex_id = lexicon.get("id")

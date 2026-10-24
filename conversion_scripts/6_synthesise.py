@@ -14,9 +14,9 @@ from pathlib import Path
 from lxml import etree
 
 from cyg.merge import LOW_TRUST_RESOURCES, MergeBuilder
+from cyg.presynth import MANIFEST_NAME, read_manifest, stem_resource
 
 
-MANIFEST_NAME = 'manifest.txt'  # written by 2_batch_convert_lmfs.py
 
 
 def select_files(input_dir: Path) -> list[Path]:
@@ -33,11 +33,11 @@ def select_files(input_dir: Path) -> list[Path]:
         Files to merge, sorted by name
     """
     all_files = sorted(input_dir.glob('*.xml'))
-    manifest = input_dir / MANIFEST_NAME
-    if not manifest.exists():
+    manifest = read_manifest(input_dir)
+    if manifest is None:
         print(f'  Warning: no {MANIFEST_NAME}; merging every file in {input_dir}')
         return all_files
-    planned = set(manifest.read_text(encoding='utf-8').split())
+    planned = set(manifest)
     keep, ignored = [], []
     for f in all_files:
         if f.name in planned or 'cili' in f.stem or 'mtg' in f.stem:
@@ -69,10 +69,8 @@ def low_trust_rank(path: Path) -> int | None:
 
     A pre-synth stem is the resource code plus a version ('UzWordnet-uz-1.0').
     """
-    for i, code in enumerate(LOW_TRUST_RESOURCES):
-        if path.stem == code or path.stem.startswith(code + '-'):
-            return i
-    return None
+    code = stem_resource(path.stem, LOW_TRUST_RESOURCES)
+    return None if code is None else LOW_TRUST_RESOURCES.index(code)
 
 
 def merge_order(all_files: list[Path]) -> list[Path]:
@@ -85,25 +83,24 @@ def merge_order(all_files: list[Path]) -> list[Path]:
     every other wordnet, then LOW_TRUST_RESOURCES with the worst last, and
     finally the machine-translated glosses (mtg).
     """
-    cili_files = [f for f in all_files if 'cili' in f.stem]
-    oewn_files = [f for f in all_files if 'oewn' in f.stem]
-    # Machine-translated glosses (mtg) reference definiendum concepts from
-    # every other resource — _do_gloss() silently drops a Gloss if its
-    # concept isn't registered yet, so mtg must be processed last.
-    mtg_files = [f for f in all_files if 'mtg' in f.stem]
-    rest = [
-        f for f in all_files
-        if f not in cili_files and f not in oewn_files and f not in mtg_files
-    ]
-    concept_files = [f for f in rest if is_concepts_lexicon(f)]
-    rest = [f for f in rest if f not in concept_files]
-    low_trust = sorted(
-        (f for f in rest if low_trust_rank(f) is not None),
-        key=lambda f: -low_trust_rank(f),  # list is worst first; merge worst last
-    )
-    other_files = [f for f in rest if f not in low_trust]
-    return (cili_files + oewn_files + concept_files + other_files
-            + low_trust + mtg_files)
+    def group(f: Path) -> tuple[int, int]:
+        if 'cili' in f.stem:
+            return (0, 0)
+        if 'oewn' in f.stem:
+            return (1, 0)
+        # Machine-translated glosses (mtg) reference definiendum concepts from
+        # every other resource — _do_gloss() silently drops a Gloss if its
+        # concept isn't registered yet, so mtg must be processed last.
+        if 'mtg' in f.stem:
+            return (5, 0)
+        if is_concepts_lexicon(f):
+            return (2, 0)
+        rank = low_trust_rank(f)
+        if rank is not None:
+            return (4, -rank)  # list is worst first; merge worst last
+        return (3, 0)
+
+    return sorted(all_files, key=group)  # stable: keeps name order in a group
 
 
 def main() -> None:

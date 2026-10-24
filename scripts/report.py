@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -22,6 +21,7 @@ from pathlib import Path
 from lxml import etree as ET
 
 from cyg.merge import INVERSE_CONCEPT_RELATIONS, INVERSE_SENSE_RELATIONS
+from cyg.presynth import log_path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PRESYNTH_DIR = PROJECT_ROOT / "bin" / "cygnets_presynth"
@@ -633,10 +633,10 @@ def check_glossed_concepts_without_senses(data: WordnetData) -> Issue | None:
 
 def load_json_log(xml_path: Path) -> dict:
     """Load the per-file converter log (``{stem}_log.json``) alongside *xml_path*."""
-    log_path = xml_path.with_name(xml_path.stem + "_log.json")
-    if not log_path.exists():
+    path = log_path(xml_path)
+    if not path.exists():
         return {}
-    with open(log_path, encoding='utf-8') as f:
+    with open(path, encoding='utf-8') as f:
         return json.load(f)
 
 
@@ -944,7 +944,7 @@ def issues_from_json_log(log: dict, log_path: Path | None = None) -> list[Issue]
 
 def issues_from_conflicts_log(
     reversed_rels: list[dict],
-    file_cycles: list[dict],
+    cycles: list[dict],
     data: WordnetData,
     xml_stem: str = "",
 ) -> list[Issue]:
@@ -983,7 +983,7 @@ def issues_from_conflicts_log(
             source_hint=f"{CONFLICTS_JSON.name} (reversed_relations, resource_id={data.resource_id})",
         ))
 
-    def _cycle_items(cycles: list[dict]) -> list[str]:
+    if cycles:
         items = []
         for rec in cycles[:MAX_EXAMPLES]:
             src, rel, tgt = rec['src'], rec['rel'], rec['tgt']
@@ -993,15 +993,12 @@ def issues_from_conflicts_log(
                 f"{label_concept(src, data)} {rel} {label_concept(tgt, data)}"
                 f"  (chain: {labelled_chain})"
             )
-        return items
-
-    if file_cycles:
         issues.append(Issue(
             severity="CRITICAL",
             title="Hypernym cycles spanning multiple wordnets",
-            total=len(file_cycles),
+            total=len(cycles),
             explanation=(
-                f"Cygnet removed {len(file_cycles):,} hypernym relation(s) from this "
+                f"Cygnet removed {len(cycles):,} hypernym relation(s) from this "
                 "wordnet because, together with relations from other wordnets already "
                 "in the database at the time this file was merged, they formed a cycle "
                 "in the IS-A hierarchy. The 'existing chain' shows the path that was "
@@ -1012,7 +1009,7 @@ def issues_from_conflicts_log(
                 "Check whether the hypernym direction is correct. "
                 "If the other wordnet's chain is wrong, report it there."
             ),
-            items=_cycle_items(file_cycles),
+            items=items,
             source_hint=f"{CONFLICTS_JSON.name} (cycles, xml_stem={xml_stem or data.resource_id})",
         ))
 
@@ -1125,14 +1122,14 @@ def collect_issues(path: Path) -> tuple[WordnetData, list[Issue], dict] | None:
         issue.source_hint = path.name
 
     # Augment with converter log (created at pre-synth time)
-    log_path = path.with_name(path.stem + "_log.json")
     json_log = load_json_log(path)
-    issues.extend(issues_from_json_log(json_log, log_path if log_path.exists() else None))
+    log = log_path(path)
+    issues.extend(issues_from_json_log(json_log, log if log.exists() else None))
 
     # Augment with merge-time relation conflicts log
-    reversed_rels, file_cycles = parse_conflicts_json(data.resource_id, path.stem)
+    reversed_rels, cycles = parse_conflicts_json(data.resource_id, path.stem)
     issues.extend(issues_from_conflicts_log(
-        reversed_rels, file_cycles, data, xml_stem=path.stem
+        reversed_rels, cycles, data, xml_stem=path.stem
     ))
 
     return data, issues, json_log

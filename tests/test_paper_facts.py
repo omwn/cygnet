@@ -59,6 +59,8 @@ def _seed_build(tmp_path: Path) -> dict:
     toml.write_text(
         'el = ["https://github.com/igamasniak/omw-converters/G.xml.xz"]\n'
         'ja = ["https://github.com/bond-lab/wnja/wnja-2.1.tar.xz"]\n'
+        '# old = ["https://github.com/igamasniak/omw-converters/commented-out.xml"]\n'
+        'mul = ["https://github.com/omwn/omw-kinship/omw-kin-0.1.tar.xz"]\n'
     )
     raw = tmp_path / "raw"
     raw.mkdir()
@@ -90,10 +92,15 @@ def test_relations_count_rows_and_resources(tmp_path):
 
 
 def test_converted_counts_converter_urls_plus_kenet():
-    toml = ('a = ["https://github.com/igamasniak/omw-converters/x.xml.xz",\n'
-            '"https://github.com/igamasniak/omw-converters/y.xml.xz"]\n'
-            'b = ["https://example.org/z.xml"]\n')
-    assert converted_facts(toml) == {"wordnets": 3}
+    sources = {"a": ["https://github.com/igamasniak/omw-converters/x.xml.xz",
+                     "https://github.com/igamasniak/omw-converters/y.xml.xz"],
+               "b": ["https://example.org/z.xml"]}
+    assert converted_facts(sources) == {"wordnets": 3}
+
+
+def test_converted_ignores_commented_urls(tmp_path):
+    facts = build_facts(**_seed_build(tmp_path))
+    assert facts["converted"] == {"wordnets": 2}   # one converter URL + KeNet
 
 
 def test_tex_has_separators_and_fallback():
@@ -111,4 +118,4 @@ def test_multilingual_counts_languages_of_built_version(tmp_path):
 
 def test_baseline_measured_like_current(tmp_path):
     paths = _seed_build(tmp_path)
-    assert baseline_facts(paths["db"]) == build_facts(**paths)["cygnet"]
+    assert baseline_facts(paths["db"], ("omw-kin",)) == build_facts(**paths)["cygnet"]

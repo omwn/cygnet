@@ -12,6 +12,8 @@ from pathlib import Path
 import langcodes
 from lxml import etree as ET
 
+from cyg.converters import CONCEPT_REVERSE_RELATIONS, SENSE_REVERSE_RELATIONS
+
 logger = logging.getLogger(__name__)
 
 _COMBINING_RE = re.compile(r'[\u0300-\u036f\u1dc0-\u1dff\u20d0-\u20ff\ufe20-\ufe2f]')
@@ -148,13 +150,11 @@ CREATE TABLE provenance (
     version        TEXT,
     original_id    TEXT
 );
-CREATE INDEX idx_provenance_lookup ON provenance(table_rowid, item_rowid);
 """
 
 INDEXES = """
 CREATE INDEX idx_forms_normalized  ON forms(normalized_form);
 CREATE INDEX idx_forms_lower       ON forms(LOWER(form), rank, entry_rowid);
-CREATE INDEX idx_pronunciations_form ON pronunciations(form_rowid);
 CREATE INDEX idx_senses_entry      ON senses(entry_rowid);
 CREATE INDEX idx_senses_synset    ON senses(synset_rowid);
 CREATE INDEX idx_definitions_synset        ON definitions(synset_rowid);
@@ -199,25 +199,7 @@ CILI_RESOURCE = {
 }
 
 INVERSE_SENSE_RELATIONS: dict[str, str] = {
-    'antonym':           'antonym',
-    'also':              'also',
-    'similar':           'similar',
-    'derivation':        'derivation',
-    'anto_gradable':     'anto_gradable',
-    'anto_simple':       'anto_simple',
-    'anto_converse':     'anto_converse',
-    'domain_topic':      'has_domain_topic',
-    'domain_region':     'has_domain_region',
-    'exemplifies':       'is_exemplified_by',
-    'feminine':          'has_feminine',
-    'masculine':         'has_masculine',
-    'young':             'has_young',
-    'diminutive':        'has_diminutive',
-    'augmentative':      'has_augmentative',
-    'simple_aspect_ip':  'simple_aspect_pi',
-    'secondary_aspect_ip': 'secondary_aspect_pi',
-    'metaphor':          'has_metaphor',
-    'metonym':           'has_metonym',
+    rel: inv for rel, inv in SENSE_REVERSE_RELATIONS.items() if inv is not None
 }
 
 # Resources with a documented, systematic hypernym-direction bug in their
@@ -239,63 +221,14 @@ INVERSE_SENSE_RELATIONS: dict[str, str] = {
 LOW_TRUST_RESOURCES: tuple[str, ...] = ('UzWordnet-uz',)
 
 INVERSE_CONCEPT_RELATIONS: dict[str, str] = {
-    'hypernym':          'hyponym',
-    'instance_hypernym': 'instance_hyponym',
-    'meronym':           'holonym',
-    'mero_member':       'holo_member',
-    'mero_part':         'holo_part',
-    'mero_substance':    'holo_substance',
-    'mero_location':     'holo_location',
-    'mero_portion':      'holo_portion',
-    'causes':            'is_caused_by',
-    'entails':           'is_entailed_by',
-    'subevent':          'is_subevent_of',
-    'state_of':          'be_in_state',
-    'manner_of':         'in_manner',
-    'domain_topic':      'has_domain_topic',
-    'domain_region':     'has_domain_region',
-    'domain':            'has_domain',
-    'exemplifies':       'is_exemplified_by',
-    'classifies':        'classified_by',
-    'restricts':         'restricted_by',
-    'role':              'involved',
-    'agent':             'involved_agent',
-    'patient':           'involved_patient',
-    'result':            'involved_result',
-    'instrument':        'involved_instrument',
-    'location':          'involved_location',
-    'direction':         'involved_direction',
-    'target_direction':  'involved_target_direction',
-    'source_direction':  'involved_source_direction',
-    'co_agent_patient':      'co_patient_agent',
-    'co_agent_instrument':   'co_instrument_agent',
-    'co_agent_result':       'co_result_agent',
-    'co_patient_instrument': 'co_instrument_patient',
-    'co_result_instrument':  'co_instrument_result',
-    'feminine':          'has_feminine',
-    'masculine':         'has_masculine',
-    'young':             'has_young',
-    'diminutive':        'has_diminutive',
-    'augmentative':      'has_augmentative',
-    'simple_aspect_ip':  'simple_aspect_pi',
-    'secondary_aspect_ip': 'secondary_aspect_pi',
-    'metaphor':          'has_metaphor',
-    'metonym':           'has_metonym',
-    'possessive':        'possessor',
-    'antonym':           'antonym',
-    'similar':           'similar',
-    'attribute':         'attribute',
-    'eq_synonym':        'eq_synonym',
-    'ir_synonym':        'ir_synonym',
-    'co_role':           'co_role',
-    'also':              'also',
-    'anto_gradable':     'anto_gradable',
-    'anto_simple':       'anto_simple',
-    'anto_converse':     'anto_converse',
-    'derivation':        'derivation',
+    rel: inv for rel, inv in CONCEPT_REVERSE_RELATIONS.items() if inv is not None
 }
 
 BATCH_SIZE = 50_000
+
+# Relation types that make up the IS-A hierarchy, which must stay acyclic.
+HYPERNYM_TYPES = frozenset({'hypernym', 'instance_hypernym'})
+HYPONYM_TYPES = frozenset({'hyponym', 'instance_hyponym'})
 
 # ---------------------------------------------------------------------------
 # Utilities
@@ -436,6 +369,11 @@ class MergeBuilder:
         # the duplicate-lexeme lookup 'SELECT form FROM forms WHERE entry_rowid=?'
         # is O(log n) rather than O(n) for all subsequent duplicate checks.
         self.cur.execute('CREATE INDEX idx_forms_entry ON forms(entry_rowid)')
+        # Likewise for the pronunciations of an existing form when a lexeme
+        # from a later wordnet merges into one already loaded.
+        self.cur.execute(
+            'CREATE INDEX idx_pronunciations_form ON pronunciations(form_rowid)'
+        )
 
         self.prov_conn = sqlite3.connect(str(prov_db_path))
         self.prov_cur = self.prov_conn.cursor()
@@ -495,6 +433,21 @@ class MergeBuilder:
         self._sense_rels_buf: list[tuple] = []
         self._synset_rels_buf: list[tuple] = []
         self._prov_buf: list[tuple] = []
+
+        # The hypernym graph, kept in memory so that the per-file cycle check
+        # only has to search from the new edges (see check_and_remove_new_cycles).
+        # Hypernym rows are deleted during Phase 1 only by that check.
+        self._hyp_children: dict[int, list[int]] = {}
+        # One concept pair can have several rows (e.g. both 'hypernym' and
+        # 'instance_hypernym'): (src, tgt) -> [(rowid, type_rowid), ...]
+        self._hyp_pair_rows: dict[tuple[int, int], list[tuple[int, int]]] = {}
+        self._hyp_type_names: dict[int, str] = {}
+        # Hypernym rows buffered since the last cycle check:
+        # (rowid, src, tgt, type_rowid)
+        self._hyp_new: list[tuple[int, int, int, int]] = []
+        # Rowids of hyponym rows, so that the inverse of a removed hypernym can
+        # be deleted by rowid: synset_relations has no index during Phase 1.
+        self._hypo_rowids: dict[tuple[int, int, int], int] = {}
 
         # Structured conflict records (written to JSON at the end of synthesis)
         self._conflicts: dict[str, list] = {
@@ -562,14 +515,18 @@ class MergeBuilder:
         )
 
     def _insert_prov(self, table_name: str, item_rowid: int, prov_elems) -> int:
-        table_rowid = self._prov_table_rowid(table_name)
+        # Called once per item (~10M times), so look the caches up directly.
+        table_rowid = (self._prov_table_cache.get(table_name)
+                       or self._prov_table_rowid(table_name))
+        resources = self._prov_resource_cache
+        append = self._prov_buf.append
         count = 0
         for p in prov_elems:
             resource = p.get('resource')
             if resource:
-                self._prov_buf.append((
+                append((
                     table_rowid, item_rowid,
-                    self._prov_resource_rowid(resource),
+                    resources.get(resource) or self._prov_resource_rowid(resource),
                     p.get('version'), p.get('original_id'),
                 ))
                 count += 1
@@ -892,6 +849,10 @@ class MergeBuilder:
             self._synset_rels_buf.append((cr_rowid, source, target, type_rowid))
             self.n_prov += self._insert_prov('synset_relations', cr_rowid, prov_elems)
             self.n_synset_rels += 1
+            if rel_type in HYPERNYM_TYPES:
+                self._track_hypernym(cr_rowid, source, target, type_rowid, rel_type)
+            elif rel_type in HYPONYM_TYPES:
+                self._hypo_rowids[key] = cr_rowid
 
         if inv:
             inv_type = self._rel_type_rowid(inv)
@@ -902,6 +863,10 @@ class MergeBuilder:
                 self._next_synset_rel_id += 1
                 self._synset_rels_buf.append((inv_rowid, target, source, inv_type))
                 self.n_synset_rels += 1
+                if inv in HYPERNYM_TYPES:
+                    self._track_hypernym(inv_rowid, target, source, inv_type, inv)
+                elif inv in HYPONYM_TYPES:
+                    self._hypo_rowids[inv_key] = inv_rowid
 
     # --- Flush helpers ---
 
@@ -1108,10 +1073,12 @@ class MergeBuilder:
                 if len(cluster) < 2:
                     continue
                 keep_entry, *others = cluster
-                self._merge_variant_senses(
+                identical, variant = self._merge_variant_senses(
                     keep_entry, sense_of[keep_entry],
-                    [(sense_of[e], e) for e in others], removed,
+                    [(sense_of[e], e) for e in others],
                 )
+                removed['identical'] += identical
+                removed['variant'] += variant
 
         # Dedup any sense_relations that became identical after the redirect
         self.cur.execute("""
@@ -1153,16 +1120,20 @@ class MergeBuilder:
 
     def _merge_variant_senses(
         self, keep_entry: int, keep_sense: int,
-        variants: list[tuple[int, int]], removed: dict[str, int],
-    ) -> None:
+        variants: list[tuple[int, int]],
+    ) -> tuple[int, int]:
         """Merge variant entries' senses into one surviving sense.
 
         Args:
             keep_entry: Entry that receives the variants' wordforms.
             keep_sense: keep_entry's sense, which survives.
             variants: (sense rowid, entry rowid) pairs to merge and delete.
-            removed: Counts to update, keyed 'identical' and 'variant'.
+
+        Returns:
+            Senses removed whose lemma was identical to keep_entry's, and
+            those that were case or width variants of it.
         """
+        identical_count = 0
         prov_senses_rowid = self._prov_table_rowid('senses')
         rows = self.cur.execute(
             'SELECT form, rank FROM forms WHERE entry_rowid = ?', (keep_entry,)
@@ -1177,8 +1148,7 @@ class MergeBuilder:
                 'WHERE entry_rowid = ? ORDER BY rank',
                 (entry_rowid,),
             ).fetchall()
-            identical = any(r == 0 and f in lemmas for _, f, _, r in forms)
-            removed['identical' if identical else 'variant'] += 1
+            identical_count += any(r == 0 and f in lemmas for _, f, _, r in forms)
 
             # Move wordforms from the non-canonical entry to keep_entry,
             # ranked after its own so that it keeps a single lemma
@@ -1242,6 +1212,7 @@ class MergeBuilder:
                 'DELETE FROM provenance WHERE table_rowid = ? AND item_rowid = ?',
                 (prov_senses_rowid, sense_rowid),
             )
+        return identical_count, len(variants) - identical_count
 
     def cascade_delete(self) -> dict[str, int]:
         """Remove synsets with no definitions and cascade to dependent rows."""
@@ -1427,6 +1398,13 @@ class MergeBuilder:
                     queue.append(path + [nbr])
         return [start, end]
 
+    def _track_hypernym(
+        self, rowid: int, src: int, tgt: int, type_rowid: int, rel_type: str
+    ) -> None:
+        """Note a buffered hypernym row for the next cycle check."""
+        self._hyp_type_names[type_rowid] = rel_type
+        self._hyp_new.append((rowid, src, tgt, type_rowid))
+
     def check_and_remove_new_cycles(
         self, resource_code: str, first_new_rowid: int
     ) -> int:
@@ -1436,6 +1414,11 @@ class MergeBuilder:
         SCC, removes them and their auto-inverses, and logs a human-readable
         description suitable for filing upstream bug reports.
 
+        The graph was acyclic before the file, so every new cycle contains one
+        of its edges, and the SCC of that edge is reachable from the edge's
+        source.  Tarjan therefore only starts from the new edges' sources,
+        rather than covering the whole graph.
+
         Args:
             resource_code: Resource identifier for logging.
             first_new_rowid: Lowest synset_relation rowid assigned to this file.
@@ -1443,41 +1426,19 @@ class MergeBuilder:
         Returns:
             Number of cycle-causing edges removed.
         """
-        hypernym_types = {r[0]: r[1] for r in self.cur.execute(
-            "SELECT rowid, type FROM relation_types "
-            "WHERE type IN ('hypernym', 'instance_hypernym')"
-        ).fetchall()}
-        if not hypernym_types:
-            return 0
-
-        ph = ','.join('?' * len(hypernym_types))
-        rows = self.cur.execute(
-            f"SELECT rowid, source_rowid, target_rowid, type_rowid "
-            f"FROM synset_relations WHERE type_rowid IN ({ph})",
-            list(hypernym_types),
-        ).fetchall()
-        if not rows:
-            return 0
-
-        children: dict[int, list[int]] = {}
-        nodes: set[int] = set()
-        # One concept pair can have several rows (e.g. both 'hypernym' and
-        # 'instance_hypernym'), so keep every row: removing only one of them
-        # would leave the pair connected and the cycle in place.
-        pair_rows: dict[tuple[int, int], list[tuple[int, int]]] = {}
-        for rowid, src, tgt, tr in rows:
+        children, pair_rows = self._hyp_children, self._hyp_pair_rows
+        for rowid, src, tgt, type_rowid in self._hyp_new:
             if (src, tgt) not in pair_rows:
                 children.setdefault(src, []).append(tgt)
-            pair_rows.setdefault((src, tgt), []).append((rowid, tr))
-            nodes.add(src)
-            nodes.add(tgt)
-
-        cyclic_sccs = self._tarjan_cyclic_sccs(nodes, children)
-        if not cyclic_sccs:
+            pair_rows.setdefault((src, tgt), []).append((rowid, type_rowid))
+        starts = {src for rowid, src, _, _ in self._hyp_new if rowid >= first_new_rowid}
+        self._hyp_new.clear()
+        if not starts:
             return 0
 
-        removed = 0
-        for scc in cyclic_sccs:
+        # Log every removal against the graph as it was, then update it.
+        doomed: list[tuple[int, int, int, int]] = []
+        for scc in self._tarjan_cyclic_sccs(starts, children):
             scc_set = set(scc)
             for src in scc_set:
                 for tgt in children.get(src, []):
@@ -1486,24 +1447,32 @@ class MergeBuilder:
                     for edge_rowid, type_rowid in pair_rows[(src, tgt)]:
                         if edge_rowid < first_new_rowid:
                             continue
-                        # From the new file and on a cycle — remove it
-                        self._remove_cycle_edge(
-                            resource_code, src, tgt, edge_rowid,
-                            hypernym_types[type_rowid], type_rowid,
-                            scc_set, children,
-                        )
-                        removed += 1
-        return removed
+                        chain = self._bfs_path(tgt, src, scc_set, children, (src, tgt))
+                        edge = (edge_rowid, src, tgt, type_rowid)
+                        self._remove_cycle_edge(resource_code, edge, chain)
+                        doomed.append(edge)
+        for edge_rowid, src, tgt, type_rowid in doomed:
+            rows = pair_rows[(src, tgt)]
+            rows.remove((edge_rowid, type_rowid))
+            if not rows:
+                del pair_rows[(src, tgt)]
+                children[src].remove(tgt)
+        return len(doomed)
 
     def _remove_cycle_edge(
-        self, resource_code: str, src: int, tgt: int, edge_rowid: int,
-        rel_type: str, type_rowid: int,
-        scc_set: set[int], children: dict[int, list[int]],
+        self, resource_code: str, edge: tuple[int, int, int, int], chain: list[int],
     ) -> None:
-        """Delete one cycle-closing hypernym row and its auto-inverse; log it."""
+        """Delete one cycle-closing hypernym row and its auto-inverse; log it.
+
+        Args:
+            resource_code: Resource identifier for logging.
+            edge: (rowid, source, target, type_rowid) of the row to delete.
+            chain: The existing path from target back to source.
+        """
+        edge_rowid, src, tgt, type_rowid = edge
+        rel_type = self._hyp_type_names[type_rowid]
         src_ili = self._synset_rowid_to_ili.get(src, f'#{src}')
         tgt_ili = self._synset_rowid_to_ili.get(tgt, f'#{tgt}')
-        chain = self._bfs_path(tgt, src, scc_set, children, (src, tgt))
         chain_ilis = [self._synset_rowid_to_ili.get(n) or f'#{n}' for n in chain]
         logger.warning(
             'Cycle removed [%s]: %s %s %s (existing chain: %s → %s)',
@@ -1525,18 +1494,14 @@ class MergeBuilder:
         inv_name = INVERSE_CONCEPT_RELATIONS.get(rel_type)
         if not inv_name:
             return
-        inv_row = self.cur.execute(
-            'SELECT rowid FROM relation_types WHERE type = ?', (inv_name,)
-        ).fetchone()
-        if not inv_row:
-            return
-        self.cur.execute(
-            'DELETE FROM synset_relations '
-            'WHERE source_rowid = ? AND target_rowid = ? AND type_rowid = ?',
-            (tgt, src, inv_row[0]),
-        )
-        self.n_synset_rels -= self.cur.rowcount
-        self._synset_rel_keys.pop((tgt, src, inv_row[0]), None)
+        inv_key = (tgt, src, self._rel_type_rowid(inv_name))
+        inv_rowid = self._hypo_rowids.pop(inv_key, None)
+        if inv_rowid is not None:
+            self.cur.execute(
+                'DELETE FROM synset_relations WHERE rowid = ?', (inv_rowid,)
+            )
+            self.n_synset_rels -= self.cur.rowcount
+        self._synset_rel_keys.pop(inv_key, None)
 
     def write_conflicts_json(self, path: Path) -> None:
         """Write all collected conflict records to a structured JSON file.
@@ -1708,6 +1673,13 @@ class MergeBuilder:
     def create_indexes(self) -> None:
         """Create indexes before post-processing queries (critical for performance)."""
         self.cur.executescript(INDEXES)
+        # Built here rather than in PROV_SCHEMA: nothing reads provenance
+        # during Phase 1, and maintaining the index through ~10M inserts
+        # costs more than building it once.
+        self.prov_cur.execute(
+            'CREATE INDEX IF NOT EXISTS idx_provenance_lookup '
+            'ON provenance(table_rowid, item_rowid)'
+        )
 
     def finalize(self, db_path: Path, prov_db_path: Path) -> None:
         """Run ANALYZE and commit both databases."""

@@ -15,7 +15,7 @@ Table 1 alone is not sufficient to decide. A resource can accumulate a high
 raw count simply by intersecting a lot with one genuinely bad resource — it
 does not follow that it, too, has a directionality bug. Concretely: in this
 project's data, odwn-nl once ranked #3 by aggregate rate, close behind the
-two confirmed-bad resources. But every cycle it appeared in also contained
+confirmed-bad resources. But every cycle it appeared in also contained
 an oewn (or estwn) edge agreeing with its direction, with UzWordnet-uz's
 edge the lone contradiction — odwn-nl was an innocent bystander that often
 completed a triangle with UzWordnet-uz's already-reversed edge.
@@ -38,6 +38,7 @@ from itertools import pairwise
 from pathlib import Path
 
 from cyg.merge import LOW_TRUST_RESOURCES
+from cyg.presynth import stem_resource
 
 CONFLICTS_PATH = Path('bin/relation_conflicts.json')
 DB_PATH = Path('web/cygnet.db')
@@ -46,10 +47,7 @@ PROV_DB_PATH = Path('web/provenance.db')
 
 def resolve_resource_code(stem: str, codes_by_length: list[str]) -> str:
     """Map an xml_stem like 'UzWordnet-uz-1.0' back to its resources.code."""
-    for code in codes_by_length:
-        if stem == code or stem.startswith(code + '-'):
-            return code
-    return stem
+    return stem_resource(stem, codes_by_length) or stem
 
 
 def load_resources(cur: sqlite3.Cursor) -> list[tuple[str, int | None, int | None]]:

@@ -5,9 +5,7 @@ Converters for transforming external lexical resources into Cygnet format.
 import argparse
 import html
 import json
-import gzip
 import logging
-import lzma
 import sys
 from collections import defaultdict
 from lxml import etree
@@ -18,7 +16,9 @@ from cyg.multilex import (
     dc_identifier,
     encode_for_xml_id,
     fix_language,
+    open_xml,
 )
+from cyg.presynth import log_path as presynth_log_path
 import spacy
 import pyinflect
 from nltk.stem import WordNetLemmatizer
@@ -369,7 +369,7 @@ class WordNetToCygnetConverter:
 
     def read_metadata(self, input_path: str) -> tuple[etree.Element, etree.ElementTree]:
         """Parse the input file and extract metadata without full conversion."""
-        with self._open_file(input_path) as f:
+        with open_xml(input_path) as f:
             tree = etree.parse(f)
         root = tree.getroot()
 
@@ -391,18 +391,6 @@ class WordNetToCygnetConverter:
         self.lexicon_language = self.language_override or fix_language(source_language)
         if self.lexicon_language:
             self.lexicon_attrs['language'] = self.lexicon_language
-
-    def _open_file(self, filepath: str):
-        """
-        Open a file for reading, automatically handling compression.
-        Supports .xml, .xml.gz, and .xml.xz files.
-        """
-        if filepath.endswith('.gz'):
-            return gzip.open(filepath, 'rb')
-        elif filepath.endswith('.xz'):
-            return lzma.open(filepath, 'rb')
-        else:
-            return open(filepath, 'rb')
 
     def _normalize_pos(self, pos: str) -> str:
         """
@@ -862,10 +850,6 @@ class WordNetToCygnetConverter:
 
         return new_start, new_end
 
-    def _encode_for_xml_id(self, text: str) -> str:
-        """Convert any Unicode string to a safe XML ID, one-to-one (see encode_for_xml_id)."""
-        return encode_for_xml_id(text)
-
     def _normalize_text(self, text: str) -> str:
         """Normalize text for comparison (whitespace and punctuation)."""
         if not text:
@@ -885,7 +869,7 @@ class WordNetToCygnetConverter:
             return
         fixes_before = self.log['statistics']['html_entity_fixes']['count']
         logger.info(f"Loading CILI from {self.cili_path}...")
-        with self._open_file(self.cili_path) as f:
+        with open_xml(self.cili_path) as f:
             tree = etree.parse(f)
         root = tree.getroot()
 
@@ -935,7 +919,7 @@ class WordNetToCygnetConverter:
             return
 
         logger.info(f"Loading existing relations from {self.relations_path}...")
-        with self._open_file(self.relations_path) as f:
+        with open_xml(self.relations_path) as f:
             tree = etree.parse(f)
         root = tree.getroot()
 
@@ -1032,18 +1016,7 @@ class WordNetToCygnetConverter:
                 if shared_id is not None and not shared_id.startswith('cili.'):
                     # Concepts lexicon: a stable id shared with its members.
                     concept_id = shared_id
-                    concept = etree.Element('Concept',
-                                            id=concept_id,
-                                            ontological_category=pos,
-                                            status='1')
-                    from_elem = etree.SubElement(concept, 'Provenance',
-                                                 resource=self.lexicon_id,
-                                                 version=self.lexicon_version)
-                    from_elem.set('original_id', synset_id)
-                    self.concepts.append(concept)
-                    self.created_concepts.add(concept_id)
-                    self.log['statistics']['concepts']['newly_created'] += 1
-                    self.log['statistics']['concepts']['total'] += 1
+                    self._new_concept(concept_id, pos, synset_id)
                 elif is_valid_ili or shared_id is not None:
                     if shared_id is not None:
                         ili = shared_id.removeprefix('cili.')
@@ -1056,19 +1029,7 @@ class WordNetToCygnetConverter:
                         # Create new concept instead
                         concept_id = f"{self.lexicon_id}.i{self.concept_counter}"
                         self.concept_counter += 1
-                        concept = etree.Element('Concept',
-                                                id=concept_id,
-                                                ontological_category=pos,
-                                                status='1')
-                        # Add Provenance element
-                        from_elem = etree.SubElement(concept, 'Provenance',
-                                                     resource=self.lexicon_id,
-                                                     version=self.lexicon_version)
-                        from_elem.set('original_id', synset_id)
-                        self.concepts.append(concept)
-                        self.created_concepts.add(concept_id)
-                        self.log['statistics']['concepts']['newly_created'] += 1
-                        self.log['statistics']['concepts']['total'] += 1
+                        self._new_concept(concept_id, pos, synset_id)
                     else:
                         # Check POS match
                         cili_concept = self.cili_concepts[concept_id]
@@ -1096,19 +1057,7 @@ class WordNetToCygnetConverter:
                     concept_id = f"{self.lexicon_id}.i{self.concept_counter}"
                     self.concept_counter += 1
 
-                    concept = etree.Element('Concept',
-                                            id=concept_id,
-                                            ontological_category=pos,
-                                            status='1')
-                    # Add Provenance element
-                    from_elem = etree.SubElement(concept, 'Provenance',
-                                                 resource=self.lexicon_id,
-                                                 version=self.lexicon_version)
-                    from_elem.set('original_id', synset_id)
-                    self.concepts.append(concept)
-                    self.created_concepts.add(concept_id)
-                    self.log['statistics']['concepts']['newly_created'] += 1
-                    self.log['statistics']['concepts']['total'] += 1
+                    self._new_concept(concept_id, pos, synset_id)
                 # Store mapping
                 self.synset_to_concept[synset_id] = concept_id
 
@@ -1132,9 +1081,9 @@ class WordNetToCygnetConverter:
                         annotated_sentence.text = definition_text
 
                         # Add Provenance element
-                        from_elem = etree.SubElement(gloss, 'Provenance',
-                                                  resource=self.lexicon_id,
-                                                  version=self.lexicon_version)
+                        etree.SubElement(gloss, 'Provenance',
+                                         resource=self.lexicon_id,
+                                         version=self.lexicon_version)
 
                         self.glosses.append(gloss)
                         self.log['statistics']['glosses']['created'] += 1
@@ -1144,6 +1093,23 @@ class WordNetToCygnetConverter:
         logger.info(f"  Total concepts: {self.log['statistics']['concepts']['total']}")
         logger.info(f"  Created {self.log['statistics']['glosses']['created']} glosses")
         logger.warning(f"  Found {self.log['synset_concept_pos_mismatches']['total_count']} synset-concept POS mismatches")
+
+    def _new_concept(self, concept_id: str, pos: str, synset_id: str) -> None:
+        """Create a Concept that is not in CILI, with its provenance.
+
+        Args:
+            concept_id: The new concept's id.
+            pos: Its ontological category.
+            synset_id: The source synset it was made from.
+        """
+        concept = etree.Element('Concept', id=concept_id,
+                                ontological_category=pos, status='1')
+        etree.SubElement(concept, 'Provenance', resource=self.lexicon_id,
+                         version=self.lexicon_version, original_id=synset_id)
+        self.concepts.append(concept)
+        self.created_concepts.add(concept_id)
+        self.log['statistics']['concepts']['newly_created'] += 1
+        self.log['statistics']['concepts']['total'] += 1
 
     def pass2_lexical_entries_to_lexemes_and_senses(self, root: etree.Element):
         """
@@ -1200,7 +1166,7 @@ class WordNetToCygnetConverter:
                 all_wordforms_sorted.extend(remaining)
 
                 # Build lexeme ID
-                encoded_forms = [self._encode_for_xml_id(f) for f in all_wordforms_sorted]
+                encoded_forms = [encode_for_xml_id(f) for f in all_wordforms_sorted]
                 lexeme_id = f"{self.lexicon_language}.{grammatical_category}.{'-'.join(encoded_forms)}"
 
                 # Create deduplication key
@@ -1923,7 +1889,7 @@ class WordNetToCygnetConverter:
         output_tree = etree.ElementTree(output_root)
 
         # Derive log filename from output
-        log_path = output_path[:-4] + '_log.json'
+        log_path = str(presynth_log_path(output_path))
 
         # Write output XML
         logger.info(f"Writing output to {output_path}...")
