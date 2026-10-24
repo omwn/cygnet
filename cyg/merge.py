@@ -15,6 +15,10 @@ from lxml import etree as ET
 logger = logging.getLogger(__name__)
 
 _COMBINING_RE = re.compile(r'[\u0300-\u036f\u1dc0-\u1dff\u20d0-\u20ff\ufe20-\ufe2f]')
+# Full-width ASCII and half-width katakana: the only ranges fold_lemma()
+# NFKC-normalises, so that compatibility characters elsewhere (\u03c1/\u03f1, m\u00b2/\u33a1)
+# stay distinct.
+_WIDTH_RE = re.compile(r'[\uff01-\uff5e\uff61-\uff9f]+')
 
 # ---------------------------------------------------------------------------
 # Schema constants
@@ -301,6 +305,49 @@ def remove_accents(text: str) -> str:
     if text.isascii():
         return text
     return _COMBINING_RE.sub('', unicodedata.normalize('NFD', text))
+
+
+def fold_lemma(form: str) -> str:
+    """Fold a lemma for case/width-variant matching.
+
+    Lower-cases with full Unicode rules (Cyrillic, Greek and accented Latin
+    included) and maps full-width ASCII and half-width katakana to their
+    usual forms.  Nothing else is folded: accents, hyphens, spaces, kana
+    spelling and kanji variants all distinguish forms.
+
+    Args:
+        form: The written form.
+
+    Returns:
+        The folded form, e.g. 'vip' for 'ＶＩＰ' and 'ガス' for 'ｶﾞｽ'.
+    """
+    form = _WIDTH_RE.sub(lambda m: unicodedata.normalize('NFKC', m.group()), form)
+    return form.lower()
+
+
+def reading_clusters(signatures: dict[int, frozenset]) -> list[list[int]]:
+    """Partition entries into groups whose readings are compatible.
+
+    An entry's signature is its set of non-lemma forms and pronunciations.
+    Two signatures are compatible when one contains the other (an empty
+    signature is compatible with any).  Each entry joins the one maximal
+    signature that contains its own; an entry compatible with several
+    maximal signatures (e.g. a bare 物 beside 物/もの and 物/ぶつ) is
+    ambiguous and only groups with entries of the same signature.
+
+    Args:
+        signatures: Entry rowid -> signature.
+
+    Returns:
+        Lists of entry rowids, each sorted, in order of their first rowid.
+    """
+    distinct = set(signatures.values())
+    maximal = [s for s in distinct if not any(s < t for t in distinct)]
+    clusters: dict[frozenset, list[int]] = {}
+    for entry, sig in sorted(signatures.items()):
+        homes = [m for m in maximal if sig <= m]
+        clusters.setdefault(homes[0] if len(homes) == 1 else sig, []).append(entry)
+    return sorted(clusters.values())
 
 
 def build_annotated_sentence(parent, text: str, annotations: list[tuple]) -> None:
@@ -1020,116 +1067,50 @@ class MergeBuilder:
 
     # --- Post-processing (run after all files are loaded) ---
 
-    def merge_case_variants(self) -> int:
+    def merge_case_variants(self) -> dict[str, int]:
         """
-        Consolidate senses where different-case lexemes map to the same synset.
+        Consolidate senses where variant lexemes map to the same synset.
 
-        E.g. 'Bank' (entry A) and 'bank' (entry B) both having a sense for the
-        same concept are merged: all wordforms move to the lower-rowid entry,
-        the duplicate sense is deleted, and all references updated.
+        Entries in the same language and part of speech whose lemmas are
+        equal under fold_lemma() (e.g. 'Bank'/'bank', 'ＶＩＰ'/'VIP') and
+        that have a sense for the same concept are merged: all wordforms
+        move to the lowest-rowid entry, the duplicate sense is deleted, and
+        all references are updated.  Entries whose readings differ
+        (homographs such as 物 もの/ぶつ) are left apart; see
+        reading_clusters().
 
-        Returns the number of senses removed.
+        Returns:
+            Senses removed, as {'identical': n, 'variant': n}: 'identical'
+            for entries with exactly the same lemma, 'variant' for case or
+            width variants.
         """
+        self.conn.create_function('fold_lemma', 1, fold_lemma, deterministic=True)
         groups = self.cur.execute("""
-            SELECT LOWER(f.form) AS norm_lemma,
-                   e.language_rowid, e.pos, s.synset_rowid,
-                   MIN(s.rowid)   AS keep_sense,
-                   MIN(e.rowid)   AS keep_entry
+            SELECT GROUP_CONCAT(s.rowid || ':' || e.rowid)
             FROM senses s
             JOIN entries e ON s.entry_rowid = e.rowid
             JOIN forms   f ON f.entry_rowid = e.rowid AND f.rank = 0
-            GROUP BY norm_lemma, e.language_rowid, e.pos, s.synset_rowid
+            GROUP BY fold_lemma(f.form), e.language_rowid, e.pos, s.synset_rowid
             HAVING COUNT(*) > 1
         """).fetchall()
 
-        removed = 0
-        prov_senses_rowid = self._prov_table_rowid('senses')
-
-        for norm_lemma, lang_rowid, pos, synset_rowid, keep_sense, keep_entry in groups:
-            variants = self.cur.execute("""
-                SELECT s.rowid, e.rowid
-                FROM senses s
-                JOIN entries e ON s.entry_rowid = e.rowid
-                JOIN forms   f ON f.entry_rowid = e.rowid AND f.rank = 0
-                WHERE LOWER(f.form) = ? AND e.language_rowid = ?
-                  AND e.pos = ? AND s.synset_rowid = ?
-            """, (norm_lemma, lang_rowid, pos, synset_rowid)).fetchall()
-
-            existing_forms = set(
-                r[0] for r in self.cur.execute(
-                    'SELECT form FROM forms WHERE entry_rowid = ?', (keep_entry,)
-                ).fetchall()
-            )
-
-            for sense_rowid, entry_rowid in variants:
-                if sense_rowid == keep_sense:
+        removed = {'identical': 0, 'variant': 0}
+        for (members,) in groups:
+            sense_of: dict[int, int] = {}
+            for pair in members.split(','):
+                sense_rowid, entry_rowid = map(int, pair.split(':'))
+                if sense_rowid < sense_of.get(entry_rowid, sense_rowid + 1):
+                    sense_of[entry_rowid] = sense_rowid
+            if len(sense_of) < 2:
+                continue
+            for cluster in reading_clusters(self._reading_signatures(list(sense_of))):
+                if len(cluster) < 2:
                     continue
-
-                # Move wordforms from the non-canonical entry to keep_entry
-                for old_form_rowid, form, norm_form, rank in self.cur.execute(
-                    'SELECT rowid, form, normalized_form, rank FROM forms '
-                    'WHERE entry_rowid = ?',
-                    (entry_rowid,),
-                ).fetchall():
-                    if form not in existing_forms:
-                        self.cur.execute(
-                            'INSERT INTO forms '
-                            '(entry_rowid, form, normalized_form, rank) '
-                            'VALUES (?, ?, ?, ?)',
-                            (keep_entry, form, norm_form, rank),
-                        )
-                        new_form_rowid = self.cur.lastrowid
-                        existing_forms.add(form)
-                        self.cur.execute(
-                            'INSERT INTO pronunciations (form_rowid, variety, pronunciation, audio)'
-                            ' SELECT ?, variety, pronunciation, audio'
-                            ' FROM pronunciations WHERE form_rowid = ?',
-                            (new_form_rowid, old_form_rowid),
-                        )
-
-                # Merge provenance into the surviving sense
-                existing_prov = set(
-                    r[0] for r in self.prov_cur.execute(
-                        'SELECT original_id FROM provenance '
-                        'WHERE table_rowid = ? AND item_rowid = ?',
-                        (prov_senses_rowid, keep_sense),
-                    ).fetchall()
+                keep_entry, *others = cluster
+                self._merge_variant_senses(
+                    keep_entry, sense_of[keep_entry],
+                    [(sense_of[e], e) for e in others], removed,
                 )
-                for res_rowid, version, orig_id in self.prov_cur.execute(
-                    'SELECT resource_rowid, version, original_id FROM provenance '
-                    'WHERE table_rowid = ? AND item_rowid = ?',
-                    (prov_senses_rowid, sense_rowid),
-                ).fetchall():
-                    if orig_id not in existing_prov:
-                        self.prov_cur.execute(
-                            'INSERT INTO provenance '
-                            '(table_rowid, item_rowid, resource_rowid, version, original_id) '
-                            'VALUES (?, ?, ?, ?, ?)',
-                            (prov_senses_rowid, keep_sense, res_rowid, version, orig_id),
-                        )
-                        existing_prov.add(orig_id)
-
-                # Redirect all references to the surviving sense
-                for table, col in [
-                    ('sense_relations',       'source_rowid'),
-                    ('sense_relations',       'target_rowid'),
-                    ('example_annotations',   'sense_rowid'),
-                    ('definition_annotations','sense_rowid'),
-                    ('sense_examples',        'sense_rowid'),
-                ]:
-                    self.cur.execute(
-                        f'UPDATE {table} SET {col} = ? WHERE {col} = ?',
-                        (keep_sense, sense_rowid),
-                    )
-
-                self.cur.execute(
-                    'DELETE FROM senses WHERE rowid = ?', (sense_rowid,)
-                )
-                self.prov_cur.execute(
-                    'DELETE FROM provenance WHERE table_rowid = ? AND item_rowid = ?',
-                    (prov_senses_rowid, sense_rowid),
-                )
-                removed += 1
 
         # Dedup any sense_relations that became identical after the redirect
         self.cur.execute("""
@@ -1140,6 +1121,126 @@ class MergeBuilder:
             )
         """)
         return removed
+
+    def _reading_signatures(self, entries: list[int]) -> dict[int, frozenset]:
+        """Return each entry's non-lemma forms and pronunciations.
+
+        Forms that only vary the lemma (e.g. 'bank' moved onto 'Bank' by an
+        earlier merge) are not readings and are left out.
+
+        Args:
+            entries: Entry rowids.
+
+        Returns:
+            Entry rowid -> frozenset of ('form', text) and ('pron', text) items.
+        """
+        sigs: dict[int, set] = {e: set() for e in entries}
+        marks = ','.join('?' * len(entries))
+        rows = self.cur.execute(f"""
+            SELECT f.entry_rowid, f.form, f.rank, p.pronunciation
+            FROM forms f
+            LEFT JOIN pronunciations p ON p.form_rowid = f.rowid
+            WHERE f.entry_rowid IN ({marks})
+        """, entries).fetchall()
+        lemma_folds = {(e, fold_lemma(form)) for e, form, rank, _ in rows if rank == 0}
+        for entry_rowid, form, rank, pron in rows:
+            if rank > 0 and (entry_rowid, fold_lemma(form)) not in lemma_folds:
+                sigs[entry_rowid].add(('form', form))
+            if pron:
+                sigs[entry_rowid].add(('pron', pron))
+        return {e: frozenset(s) for e, s in sigs.items()}
+
+    def _merge_variant_senses(
+        self, keep_entry: int, keep_sense: int,
+        variants: list[tuple[int, int]], removed: dict[str, int],
+    ) -> None:
+        """Merge variant entries' senses into one surviving sense.
+
+        Args:
+            keep_entry: Entry that receives the variants' wordforms.
+            keep_sense: keep_entry's sense, which survives.
+            variants: (sense rowid, entry rowid) pairs to merge and delete.
+            removed: Counts to update, keyed 'identical' and 'variant'.
+        """
+        prov_senses_rowid = self._prov_table_rowid('senses')
+        rows = self.cur.execute(
+            'SELECT form, rank FROM forms WHERE entry_rowid = ?', (keep_entry,)
+        ).fetchall()
+        existing_forms = {form for form, _ in rows}
+        lemmas = {form for form, rank in rows if rank == 0}
+        next_rank = max(rank for _, rank in rows) + 1
+
+        for sense_rowid, entry_rowid in variants:
+            forms = self.cur.execute(
+                'SELECT rowid, form, normalized_form, rank FROM forms '
+                'WHERE entry_rowid = ? ORDER BY rank',
+                (entry_rowid,),
+            ).fetchall()
+            identical = any(r == 0 and f in lemmas for _, f, _, r in forms)
+            removed['identical' if identical else 'variant'] += 1
+
+            # Move wordforms from the non-canonical entry to keep_entry,
+            # ranked after its own so that it keeps a single lemma
+            for old_form_rowid, form, norm_form, _rank in forms:
+                if form not in existing_forms:
+                    self.cur.execute(
+                        'INSERT INTO forms '
+                        '(entry_rowid, form, normalized_form, rank) '
+                        'VALUES (?, ?, ?, ?)',
+                        (keep_entry, form, norm_form, next_rank),
+                    )
+                    next_rank += 1
+                    new_form_rowid = self.cur.lastrowid
+                    existing_forms.add(form)
+                    self.cur.execute(
+                        'INSERT INTO pronunciations (form_rowid, variety, pronunciation, audio)'
+                        ' SELECT ?, variety, pronunciation, audio'
+                        ' FROM pronunciations WHERE form_rowid = ?',
+                        (new_form_rowid, old_form_rowid),
+                    )
+
+            # Merge provenance into the surviving sense
+            existing_prov = set(
+                r[0] for r in self.prov_cur.execute(
+                    'SELECT original_id FROM provenance '
+                    'WHERE table_rowid = ? AND item_rowid = ?',
+                    (prov_senses_rowid, keep_sense),
+                ).fetchall()
+            )
+            for res_rowid, version, orig_id in self.prov_cur.execute(
+                'SELECT resource_rowid, version, original_id FROM provenance '
+                'WHERE table_rowid = ? AND item_rowid = ?',
+                (prov_senses_rowid, sense_rowid),
+            ).fetchall():
+                if orig_id not in existing_prov:
+                    self.prov_cur.execute(
+                        'INSERT INTO provenance '
+                        '(table_rowid, item_rowid, resource_rowid, version, original_id) '
+                        'VALUES (?, ?, ?, ?, ?)',
+                        (prov_senses_rowid, keep_sense, res_rowid, version, orig_id),
+                    )
+                    existing_prov.add(orig_id)
+
+            # Redirect all references to the surviving sense
+            for table, col in [
+                ('sense_relations',       'source_rowid'),
+                ('sense_relations',       'target_rowid'),
+                ('example_annotations',   'sense_rowid'),
+                ('definition_annotations','sense_rowid'),
+                ('sense_examples',        'sense_rowid'),
+            ]:
+                self.cur.execute(
+                    f'UPDATE {table} SET {col} = ? WHERE {col} = ?',
+                    (keep_sense, sense_rowid),
+                )
+
+            self.cur.execute(
+                'DELETE FROM senses WHERE rowid = ?', (sense_rowid,)
+            )
+            self.prov_cur.execute(
+                'DELETE FROM provenance WHERE table_rowid = ? AND item_rowid = ?',
+                (prov_senses_rowid, sense_rowid),
+            )
 
     def cascade_delete(self) -> dict[str, int]:
         """Remove synsets with no definitions and cascade to dependent rows."""

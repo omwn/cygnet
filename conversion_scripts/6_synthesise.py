@@ -175,7 +175,8 @@ def main() -> None:
 
     print('\nPhase 2: Merging case-variant lexemes...')
     removed = builder.merge_case_variants()
-    print(f'  Removed {removed:,} duplicate senses from case-variant merge')
+    print(f'  Removed {removed["identical"]:,} duplicate senses of identical lemmas '
+          f'and {removed["variant"]:,} of case/width variants')
 
     print('\nPhase 3: Cascade-deleting synsets without definitions...')
     counts = builder.cascade_delete()

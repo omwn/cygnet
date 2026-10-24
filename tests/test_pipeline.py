@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from conftest import MergeBuilder, build_test_db, wn_xml
+from cyg.merge import fold_lemma, reading_clusters
 
 _WORDNETS_DIR = Path(__file__).parent / 'wordnets'
 
@@ -178,7 +179,7 @@ class TestMergeCaseVariants:
 
     def test_two_senses_collapse_to_one(self, builder_case_variants):
         removed = builder_case_variants.merge_case_variants()
-        assert removed == 1
+        assert removed == {'identical': 0, 'variant': 1}
         n = builder_case_variants.cur.execute(
             'SELECT COUNT(*) FROM senses'
         ).fetchone()[0]
@@ -194,11 +195,141 @@ class TestMergeCaseVariants:
     def test_polysemous_same_lemma_not_merged(self, builder_polysemy):
         """Same lemma, different synsets — must NOT be merged."""
         removed = builder_polysemy.merge_case_variants()
-        assert removed == 0
+        assert removed == {'identical': 0, 'variant': 0}
         n = builder_polysemy.cur.execute(
             'SELECT COUNT(*) FROM senses'
         ).fetchone()[0]
         assert n == 2
+
+
+    def test_merged_entry_keeps_one_lemma(self, builder_case_variants):
+        """The moved variant becomes a non-lemma form, not a second lemma."""
+        builder_case_variants.merge_case_variants()
+        lemmas = [r[0] for r in builder_case_variants.cur.execute(
+            'SELECT f.form FROM forms f JOIN senses s USING (entry_rowid) '
+            'WHERE f.rank = 0'
+        ).fetchall()]
+        assert lemmas == ['dog']
+
+
+def _variant_lexeme(lid: str, lemma: str, others: tuple[str, ...] = (),
+                    lang: str = 'ja') -> str:
+    """Return a Lexeme with a sense for cili.h1."""
+    forms = ''.join(f'<Wordform form="{f}"/>' for f in (lemma, *others))
+    return (
+        f'<Lexeme id="{lid}" language="{lang}" grammatical_category="NOUN">'
+        f'{forms}<Provenance resource="wn-a" version="1.0"/></Lexeme>'
+        f'<Sense id="s.{lid}" signifier="{lid}" signified="cili.h1">'
+        f'<Provenance resource="wn-a" version="1.0"/></Sense>'
+    )
+
+
+_H1 = """\
+<Concept id="cili.h1" ontological_category="NOUN" status="1">
+  <Provenance resource="wn-a" version="1.0"/>
+</Concept>
+<Gloss definiendum="cili.h1" language="en">
+  <AnnotatedSentence>a thing</AnnotatedSentence>
+  <Provenance resource="wn-a" version="1.0"/>
+</Gloss>
+"""
+
+
+def _load_lexemes(builder, tmp_path, *lexemes: str):
+    (tmp_path / 'wn.xml').write_text(wn_xml('wn-a', _H1 + ''.join(lexemes)))
+    builder.process_file(tmp_path / 'wn.xml')
+    builder.create_indexes()
+    return builder
+
+
+def _n_senses(builder) -> int:
+    return builder.cur.execute('SELECT COUNT(*) FROM senses').fetchone()[0]
+
+
+class TestMergeVariantsReadings:
+    """Homographs with different readings stay apart (issue #22)."""
+
+    def test_homographs_with_different_readings_kept(self, builder, tmp_path):
+        b = _load_lexemes(builder, tmp_path,
+                          _variant_lexeme('l1', '物', ('ブツ', 'ぶつ')),
+                          _variant_lexeme('l2', '物', ('モノ', 'もの')))
+        assert b.merge_case_variants() == {'identical': 0, 'variant': 0}
+        assert _n_senses(b) == 2
+
+    def test_same_readings_merged(self, builder, tmp_path):
+        b = _load_lexemes(builder, tmp_path,
+                          _variant_lexeme('l1', '物', ('もの',)),
+                          _variant_lexeme('l2', '物', ('モノ', 'もの')))
+        assert b.merge_case_variants() == {'identical': 1, 'variant': 0}
+        assert _n_senses(b) == 1
+
+    def test_bare_entry_merged_with_single_reading(self, builder, tmp_path):
+        b = _load_lexemes(builder, tmp_path,
+                          _variant_lexeme('l1', '物'),
+                          _variant_lexeme('l2', '物', ('もの',)))
+        assert b.merge_case_variants()['identical'] == 1
+        assert _n_senses(b) == 1
+
+    def test_ambiguous_bare_entry_kept(self, builder, tmp_path):
+        """A bare 物 could go with either reading, so nothing merges."""
+        b = _load_lexemes(builder, tmp_path,
+                          _variant_lexeme('l1', '物'),
+                          _variant_lexeme('l2', '物', ('ぶつ',)),
+                          _variant_lexeme('l3', '物', ('もの',)))
+        b.merge_case_variants()
+        assert _n_senses(b) == 3
+
+    def test_full_width_variant_merged(self, builder, tmp_path):
+        b = _load_lexemes(builder, tmp_path,
+                          _variant_lexeme('l1', 'VIP'),
+                          _variant_lexeme('l2', 'ＶＩＰ'))
+        assert b.merge_case_variants() == {'identical': 0, 'variant': 1}
+
+    def test_non_ascii_case_variant_merged(self, builder, tmp_path):
+        b = _load_lexemes(builder, tmp_path,
+                          _variant_lexeme('l1', 'Москва', lang='ru'),
+                          _variant_lexeme('l2', 'москва', lang='ru'))
+        assert b.merge_case_variants() == {'identical': 0, 'variant': 1}
+
+    def test_spelling_variants_not_merged(self, builder, tmp_path):
+        b = _load_lexemes(builder, tmp_path,
+                          _variant_lexeme('l1', 'hiruk pikuk', lang='id'),
+                          _variant_lexeme('l2', 'hiruk-pikuk', lang='id'),
+                          _variant_lexeme('l3', '嘆息'),
+                          _variant_lexeme('l4', '歎息'))
+        b.merge_case_variants()
+        assert _n_senses(b) == 4
+
+
+class TestFoldLemma:
+    """fold_lemma() folds case and width only."""
+
+    @pytest.mark.parametrize('form, folded', [
+        ('Bank', 'bank'),
+        ('ＶＩＰ', 'vip'),
+        ('４月', '4月'),
+        ('ｶﾞｽ', 'ガス'),
+        ('UNIXシステム', 'unixシステム'),
+        ('ΟΔΟΣ', 'οδος'),
+    ])
+    def test_folded(self, form, folded):
+        assert fold_lemma(form) == folded
+
+    @pytest.mark.parametrize('form', ['garcía', 'm²', 'ϱ', 'hiruk-pikuk', 'ジャム・セッション'])
+    def test_unchanged(self, form):
+        assert fold_lemma(form) == form
+
+
+class TestReadingClusters:
+    """reading_clusters() groups entries with compatible readings."""
+
+    def test_subset_joins_superset(self):
+        a, b = frozenset({'x'}), frozenset({'x', 'y'})
+        assert reading_clusters({1: a, 2: b}) == [[1, 2]]
+
+    def test_ambiguous_entries_group_by_signature(self):
+        e, x, y = frozenset(), frozenset({'x'}), frozenset({'y'})
+        assert reading_clusters({1: e, 2: x, 3: y, 4: e}) == [[1, 4], [2], [3]]
 
 
 # ---------------------------------------------------------------------------
