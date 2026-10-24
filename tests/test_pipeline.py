@@ -212,6 +212,15 @@ class TestMergeCaseVariants:
         assert lemmas == ['dog']
 
 
+    def test_reading_lookup_uses_pronunciation_index(self, builder_case_variants):
+        """Signatures look pronunciations up by form without a table scan."""
+        plan = ' '.join(r[3] for r in builder_case_variants.cur.execute(
+            'EXPLAIN QUERY PLAN SELECT p.pronunciation FROM forms f '
+            'LEFT JOIN pronunciations p ON p.form_rowid = f.rowid '
+            'WHERE f.entry_rowid = 1'
+        ).fetchall())
+        assert 'idx_pronunciations_form' in plan
+
 def _variant_lexeme(lid: str, lemma: str, others: tuple[str, ...] = (),
                     lang: str = 'ja') -> str:
     """Return a Lexeme with a sense for cili.h1."""
