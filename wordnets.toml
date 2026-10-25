@@ -86,11 +86,11 @@ ja = ["https://github.com/bond-lab/wnja/releases/download/v2.1/wnja-2.1.tar.xz",
 "https://github.com/omwn/tufs/releases/download/v2026.04.06/tufs-ja-2026.04.06.tar.xz"]
 
 # Malay — Wordnet Bahasa (Malaysian Malay)
-zsm = ["https://github.com/bond-lab/Bahasa-Wordnet/releases/download/v1.4/wnb-zsm-1.4.tar.xz",
+zsm = ["https://github.com/bond-lab/Bahasa-Wordnet/releases/download/v1.5/wnb-zsm-1.5.tar.xz",
 "https://github.com/omwn/tufs/releases/download/v2026.04.06/tufs-ms-2026.04.06.tar.xz"]
 
 # Indonesian — Wordnet Bahasa (Indonesian)
-id = ["https://github.com/bond-lab/Bahasa-Wordnet/releases/download/v1.4/wnb-id-1.4.tar.xz",
+id = ["https://github.com/bond-lab/Bahasa-Wordnet/releases/download/v1.5/wnb-id-1.5.tar.xz",
 "https://github.com/omwn/tufs/releases/download/v2026.04.06/tufs-id-2026.04.06.tar.xz"]
 
 # Kurdish (Kurmanji) — KurdNet
