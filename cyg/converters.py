@@ -3,11 +3,14 @@ Converters for transforming external lexical resources into Cygnet format.
 """
 
 import argparse
+import ctypes
+import ctypes.util
+import gc
 import html
 import json
 import logging
 import sys
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from lxml import etree
 
 from cyg.multilex import (
@@ -25,6 +28,25 @@ from nltk.stem import WordNetLemmatizer
 import nltk
 
 logger = logging.getLogger(__name__)
+
+# spaCy docs kept by WordNetToCygnetConverter._get_doc.
+DOC_CACHE_SIZE = 4096
+
+
+def release_memory() -> None:
+    """Collect garbage and return freed heap memory to the operating system.
+
+    glibc keeps memory freed by libxml2 for reuse by this process, so without
+    malloc_trim() clearing a large tree does not lower its footprint. Does
+    nothing beyond gc.collect() where malloc_trim is unavailable.
+    """
+    gc.collect()
+    libc_name = ctypes.util.find_library('c')
+    if libc_name is None:
+        return
+    malloc_trim = getattr(ctypes.CDLL(libc_name), 'malloc_trim', None)
+    if malloc_trim is not None:
+        malloc_trim(0)
 
 NEW_POS_LABELS = {
     'n': 'NOUN',
@@ -223,7 +245,8 @@ class WordNetToCygnetConverter:
         self.lexentry_to_lexeme: dict[str, str] = {}
 
         # CILI data structures
-        self.cili_concepts: dict[str, etree.Element] = {}
+        # CILI concept ID -> its ontological category (None if it has none)
+        self.cili_concepts: dict[str, str | None] = {}
         self.cili_glosses: dict[str, str] = {}
 
         # Relations file data structures
@@ -345,7 +368,10 @@ class WordNetToCygnetConverter:
         self.nltk_lemmatizer = None
 
         # Caching for performance
-        self.doc_cache: dict[str, any] = {}  # spaCy document cache
+        # spaCy documents, most recently used last. Bounded: a doc holds its
+        # tensors, and an unbounded cache of every example text took about
+        # 1 GB for plWordNet, though each text is only reused within one call.
+        self.doc_cache: OrderedDict[str, spacy.tokens.Doc] = OrderedDict()
         self.form_cache: dict[str, set[str]] = {}  # morphological forms cache
         self.nltk_cache: dict[str, frozenset[str]] = {}  # NLTK lemmas per token
 
@@ -593,9 +619,14 @@ class WordNetToCygnetConverter:
         return added_count
     def _get_doc(self, text: str):
         """Get spaCy doc with caching."""
-        if text not in self.doc_cache:
-            self.doc_cache[text] = self.nlp(text)
-        return self.doc_cache[text]
+        doc = self.doc_cache.get(text)
+        if doc is None:
+            doc = self.doc_cache[text] = self.nlp(text)
+            if len(self.doc_cache) > DOC_CACHE_SIZE:
+                self.doc_cache.popitem(last=False)
+        else:
+            self.doc_cache.move_to_end(text)
+        return doc
 
 
     def _get_all_forms(self, word: str) -> set[str]:
@@ -878,7 +909,7 @@ class WordNetToCygnetConverter:
         if concept_layer is not None:
             for concept in concept_layer.findall('Concept'):
                 concept_id = concept.get('id')
-                self.cili_concepts[concept_id] = concept
+                self.cili_concepts[concept_id] = concept.get('ontological_category')
 
         # Load glosses
         gloss_layer = root.find('GlossLayer')
@@ -1032,8 +1063,7 @@ class WordNetToCygnetConverter:
                         self._new_concept(concept_id, pos, synset_id)
                     else:
                         # Check POS match
-                        cili_concept = self.cili_concepts[concept_id]
-                        cili_ontological_category = cili_concept.get('ontological_category', '')
+                        cili_ontological_category = self.cili_concepts[concept_id] or ''
 
                         if pos != cili_ontological_category:
                             # Update summary statistics
@@ -1122,8 +1152,7 @@ class WordNetToCygnetConverter:
         for concept in self.concepts:
             concept_pos_map[concept.get('id')] = concept.get('ontological_category')
         # Also include CILI concepts
-        for concept_id, concept_elem in self.cili_concepts.items():
-            concept_pos_map[concept_id] = concept_elem.get('ontological_category')
+        concept_pos_map.update(self.cili_concepts)
 
         for lexicon in root.findall('Lexicon') + root.findall('LexiconExtension'):
             # Also check for ExternalLexicalEntry in extensions
@@ -1603,6 +1632,9 @@ class WordNetToCygnetConverter:
     def pass4_examples(self, root: etree.Element):
         """
         Pass 4: Process examples from Synsets and Senses, tagging with sense annotations.
+
+        This is the last pass, so once the example texts are collected the
+        input tree is cleared to free its memory before spaCy is loaded.
         """
         logger.info("\nPass 4: Processing examples...")
 
@@ -1610,6 +1642,35 @@ class WordNetToCygnetConverter:
         if next(root.iter('Example'), None) is None:
             logger.info("  No examples")
             return
+
+        # (text, is_synset_example, concept or old sense ID), synset examples first
+        examples: list[tuple[str, bool, str]] = []
+        total_examples = 0
+        lexicons = root.findall('Lexicon') + root.findall('LexiconExtension')
+        for lexicon in lexicons:
+            for synset in lexicon.findall('Synset') + lexicon.findall('ExternalSynset'):
+                synset_examples = synset.findall('Example')
+                total_examples += len(synset_examples)
+                concept_id = self.synset_to_concept.get(synset.get('id'))
+                if concept_id is None:
+                    continue
+                examples.extend((ex.text, True, concept_id)
+                                for ex in synset_examples if ex.text)
+        for lexicon in lexicons:
+            entries = (lexicon.findall('LexicalEntry')
+                       + lexicon.findall('ExternalLexicalEntry'))
+            for entry in entries:
+                for sense in entry.findall('Sense') + entry.findall('ExternalSense'):
+                    sense_examples = sense.findall('Example')
+                    total_examples += len(sense_examples)
+                    examples.extend((ex.text, False, sense.get('id'))
+                                    for ex in sense_examples if ex.text)
+        del lexicons
+        root.clear()
+        release_memory()
+
+        self.log['statistics']['examples']['total_found'] = total_examples
+        logger.info(f"  Total examples to process: {total_examples}")
 
         self._initialize_nlp_tools()
 
@@ -1619,83 +1680,23 @@ class WordNetToCygnetConverter:
             concept_id = sense_elem.get('signified')
             self.concept_to_senses[concept_id].append(sense_id)
 
-        example_counter = 1
-        total_examples = 0
-
-        # Count total examples first
-        for lexicon in root.findall('Lexicon') + root.findall('LexiconExtension'):
-            synsets = lexicon.findall('Synset') + lexicon.findall('ExternalSynset')
-            for synset in synsets:
-                total_examples += len(synset.findall('Example'))
-
-            lexical_entries = lexicon.findall('LexicalEntry') + lexicon.findall('ExternalLexicalEntry')
-            for entry in lexical_entries:
-                senses = entry.findall('Sense') + entry.findall('ExternalSense')
-                for sense in senses:
-                    total_examples += len(sense.findall('Example'))
-
-        self.log['statistics']['examples']['total_found'] = total_examples
-        logger.info(f"  Total examples to process: {total_examples}")
-
-        # Process synset examples
-        for lexicon in root.findall('Lexicon') + root.findall('LexiconExtension'):
-            synsets = lexicon.findall('Synset') + lexicon.findall('ExternalSynset')
-            for synset in synsets:
-                synset_id = synset.get('id')
-
-                # Get concept for this synset
-                if synset_id not in self.synset_to_concept:
-                    continue
-
-                concept_id = self.synset_to_concept[synset_id]
-
-                for example in synset.findall('Example'):
-                    if example.text:
-                        raw = example.text.strip()
-                        unescaped = html.unescape(raw)
-                        if unescaped != raw:
-                            self.log['statistics']['html_entity_fixes']['count'] += 1
-                        self._process_single_example(
-                            unescaped,
-                            f"ex_{example_counter}",
-                            is_synset_example=True,
-                            concept_id=concept_id
-                        )
-                        example_counter += 1
-
-                        # Progress logging
-                        if example_counter % 10000 == 0:
-                            logger.info(
-                                f"    Processed {example_counter}/{total_examples} examples "
-                                f"(skipped: {self.log['statistics']['examples']['skipped']})")
-
-        # Process sense examples
-        for lexicon in root.findall('Lexicon') + root.findall('LexiconExtension'):
-            lexical_entries = lexicon.findall('LexicalEntry') + lexicon.findall('ExternalLexicalEntry')
-            for entry in lexical_entries:
-                senses = entry.findall('Sense') + entry.findall('ExternalSense')
-                for sense in senses:
-                    old_sense_id = sense.get('id')
-
-                    for example in sense.findall('Example'):
-                        if example.text:
-                            raw = example.text.strip()
-                            unescaped = html.unescape(raw)
-                            if unescaped != raw:
-                                self.log['statistics']['html_entity_fixes']['count'] += 1
-                            self._process_single_example(
-                                unescaped,
-                                f"ex_{example_counter}",
-                                is_synset_example=False,
-                                old_sense_id=old_sense_id
-                            )
-                            example_counter += 1
-
-                            # Progress logging
-                            if example_counter % 100 == 0:
-                                logger.info(
-                                    f"    Processed {example_counter}/{total_examples} examples "
-                                    f"(skipped: {self.log['statistics']['examples']['skipped']})")
+        for example_counter, (text, is_synset, owner) in enumerate(examples, 1):
+            raw = text.strip()
+            unescaped = html.unescape(raw)
+            if unescaped != raw:
+                self.log['statistics']['html_entity_fixes']['count'] += 1
+            if is_synset:
+                self._process_single_example(unescaped, f"ex_{example_counter}",
+                                             is_synset_example=True,
+                                             concept_id=owner)
+            else:
+                self._process_single_example(unescaped, f"ex_{example_counter}",
+                                             is_synset_example=False,
+                                             old_sense_id=owner)
+            if example_counter % 10000 == 0:
+                logger.info(
+                    f"    Processed {example_counter}/{len(examples)} examples "
+                    f"(skipped: {self.log['statistics']['examples']['skipped']})")
 
         logger.info(f"  Examples processed: {self.log['statistics']['examples']['processed']}")
         logger.warning(f"  Examples skipped: {self.log['statistics']['examples']['skipped']}")

@@ -4,6 +4,8 @@ Covers _get_all_forms and _find_best_match across English and the
 morphologically rich languages where tok2vec was previously disabled.
 """
 
+from collections import OrderedDict
+
 import pytest
 import spacy
 
@@ -25,7 +27,7 @@ def _make_converter(lang: str) -> WordNetToCygnetConverter:
     """Return a converter with NLP tools loaded for *lang*, no DB needed."""
     conv = object.__new__(WordNetToCygnetConverter)
     conv.lexicon_language = lang
-    conv.doc_cache = {}
+    conv.doc_cache = OrderedDict()
     conv.form_cache = {}
     conv.nltk_cache = {}
     conv.nltk_lemmatizer = None
