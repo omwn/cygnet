@@ -11,6 +11,7 @@ import json
 import logging
 import sys
 from collections import OrderedDict, defaultdict
+from typing import Any, Callable, NamedTuple
 from lxml import etree
 
 from cyg.multilex import (
@@ -232,6 +233,48 @@ def _spacy_candidates(lang: str) -> list[str]:
     candidates.append(f'{lang}_core_news_sm')
     candidates.append(_SPACY_FALLBACK)
     return candidates
+class ConceptRecord(NamedTuple):
+    """A Concept created for a synset not in CILI."""
+    id: str
+    ontological_category: str
+    original_id: str  # the source synset
+
+
+class GlossRecord(NamedTuple):
+    """A Gloss: one definition of a concept."""
+    definiendum: str
+    language: str
+    text: str
+
+
+class SenseRecord(NamedTuple):
+    """A Sense linking a lexeme to a concept."""
+    id: str
+    signifier: str  # lexeme ID
+    signified: str  # concept ID
+    original_id: str  # the source sense
+
+
+class RelationRecord(NamedTuple):
+    """A ConceptRelation or SenseRelation."""
+    relation_type: str
+    source: str
+    target: str
+
+
+class ExampleRecord(NamedTuple):
+    """An Example with text[start:end] annotated as an instance of a sense."""
+    original_id: str
+    sense: str
+    text: str
+    start: int
+    end: int
+
+
+# Output records are turned into elements this many at a time when written.
+WRITE_CHUNK_SIZE = 10000
+
+
 class WordNetToCygnetConverter:
     """Converts WordNet LMF lexical resources to Cygnet format."""
 
@@ -276,12 +319,14 @@ class WordNetToCygnetConverter:
         self.existing_concept_relations: set[tuple[str, str, str]] = set()
 
         # Output data structures
-        self.concepts: list[etree.Element] = []
+        # Output, kept as records (lexemes as elements, since merging edits
+        # them) and turned into elements only when written
+        self.concepts: list[ConceptRecord] = []
         self.lexemes: list[etree.Element] = []
-        self.senses: list[etree.Element] = []
-        self.glosses: list[etree.Element] = []
-        self.sense_relations: list[etree.Element] = []
-        self.concept_relations: list[etree.Element] = []
+        self.senses: list[SenseRecord] = []
+        self.glosses: list[GlossRecord] = []
+        self.sense_relations: list[RelationRecord] = []
+        self.concept_relations: list[RelationRecord] = []
 
         # Logging
         self.log = {
@@ -384,7 +429,7 @@ class WordNetToCygnetConverter:
         self.lexicon_language = None
 
         # Example processing
-        self.examples: list[etree.Element] = []
+        self.examples: list[ExampleRecord] = []
 
         # NLP tools (loaded in convert())
         self.nlp = None
@@ -404,7 +449,7 @@ class WordNetToCygnetConverter:
         self.concept_to_senses: dict[str, list[str]] = defaultdict(list)
 
         # Lookup dictionaries for fast access (populated in pass2)
-        self.sense_lookup: dict[str, etree.Element] = {}
+        self.sense_lookup: dict[str, str] = {}  # sense ID -> lexeme ID
         self.lexeme_lookup: dict[str, etree.Element] = {}
 
         # Lookup dictionary for concept ontological categories (populated in pass1)
@@ -1133,20 +1178,8 @@ class WordNetToCygnetConverter:
                         definition_elem.get('language', self.lexicon_language))
 
                     if should_add_gloss:
-                        gloss = etree.Element('Gloss',
-                                              definiendum=concept_id,
-                                              language=definition_lang)
-
-                        # Create AnnotatedSentence container for the definition text
-                        annotated_sentence = etree.SubElement(gloss, 'AnnotatedSentence')
-                        annotated_sentence.text = definition_text
-
-                        # Add Provenance element
-                        etree.SubElement(gloss, 'Provenance',
-                                         resource=self.lexicon_id,
-                                         version=self.lexicon_version)
-
-                        self.glosses.append(gloss)
+                        self.glosses.append(
+                            GlossRecord(concept_id, definition_lang, definition_text))
                         self.log['statistics']['glosses']['created'] += 1
 
         logger.info(f"  Created {self.log['statistics']['concepts']['newly_created']} new concepts")
@@ -1163,11 +1196,7 @@ class WordNetToCygnetConverter:
             pos: Its ontological category.
             synset_id: The source synset it was made from.
         """
-        concept = etree.Element('Concept', id=concept_id,
-                                ontological_category=pos, status='1')
-        etree.SubElement(concept, 'Provenance', resource=self.lexicon_id,
-                         version=self.lexicon_version, original_id=synset_id)
-        self.concepts.append(concept)
+        self.concepts.append(ConceptRecord(concept_id, pos, synset_id))
         self.created_concepts.add(concept_id)
         self.log['statistics']['concepts']['newly_created'] += 1
         self.log['statistics']['concepts']['total'] += 1
@@ -1181,7 +1210,7 @@ class WordNetToCygnetConverter:
         # First, build a map of concept IDs to their ontological categories
         concept_pos_map = {}
         for concept in self.concepts:
-            concept_pos_map[concept.get('id')] = concept.get('ontological_category')
+            concept_pos_map[concept.id] = concept.ontological_category
         # Also include CILI concepts
         concept_pos_map.update(self.cili_concepts)
 
@@ -1372,18 +1401,9 @@ class WordNetToCygnetConverter:
                     # Store mapping
                     self.old_sense_to_new_sense[old_sense_id] = new_sense_id
 
-                    # Create Sense element
-                    sense_elem = etree.Element('Sense',
-                                               id=new_sense_id,
-                                               signifier=lexeme_id,
-                                               signified=concept_id)
-                    # Add Provenance element
-                    from_elem = etree.SubElement(sense_elem, 'Provenance',
-                                                 resource=self.lexicon_id,
-                                                 version=self.lexicon_version)
-                    from_elem.set('original_id', old_sense_id)
-                    self.senses.append(sense_elem)
-                    self.sense_lookup[new_sense_id] = sense_elem
+                    self.senses.append(SenseRecord(new_sense_id, lexeme_id,
+                                                   concept_id, old_sense_id))
+                    self.sense_lookup[new_sense_id] = lexeme_id
                     self.created_senses.add(sense_key)
                     self.log['statistics']['senses']['created'] += 1
 
@@ -1629,28 +1649,14 @@ class WordNetToCygnetConverter:
         logger.warning(f"    Found {mismatch_count} ontological category mismatches")
 
         # Create XML elements
-        logger.info("  Creating XML elements...")
+        logger.info("  Recording relations...")
 
         for source, target, rel_type in final_concept_relations:
-            concept_rel = etree.Element('ConceptRelation',
-                                        relation_type=rel_type,
-                                        source=source,
-                                        target=target)
-            from_elem = etree.SubElement(concept_rel, 'Provenance',
-                                         resource=self.lexicon_id,
-                                         version=self.lexicon_version)
-            self.concept_relations.append(concept_rel)
+            self.concept_relations.append(RelationRecord(rel_type, source, target))
             self.log['statistics']['relations']['concept_relations_created'] += 1
 
         for source, target, rel_type in final_sense_relations:
-            sense_rel = etree.Element('SenseRelation',
-                                      relation_type=rel_type,
-                                      source=source,
-                                      target=target)
-            from_elem = etree.SubElement(sense_rel, 'Provenance',
-                                         resource=self.lexicon_id,
-                                         version=self.lexicon_version)
-            self.sense_relations.append(sense_rel)
+            self.sense_relations.append(RelationRecord(rel_type, source, target))
             self.log['statistics']['relations']['sense_relations_created'] += 1
 
         logger.info(f"  Created {self.log['statistics']['relations']['concept_relations_created']} concept relations")
@@ -1706,10 +1712,8 @@ class WordNetToCygnetConverter:
         self._initialize_nlp_tools()
 
         # Build concept_to_senses mapping (for synset examples)
-        for sense_elem in self.senses:
-            sense_id = sense_elem.get('id')
-            concept_id = sense_elem.get('signified')
-            self.concept_to_senses[concept_id].append(sense_id)
+        for sense in self.senses:
+            self.concept_to_senses[sense.signified].append(sense.id)
 
         for start in range(0, len(examples), EXAMPLE_BATCH_SIZE):
             batch = []
@@ -1760,10 +1764,9 @@ class WordNetToCygnetConverter:
             candidates = []
             # For each sense of the concept, all written wordforms of its lexeme
             for sense_id in self.concept_to_senses.get(concept_id, []):
-                sense_elem = self.sense_lookup.get(sense_id)
-                if sense_elem is None:
+                lexeme_id = self.sense_lookup.get(sense_id)
+                if lexeme_id is None:
                     continue
-                lexeme_id = sense_elem.get('signifier')
                 for form in self._get_lexeme_written_forms(lexeme_id):
                     candidates.append((sense_id, form))
             return candidates
@@ -1771,10 +1774,9 @@ class WordNetToCygnetConverter:
         if old_sense_id not in self.old_sense_to_new_sense:
             return None
         sense_id = self.old_sense_to_new_sense[old_sense_id]
-        sense_elem = self.sense_lookup.get(sense_id)
-        if sense_elem is None:
+        lexeme_id = self.sense_lookup.get(sense_id)
+        if lexeme_id is None:
             return None
-        lexeme_id = sense_elem.get('signifier')
         return [(sense_id, form) for form in self._get_lexeme_written_forms(lexeme_id)]
 
     def _prefetch_docs(self,
@@ -1868,31 +1870,73 @@ class WordNetToCygnetConverter:
         match_end = pos + len(wordform)
         expanded_start, expanded_end = self._expand_to_token_boundaries(text_lower, pos, match_end)
 
-        # Create Example element using ORIGINAL text (not lowercased)
-        example_elem = etree.Element('Example')
+        # The element uses the ORIGINAL text (not lowercased)
+        self.examples.append(
+            ExampleRecord(example_id, sense_id, text, expanded_start, expanded_end))
 
-        # Create AnnotatedSentence container
-        annotated_sentence = etree.SubElement(example_elem, 'AnnotatedSentence')
+    def _provenance(self, parent: etree.Element, **attrs: str) -> None:
+        """Add this lexicon's Provenance element to parent."""
+        etree.SubElement(parent, 'Provenance', resource=self.lexicon_id,
+                         version=self.lexicon_version, **attrs)
 
-        # Add text before token (original capitalization)
-        if expanded_start > 0:
-            annotated_sentence.text = text[:expanded_start]
+    def _concept_element(self, rec: ConceptRecord) -> etree.Element:
+        """The Concept element for a record."""
+        concept = etree.Element('Concept', id=rec.id,
+                                ontological_category=rec.ontological_category,
+                                status='1')
+        self._provenance(concept, original_id=rec.original_id)
+        return concept
 
-        # Create AnnotatedToken (original capitalization)
-        annotated_token = etree.SubElement(annotated_sentence, 'AnnotatedToken', sense=sense_id)
-        annotated_token.text = text[expanded_start:expanded_end]
+    def _sense_element(self, rec: SenseRecord) -> etree.Element:
+        """The Sense element for a record."""
+        sense = etree.Element('Sense', id=rec.id, signifier=rec.signifier,
+                              signified=rec.signified)
+        self._provenance(sense, original_id=rec.original_id)
+        return sense
 
-        # Add text after token (original capitalization)
-        if expanded_end < len(text):
-            annotated_token.tail = text[expanded_end:]
+    def _gloss_element(self, rec: GlossRecord) -> etree.Element:
+        """The Gloss element for a record."""
+        gloss = etree.Element('Gloss', definiendum=rec.definiendum,
+                              language=rec.language)
+        etree.SubElement(gloss, 'AnnotatedSentence').text = rec.text
+        self._provenance(gloss)
+        return gloss
 
-        # Add Provenance element with original_id
-        from_elem = etree.SubElement(example_elem, 'Provenance',
-                                     resource=self.lexicon_id,
-                                     version=self.lexicon_version)
-        from_elem.set('original_id', example_id)
+    def _example_element(self, rec: ExampleRecord) -> etree.Element:
+        """The Example element for a record, its sense word annotated."""
+        example = etree.Element('Example')
+        annotated_sentence = etree.SubElement(example, 'AnnotatedSentence')
+        if rec.start > 0:
+            annotated_sentence.text = rec.text[:rec.start]
+        annotated_token = etree.SubElement(annotated_sentence, 'AnnotatedToken',
+                                           sense=rec.sense)
+        annotated_token.text = rec.text[rec.start:rec.end]
+        if rec.end < len(rec.text):
+            annotated_token.tail = rec.text[rec.end:]
+        self._provenance(example, original_id=rec.original_id)
+        return example
 
-        self.examples.append(example_elem)
+    def _relation_element(self, tag: str, rec: RelationRecord) -> etree.Element:
+        """The ConceptRelation or SenseRelation element for a record."""
+        relation = etree.Element(tag, relation_type=rec.relation_type,
+                                 source=rec.source, target=rec.target)
+        self._provenance(relation)
+        return relation
+
+    def _output_layers(self
+                       ) -> list[tuple[str, list, Callable[[Any], etree.Element]]]:
+        """The output layers in order: (tag, records, record -> element)."""
+        return [
+            ('ConceptLayer', self.concepts, self._concept_element),
+            ('LexemeLayer', self.lexemes, lambda lexeme: lexeme),
+            ('SenseLayer', self.senses, self._sense_element),
+            ('GlossLayer', self.glosses, self._gloss_element),
+            ('ExampleLayer', self.examples, self._example_element),
+            ('SenseRelationLayer', self.sense_relations,
+             lambda rec: self._relation_element('SenseRelation', rec)),
+            ('ConceptRelationLayer', self.concept_relations,
+             lambda rec: self._relation_element('ConceptRelation', rec)),
+        ]
 
     def build_output_xml(self) -> etree.Element:
         """Build the output CygnetResource XML tree."""
@@ -1902,42 +1946,50 @@ class WordNetToCygnetConverter:
         cygnet_root = etree.Element('CygnetResource', **self.lexicon_attrs)
 
         # Add layers only if they have content
-        if self.concepts:
-            concept_layer = etree.SubElement(cygnet_root, 'ConceptLayer')
-            for concept in self.concepts:
-                concept_layer.append(concept)
-
-        if self.lexemes:
-            lexeme_layer = etree.SubElement(cygnet_root, 'LexemeLayer')
-            for lexeme in self.lexemes:
-                lexeme_layer.append(lexeme)
-
-        if self.senses:
-            sense_layer = etree.SubElement(cygnet_root, 'SenseLayer')
-            for sense in self.senses:
-                sense_layer.append(sense)
-
-        if self.glosses:
-            gloss_layer = etree.SubElement(cygnet_root, 'GlossLayer')
-            for gloss in self.glosses:
-                gloss_layer.append(gloss)
-
-        if self.examples:
-            example_layer = etree.SubElement(cygnet_root, 'ExampleLayer')
-            for example in self.examples:
-                example_layer.append(example)
-
-        if self.sense_relations:
-            sense_rel_layer = etree.SubElement(cygnet_root, 'SenseRelationLayer')
-            for rel in self.sense_relations:
-                sense_rel_layer.append(rel)
-
-        if self.concept_relations:
-            concept_rel_layer = etree.SubElement(cygnet_root, 'ConceptRelationLayer')
-            for rel in self.concept_relations:
-                concept_rel_layer.append(rel)
-
+        for tag, records, make in self._output_layers():
+            if records:
+                layer = etree.SubElement(cygnet_root, tag)
+                for rec in records:
+                    layer.append(make(rec))
         return cygnet_root
+
+    def write_output_xml(self, output_path: str) -> None:
+        """Write the output XML a chunk at a time, as build_output_xml() would.
+
+        The bytes are those of writing the whole tree with pretty_print, but
+        only WRITE_CHUNK_SIZE elements exist at once: each chunk is
+        pretty-printed inside a stand-in root and layer, which give it the
+        same indentation, and those two wrapper lines are cut off.
+
+        Args:
+            output_path: The file to write
+        """
+        root = etree.Element('CygnetResource', **self.lexicon_attrs)
+        root_tag = etree.tostring(root, encoding='unicode')
+        layers = [(tag, records, make)
+                  for tag, records, make in self._output_layers() if records]
+        with open(output_path, 'w', encoding='utf-8', newline='') as f:
+            f.write("<?xml version='1.0' encoding='UTF-8'?>\n")
+            if not layers:
+                f.write(root_tag + '\n')
+                return
+            f.write(root_tag[:-2] + '>\n')  # '<CygnetResource .../>' -> start tag
+            for tag, records, make in layers:
+                head = f'<R>\n  <{tag}>\n'
+                tail = f'  </{tag}>\n</R>\n'
+                f.write(f'  <{tag}>\n')
+                for start in range(0, len(records), WRITE_CHUNK_SIZE):
+                    wrapper = etree.Element('R')
+                    layer = etree.SubElement(wrapper, tag)
+                    for rec in records[start:start + WRITE_CHUNK_SIZE]:
+                        layer.append(make(rec))
+                    chunk = etree.tostring(wrapper, pretty_print=True,
+                                           encoding='unicode')
+                    if not (chunk.startswith(head) and chunk.endswith(tail)):
+                        raise RuntimeError(f'unexpected serialisation of {tag}')
+                    f.write(chunk[len(head):-len(tail)])
+                f.write(f'  </{tag}>\n')
+            f.write('</CygnetResource>\n')
 
     def convert_from_tree(self, root: etree.Element):
         """Convert from an already-parsed XML tree."""
@@ -1963,19 +2015,12 @@ class WordNetToCygnetConverter:
 
     def save(self, output_path: str):
         """Build output XML and save to file with log."""
-        # Build output
-        output_root = self.build_output_xml()
-        output_tree = etree.ElementTree(output_root)
-
         # Derive log filename from output
         log_path = str(presynth_log_path(output_path))
 
         # Write output XML
         logger.info(f"Writing output to {output_path}...")
-        output_tree.write(output_path,
-                          pretty_print=True,
-                          xml_declaration=True,
-                          encoding='UTF-8')
+        self.write_output_xml(output_path)
 
         # Write log
         logger.info(f"Writing log to {log_path}...")

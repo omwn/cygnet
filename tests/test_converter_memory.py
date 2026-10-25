@@ -1,11 +1,13 @@
 """Tests for the memory-saving parts of WordNetToCygnetConverter.
 
 Pass 4 frees the input tree before loading spaCy, the spaCy document cache
-is bounded, and CILI is kept as a map from concept ID to category.
+is bounded, CILI is kept as a map from concept ID to category, and the
+output is kept as records and written a chunk at a time.
 """
 
 from pathlib import Path
 
+import pytest
 from lxml import etree
 
 import cyg.converters as converters
@@ -70,7 +72,7 @@ def test_examples_in_source_order(tmp_path):
 
     converter.convert_from_tree(root)
 
-    texts = ["".join(ex.itertext()) for ex in converter.examples]
+    texts = [rec.text for rec in converter.examples]
     assert texts == ["a dog barked", "dog days", "the dog slept"]
     assert converter.log["statistics"]["examples"]["total_found"] == 3
 
@@ -98,3 +100,35 @@ def test_doc_cache_bounded(monkeypatch):
     conv._get_doc("c")
 
     assert list(conv.doc_cache) == ["a", "c"]
+
+
+_WORDNETS = Path(__file__).parent / "wordnets"
+
+
+@pytest.mark.parametrize("source", ["inline", "wn-en.xml", "wn-fr.xml"])
+def test_chunked_write_matches_whole_tree(tmp_path, monkeypatch, source):
+    """Writing in chunks gives the bytes of writing the whole tree."""
+    monkeypatch.setattr(converters, "WRITE_CHUNK_SIZE", 2)
+    converter, root = _converter(tmp_path)
+    if source != "inline":
+        root, _tree = converter.read_metadata(str(_WORDNETS / source))
+    converter.convert_from_tree(root)
+    expected = tmp_path / "whole.xml"
+    etree.ElementTree(converter.build_output_xml()).write(
+        str(expected), pretty_print=True, xml_declaration=True, encoding="UTF-8")
+
+    converter.write_output_xml(str(tmp_path / "chunked.xml"))
+
+    assert (tmp_path / "chunked.xml").read_bytes() == expected.read_bytes()
+
+
+def test_write_without_layers(tmp_path):
+    """A lexicon with no output writes an empty root, as the whole tree does."""
+    converter, _root = _converter(tmp_path)
+    expected = tmp_path / "whole.xml"
+    etree.ElementTree(converter.build_output_xml()).write(
+        str(expected), pretty_print=True, xml_declaration=True, encoding="UTF-8")
+
+    converter.write_output_xml(str(tmp_path / "chunked.xml"))
+
+    assert (tmp_path / "chunked.xml").read_bytes() == expected.read_bytes()
