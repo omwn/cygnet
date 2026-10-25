@@ -31,6 +31,29 @@ logger = logging.getLogger(__name__)
 
 # spaCy docs kept by WordNetToCygnetConverter._get_doc.
 DOC_CACHE_SIZE = 4096
+# Examples whose spaCy docs are parsed together in one nlp.pipe() batch:
+# batching gives the same docs as one nlp() call each, 4-12 times faster.
+EXAMPLE_BATCH_SIZE = 1000
+# Characters that end a token, for deciding whether a match needs spaCy.
+TOKEN_BOUNDARIES = frozenset(' .,!?;:"\'()[]{}-\u2014\u2013\n\t/\\')
+# Words of a multi-word form that need not match the example.
+FUNCTION_WORDS = frozenset({'a', 'an', 'the', 'of', 'in', 'on', 'at', 'to', 'for',
+                            'with', 'by', 'from'})
+
+
+def at_token_boundaries(text: str, start: int, end: int) -> bool:
+    """True if text[start:end] begins and ends at a token boundary.
+
+    Args:
+        text: The text
+        start: Start offset of the span
+        end: End offset of the span
+
+    Returns:
+        Whether the span needs no expansion to whole tokens
+    """
+    return ((start == 0 or text[start - 1] in TOKEN_BOUNDARIES)
+            and (end >= len(text) or text[end] in TOKEN_BOUNDARIES))
 
 
 def release_memory() -> None:
@@ -372,6 +395,8 @@ class WordNetToCygnetConverter:
         # tensors, and an unbounded cache of every example text took about
         # 1 GB for plWordNet, though each text is only reused within one call.
         self.doc_cache: OrderedDict[str, spacy.tokens.Doc] = OrderedDict()
+        # Docs parsed in advance for the current batch of examples
+        self.prefetched_docs: dict[str, spacy.tokens.Doc] = {}
         self.form_cache: dict[str, set[str]] = {}  # morphological forms cache
         self.nltk_cache: dict[str, frozenset[str]] = {}  # NLTK lemmas per token
 
@@ -619,6 +644,9 @@ class WordNetToCygnetConverter:
         return added_count
     def _get_doc(self, text: str):
         """Get spaCy doc with caching."""
+        doc = self.prefetched_docs.get(text)
+        if doc is not None:
+            return doc
         doc = self.doc_cache.get(text)
         if doc is None:
             doc = self.doc_cache[text] = self.nlp(text)
@@ -721,14 +749,11 @@ class WordNetToCygnetConverter:
 
     def _match_multi_word(self, form_words: list[str], text: str) -> str | None:
         """Match a multi-word expression using morphological form matching."""
-        # Identify content words (not function words)
-        function_words = {'a', 'an', 'the', 'of', 'in', 'on', 'at', 'to', 'for', 'with', 'by', 'from'}
-
         # Get all forms for content words in the MWE
         content_word_forms = []
         for word in form_words:
             word_lower = word.lower()
-            if word_lower not in function_words:
+            if word_lower not in FUNCTION_WORDS:
                 forms = self._get_all_forms(word_lower)
                 content_word_forms.append(forms)
 
@@ -796,11 +821,40 @@ class WordNetToCygnetConverter:
         Returns:
             Tuple of (sense_id, matched_wordform) or (None, None) if no match
         """
-        text_lower = text.lower()
-
         # Sort candidates by length (longest first) to prefer longer matches
         candidates_sorted = sorted(candidates, key=lambda x: len(x[1]), reverse=True)
+        match = self._cheap_match(text.lower(), candidates_sorted)
+        if match is not None:
+            return match
 
+        # Strategy 3: Try morphological matching with spaCy (EXPENSIVE)
+        for sense_id, form in candidates_sorted:
+            form_words = form.split()
+
+            if len(form_words) == 1:
+                # Single word matching
+                result = self._match_single_word(form, text)
+                if result:
+                    return sense_id, result
+            else:
+                # Multi-word expression matching
+                result = self._match_multi_word(form_words, text)
+                if result:
+                    return sense_id, result
+
+        return None, None
+
+    def _cheap_match(self, text_lower: str, candidates_sorted: list[tuple[str, str]]
+                     ) -> tuple[str, str] | None:
+        """Match a candidate by string comparison alone, without spaCy.
+
+        Args:
+            text_lower: The lowercased example text
+            candidates_sorted: (sense_id, wordform) pairs, longest form first
+
+        Returns:
+            (sense_id, wordform) of the first match, or None
+        """
         # Strategy 1: Try exact match first (CHEAP - no NLP processing)
         for sense_id, form in candidates_sorted:
             if form.lower() in text_lower:
@@ -827,35 +881,12 @@ class WordNetToCygnetConverter:
                                 match_count += 1
                         if match_count == len(form_words):
                             return sense_id, form
-
-        # Strategy 3: Try morphological matching with spaCy (EXPENSIVE - full NLP pipeline)
-        for sense_id, form in candidates_sorted:
-            form_words = form.split()
-
-            if len(form_words) == 1:
-                # Single word matching
-                result = self._match_single_word(form, text)
-                if result:
-                    return sense_id, result
-            else:
-                # Multi-word expression matching
-                result = self._match_multi_word(form_words, text)
-                if result:
-                    return sense_id, result
-
-        return None, None
+        return None
 
     def _expand_to_token_boundaries(self, text: str, match_start: int, match_end: int) -> tuple[int, int]:
         """Expand match to complete token boundaries."""
         # Stage 1: Check if already at boundaries (CHEAP)
-        token_boundaries = {' ', '.', ',', '!', '?', ';', ':', '"', "'", "'", '"', '"',
-                            '(', ')', '[', ']', '{', '}', '-', '—', '–',
-                            '\n', '\t', '/', '\\'}
-
-        at_start = (match_start == 0 or text[match_start - 1] in token_boundaries)
-        at_end = (match_end >= len(text) or text[match_end] in token_boundaries)
-
-        if at_start and at_end:
+        if at_token_boundaries(text, match_start, match_end):
             return match_start, match_end
 
         # Stage 2: Use spaCy to find actual token boundaries (EXPENSIVE)
@@ -1680,23 +1711,24 @@ class WordNetToCygnetConverter:
             concept_id = sense_elem.get('signified')
             self.concept_to_senses[concept_id].append(sense_id)
 
-        for example_counter, (text, is_synset, owner) in enumerate(examples, 1):
-            raw = text.strip()
-            unescaped = html.unescape(raw)
-            if unescaped != raw:
-                self.log['statistics']['html_entity_fixes']['count'] += 1
-            if is_synset:
-                self._process_single_example(unescaped, f"ex_{example_counter}",
-                                             is_synset_example=True,
-                                             concept_id=owner)
-            else:
-                self._process_single_example(unescaped, f"ex_{example_counter}",
-                                             is_synset_example=False,
-                                             old_sense_id=owner)
-            if example_counter % 10000 == 0:
-                logger.info(
-                    f"    Processed {example_counter}/{len(examples)} examples "
-                    f"(skipped: {self.log['statistics']['examples']['skipped']})")
+        for start in range(0, len(examples), EXAMPLE_BATCH_SIZE):
+            batch = []
+            for text, is_synset, owner in examples[start:start + EXAMPLE_BATCH_SIZE]:
+                raw = text.strip()
+                unescaped = html.unescape(raw)
+                if unescaped != raw:
+                    self.log['statistics']['html_entity_fixes']['count'] += 1
+                concept_id, old_sense_id = (owner, None) if is_synset else (None, owner)
+                batch.append((unescaped, is_synset, concept_id, old_sense_id))
+            self._prefetch_docs([(text, self._example_candidates(*rest))
+                                 for text, *rest in batch])
+            for example_counter, (text, *rest) in enumerate(batch, start + 1):
+                self._process_single_example(text, f"ex_{example_counter}", *rest)
+                if example_counter % 10000 == 0:
+                    logger.info(
+                        f"    Processed {example_counter}/{len(examples)} examples "
+                        f"(skipped: {self.log['statistics']['examples']['skipped']})")
+        self.prefetched_docs = {}
 
         logger.info(f"  Examples processed: {self.log['statistics']['examples']['processed']}")
         logger.warning(f"  Examples skipped: {self.log['statistics']['examples']['skipped']}")
@@ -1711,47 +1743,93 @@ class WordNetToCygnetConverter:
             self.log['statistics']['examples']['success_rate_pct'] = round(success_rate, 1)
             logger.info(f"  Success rate: {success_rate:.1f}%")
 
+    def _example_candidates(self, is_synset_example: bool, concept_id: str | None,
+                            old_sense_id: str | None) -> list[tuple[str, str]] | None:
+        """The (sense_id, wordform) pairs an example may be annotated with.
+
+        Args:
+            is_synset_example: Whether the example belongs to a synset
+            concept_id: The synset's concept (synset examples)
+            old_sense_id: The source sense ID (sense examples)
+
+        Returns:
+            The candidates, possibly none; None if a sense example's sense
+            was not converted.
+        """
+        if is_synset_example:
+            candidates = []
+            # For each sense of the concept, all written wordforms of its lexeme
+            for sense_id in self.concept_to_senses.get(concept_id, []):
+                sense_elem = self.sense_lookup.get(sense_id)
+                if sense_elem is None:
+                    continue
+                lexeme_id = sense_elem.get('signifier')
+                for form in self._get_lexeme_written_forms(lexeme_id):
+                    candidates.append((sense_id, form))
+            return candidates
+
+        if old_sense_id not in self.old_sense_to_new_sense:
+            return None
+        sense_id = self.old_sense_to_new_sense[old_sense_id]
+        sense_elem = self.sense_lookup.get(sense_id)
+        if sense_elem is None:
+            return None
+        lexeme_id = sense_elem.get('signifier')
+        return [(sense_id, form) for form in self._get_lexeme_written_forms(lexeme_id)]
+
+    def _prefetch_docs(self,
+                       batch: list[tuple[str, list[tuple[str, str]] | None]]) -> None:
+        """Parse in one nlp.pipe() batch the docs these examples will need.
+
+        Mirrors _find_best_match and _expand_to_token_boundaries: if a cheap
+        match lies on token boundaries no doc is needed; if it does not, the
+        doc of the lowercased text is; if there is no cheap match, the docs
+        of the text and the candidate words are. (A spaCy match is a whole
+        token, so it rarely needs the lowercased text too.) Any doc missed
+        here is parsed on demand, so this only affects speed.
+
+        Args:
+            batch: (example text, its candidates) pairs
+        """
+        needed: dict[str, None] = {}  # insertion-ordered set
+        for text, candidates in batch:
+            if not candidates:
+                continue
+            candidates_sorted = sorted(candidates, key=lambda x: len(x[1]),
+                                       reverse=True)
+            text_lower = text.lower()
+            match = self._cheap_match(text_lower, candidates_sorted)
+            if match is not None:
+                start = text_lower.find(match[1].lower())
+                end = start + len(match[1])
+                if start != -1 and not at_token_boundaries(text_lower, start, end):
+                    needed[text_lower] = None
+                continue
+            needed[text] = None
+            for _sense_id, form in candidates_sorted:
+                form_words = form.split()
+                if len(form_words) == 1:
+                    words = [form.lower()]
+                else:
+                    words = [w.lower() for w in form_words
+                             if w.lower() not in FUNCTION_WORDS]
+                for word in words:
+                    for w in (word, word.strip('-')):
+                        if w and w not in self.form_cache:
+                            needed[w] = None
+        texts = [t for t in needed if t not in self.doc_cache]
+        self.prefetched_docs = dict(zip(texts, self.nlp.pipe(texts, batch_size=256)))
+
     def _process_single_example(self, text: str, example_id: str,
                                 is_synset_example: bool = False,
                                 concept_id: str = None,
                                 old_sense_id: str = None):
         """Process a single example and create annotated token."""
-        candidates = []
-
-        if is_synset_example:
-            # Get all senses for this concept
-            sense_ids = self.concept_to_senses.get(concept_id, [])
-
-            # For each sense, get all written wordforms from its lexeme
-            for sense_id in sense_ids:
-                sense_elem = self.sense_lookup.get(sense_id)
-                if sense_elem is None:
-                    continue
-
-                lexeme_id = sense_elem.get('signifier')
-                written_forms = self._get_lexeme_written_forms(lexeme_id)
-
-                for form in written_forms:
-                    candidates.append((sense_id, form))
-
-        else:
-            # Sense example - get the new sense ID
-            if old_sense_id not in self.old_sense_to_new_sense:
-                self.log['examples']['skipped'] += 1
-                return
-
-            sense_id = self.old_sense_to_new_sense[old_sense_id]
-            sense_elem = self.sense_lookup.get(sense_id)
-
-            if sense_elem is None:
-                self.log['examples']['skipped'] += 1
-                return
-
-            lexeme_id = sense_elem.get('signifier')
-            written_forms = self._get_lexeme_written_forms(lexeme_id)
-
-            for form in written_forms:
-                candidates.append((sense_id, form))
+        candidates = self._example_candidates(is_synset_example, concept_id,
+                                              old_sense_id)
+        if candidates is None:
+            self.log['examples']['skipped'] += 1
+            return
 
         if not candidates:
             self.log['statistics']['examples']['skipped'] += 1

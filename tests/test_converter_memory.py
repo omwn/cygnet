@@ -89,6 +89,7 @@ def test_doc_cache_bounded(monkeypatch):
     monkeypatch.setattr(converters, "DOC_CACHE_SIZE", 2)
     conv = object.__new__(WordNetToCygnetConverter)
     conv.doc_cache = converters.OrderedDict()
+    conv.prefetched_docs = {}
     conv.nlp = lambda text: object()
     first = conv._get_doc("a")
     conv._get_doc("b")

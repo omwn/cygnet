@@ -28,6 +28,7 @@ def _make_converter(lang: str) -> WordNetToCygnetConverter:
     conv = object.__new__(WordNetToCygnetConverter)
     conv.lexicon_language = lang
     conv.doc_cache = OrderedDict()
+    conv.prefetched_docs = {}
     conv.form_cache = {}
     conv.nltk_cache = {}
     conv.nltk_lemmatizer = None
@@ -174,3 +175,38 @@ class TestKoreanMatching:
             "그 백화점에서 파는 음식은 다 신선해요.", [("s1", "팔다")]
         )
         assert sid == "s1"
+
+
+# ---------------------------------------------------------------------------
+# Batched parsing — _prefetch_docs must cover every doc matching needs
+# ---------------------------------------------------------------------------
+
+class TestPrefetchDocs:
+    @pytest.fixture(scope="class")
+    def conv(self):
+        return _make_converter('en')
+
+    @pytest.mark.parametrize("text,candidates", [
+        # Substring match inside a longer token: needs the lowercased doc.
+        ("The dogs barked loudly.", [("s1", "dog")]),
+        # No string match: needs the text's doc and the candidates' forms.
+        ("She ran quickly.", [("s1", "run"), ("s2", "sprint")]),
+        ("They were giving up.", [("s1", "give up")]),
+    ])
+    def test_no_parsing_after_prefetch(self, conv, text, candidates):
+        conv.doc_cache.clear()
+        conv.form_cache.clear()
+        conv._prefetch_docs([(text, candidates)])
+        nlp = conv.nlp
+
+        def fail(text):
+            raise AssertionError(f"parsed outside the batch: {text!r}")
+
+        conv.nlp = fail
+        try:
+            _sense, form = conv._find_best_match(text, candidates)
+            start = text.lower().find(form.lower())
+            conv._expand_to_token_boundaries(text.lower(), start, start + len(form))
+        finally:
+            conv.nlp = nlp
+            conv.prefetched_docs = {}
