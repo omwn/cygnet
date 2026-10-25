@@ -6,7 +6,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from cyg.merge import SCHEMA
+from cyg.merge import PROV_SCHEMA, SCHEMA
 
 _PATH = Path(__file__).parent.parent / "scripts" / "paper_facts.py"
 _spec = importlib.util.spec_from_file_location("paper_facts", _PATH)
@@ -64,7 +64,8 @@ def _seed_build(tmp_path: Path) -> dict:
     )
     raw = tmp_path / "raw"
     raw.mkdir()
-    for name in ["omw-kin-0.1.xml", "omw-kin-en-0.1.xml", "omw-kin-ja-0.1.xml",
+    for name in ["G.xml.xz", "wnja-2.1.xml",
+                 "omw-kin-0.1.xml", "omw-kin-en-0.1.xml", "omw-kin-ja-0.1.xml",
                  "omw-kin-zu-0.1.xml", "omw-kin-zu-0.0.xml"]:
         (raw / name).write_text("")
     return {"db": db, "presynth": presynth, "conflicts": conflicts, "toml": toml,
@@ -119,3 +120,77 @@ def test_multilingual_counts_languages_of_built_version(tmp_path):
 def test_baseline_measured_like_current(tmp_path):
     paths = _seed_build(tmp_path)
     assert baseline_facts(paths["db"], ("omw-kin",)) == build_facts(**paths)["cygnet"]
+
+
+def test_wordnets_include_failed_downloads(tmp_path):
+    """A wordnets.toml URL with no download still counts as a wordnet."""
+    paths = _seed_build(tmp_path)
+    with paths["toml"].open("a") as f:
+        f.write('ga = ["http://irishwn.teanga.io/downloads/gfong-0.1.xml.gz"]\n')
+    assert build_facts(**paths)["cygnet"]["wordnets"] == 5   # 4 built + gfong
+
+
+def test_languages_include_failed_downloads(tmp_path):
+    """A failed download's language counts, but not twice if already present."""
+    paths = _seed_build(tmp_path)
+    with paths["toml"].open("a") as f:
+        f.write('ga = ["http://irishwn.teanga.io/downloads/gfong-0.1.xml.gz"]\n'
+                'en = ["https://example.org/lost-en-1.0.xml"]\n')
+    assert build_facts(**paths)["cygnet"]["languages"] == 3   # en, ja + ga
+
+
+def _seed_dannet(tmp_path: Path) -> tuple[Path, Path]:
+    """cygnet.db and provenance.db with omw-da, TUFS Arabic and unreleased dn.
+
+    Entries: 1 Arabic (arb), 2 Arabic (ar), 3 Danish from omw-da and dn,
+    4 Danish from dn alone.  Synset 1 is from both Danish wordnets, 2 from dn.
+    """
+    db, prov = tmp_path / "cygnet.db", tmp_path / "provenance.db"
+    con = sqlite3.connect(db)
+    con.executescript(SCHEMA)
+    for rowid, code in enumerate(["arb", "ar", "da"], 1):
+        con.execute("INSERT INTO languages (rowid, code) VALUES (?, ?)", (rowid, code))
+    for code in ["cili", "omw-arb", "tufs-ar", "omw-da", "dn"]:
+        con.execute("INSERT INTO resources (code, version) VALUES (?, '1')", (code,))
+    for rowid, lang in [(1, 1), (2, 2), (3, 3), (4, 3)]:
+        con.execute("INSERT INTO entries (rowid, language_rowid, pos) "
+                    "VALUES (?, ?, 'NOUN')", (rowid, lang))
+    for rowid in [1, 2]:
+        con.execute("INSERT INTO synsets (rowid, pos) VALUES (?, 'NOUN')", (rowid,))
+    con.commit()
+    con.close()
+
+    con = sqlite3.connect(prov)
+    con.executescript(PROV_SCHEMA)
+    con.executemany("INSERT INTO prov_resources (rowid, code) VALUES (?, ?)",
+                    [(1, "omw-arb"), (2, "tufs-ar"), (3, "omw-da"), (4, "dn")])
+    con.executemany("INSERT INTO prov_tables (rowid, name) VALUES (?, ?)",
+                    [(1, "synsets"), (2, "entries")])
+    rows = [(2, 1, 1), (2, 2, 2), (2, 3, 3), (2, 3, 4), (2, 4, 4),
+            (1, 1, 3), (1, 1, 4), (1, 2, 4)]
+    con.executemany("INSERT INTO provenance (table_rowid, item_rowid, resource_rowid) "
+                    "VALUES (?, ?, ?)", rows)
+    con.commit()
+    con.close()
+    return db, prov
+
+
+def test_ar_and_arb_count_as_one_language(tmp_path):
+    db, prov = _seed_dannet(tmp_path)
+    assert baseline_facts(db, (), prov)["languages"] == 2     # Arabic, Danish
+
+
+def test_unreleased_dannet_and_its_rows_not_counted(tmp_path):
+    db, prov = _seed_dannet(tmp_path)
+    cygnet = baseline_facts(db, (), prov)
+    assert cygnet["wordnets"] == 3        # omw-arb, tufs-ar, omw-da; not dn
+    assert cygnet["lexicons"] == 3
+    assert cygnet["entries"] == 3         # entry 4 came from dn alone
+    assert cygnet["synsets"] == 1         # synset 2 came from dn alone
+
+
+def test_unreleased_without_provenance_omits_sizes(tmp_path):
+    db, _ = _seed_dannet(tmp_path)
+    cygnet = baseline_facts(db, ())
+    assert cygnet["wordnets"] == 3
+    assert "entries" not in cygnet and "synsets" not in cygnet

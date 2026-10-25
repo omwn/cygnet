@@ -11,8 +11,9 @@ from pathlib import Path
 import pytest
 
 _BUILD_SH = Path(__file__).parent.parent / "build.sh"
-_FUNCTIONS = ("get_wordnet_urls", "download_standalone", "direct_xml_name",
-              "fetch_wordnet", "all_present", "download_wordnets")
+_FUNCTIONS = ("raw_rename", "index_of", "get_wordnet_urls", "download_standalone",
+              "direct_xml_name", "fetch_wordnet", "all_present",
+              "download_wordnets")
 
 
 def _function_source(name: str) -> str:
@@ -20,14 +21,6 @@ def _function_source(name: str) -> str:
     m = re.search(rf"^{name}\(\) \{{\n.*?^\}}\n", _BUILD_SH.read_text(),
                   re.MULTILINE | re.DOTALL)
     assert m, f"{name} not found in build.sh"
-    return m.group(0)
-
-
-def _renames_source() -> str:
-    """Return the RAW_RENAMES declaration from build.sh."""
-    m = re.search(r"^declare -A RAW_RENAMES=\(\n.*?^\)\n", _BUILD_SH.read_text(),
-                  re.MULTILINE | re.DOTALL)
-    assert m, "RAW_RENAMES not found in build.sh"
     return m.group(0)
 
 
@@ -56,10 +49,10 @@ def _run(work: Path, urls: list[str]) -> subprocess.CompletedProcess:
     listed = ", ".join(f'"{u}"' for u in urls)
     (work / "wordnets.toml").write_text(f"xx = [{listed}]\n")
     script = (f"set -euo pipefail\nDATA_DIR={work}\n"
-              + _renames_source()
               + "".join(_function_source(f) for f in _FUNCTIONS)
               + "download_wordnets\n"
-              + 'printf "failed: %s\\n" "${FAILED_DOWNLOADS[@]}"\n')
+              # bash 3.2 treats an empty array as unset under set -u
+              + 'printf "failed: %s\\n" ${FAILED_DOWNLOADS[@]+"${FAILED_DOWNLOADS[@]}"}\n')
     result = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     return result
@@ -202,3 +195,23 @@ def test_renamed_member_recorded_under_new_name(work):
 
     assert _raw_names(work) == ["odenet.xml"]
     assert "odenet already present, skipping" in result.stdout
+
+
+# bash 4 features that bash 3.2 (the version macOS ships) rejects.
+_BASH4_ONLY = [
+    (r"\b(declare|local|typeset) -[a-zA-Z]*A", "associative arrays"),
+    (r"\[\[ -v ", "[[ -v ]]"),
+    (r"\b(mapfile|readarray)\b", "mapfile/readarray"),
+    (r"\$\{[A-Za-z_][A-Za-z0-9_]*(,,|\^\^)", "case conversion"),
+    (r"&>>", "&>>"),
+    (r"\b(declare|local) -[a-zA-Z]*n ", "namerefs"),
+]
+
+
+@pytest.mark.parametrize("pattern,feature", _BASH4_ONLY)
+def test_build_sh_runs_in_bash_3_2(pattern, feature):
+    """build.sh must run in macOS's bash 3.2, so it avoids bash 4 features."""
+    lines = [f"{n}: {line.strip()}"
+             for n, line in enumerate(_BUILD_SH.read_text().splitlines(), 1)
+             if re.search(pattern, line) and not line.lstrip().startswith("#")]
+    assert not lines, f"{feature} need bash 4:\n" + "\n".join(lines)

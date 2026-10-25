@@ -150,11 +150,11 @@ def test_file_url_skips_if_already_present(work):
 _BUILD_SH = Path(__file__).parent.parent / "build.sh"
 
 
-def _download_standalone_source() -> str:
-    """Return the download_standalone function definition from build.sh."""
-    m = re.search(r"^download_standalone\(\) \{\n.*?^\}\n", _BUILD_SH.read_text(),
+def _function_source(name: str) -> str:
+    """Return the definition of a shell function in build.sh."""
+    m = re.search(rf"^{name}\(\) \{{\n.*?^\}}\n", _BUILD_SH.read_text(),
                   re.MULTILINE | re.DOTALL)
-    assert m, "download_standalone not found in build.sh"
+    assert m, f"{name} not found in build.sh"
     return m.group(0)
 
 
@@ -168,8 +168,8 @@ def test_archive_skips_appledouble_files(work):
                     "-C", str(work / "pkg"), "own-pt"], check=True)
     listing = work / "listing"
     script = (f"set -euo pipefail\nDATA_DIR={work}\n"
-              + "declare -A RAW_RENAMES=()\n"
-              + _download_standalone_source()
+              + _function_source("raw_rename")
+              + _function_source("download_standalone")
               + f"download_standalone own-pt file://own-pt-1.0.tar.xz {listing}\n")
 
     result = subprocess.run(["bash", "-c", script], capture_output=True, text=True)

@@ -20,12 +20,16 @@ quietly.
 Usage:
     uv run python scripts/paper_facts.py     # reports/facts.json, reports/facts.tex
     uv run python scripts/paper_facts.py --baseline lrec2026.db   # also first.*
+        [--baseline-prov lrec2026-provenance.db]
     uv run python scripts/paper_facts.py --tex ~/papers/GWC/2027/cygnet/facts.tex
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
+import importlib.util
+import io
 import json
 import sqlite3
 import sys
@@ -39,6 +43,15 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Lexicons that are not wordnets: the concept index and the implicit PWN.
 NOT_WORDNETS = {"cili", "pwn"}
+# Wordnets never part of a Cygnet release, though a local build may hold them.
+# dn is DanNet 2025-07-03, commented out in wordnets.toml in favour of omw-da.
+# Neither they nor rows that only they supplied are counted.
+NEVER_RELEASED = {"dn"}
+# Language codes the paper counts as one language: a macrolanguage code
+# (TUFS uses ar and zh) and the individual language other wordnets use.
+SAME_LANGUAGE = {"ar": "arb", "zh": "cmn-Hans"}
+# Tables whose size the paper cites, and which provenance.db tracks.
+SIZE_TABLES = ("synsets", "senses", "entries", "definitions", "examples")
 # Key in wordnets.toml for the multilingual releases (concepts + language
 # lexicons); each release counts as one wordnet, however many lexicons it has.
 MUL_KEY = "mul"
@@ -69,42 +82,115 @@ def multilingual_releases(sources: dict) -> tuple[str, ...]:
     return tuple(url_stem(url) for url in sources.get(MUL_KEY, []))
 
 
-def coverage_facts(con: sqlite3.Connection, releases: tuple[str, ...]) -> dict:
-    """Languages, wordnets and size of the merged database.
+def unreleased_rows(con: sqlite3.Connection, prov: Path) -> None:
+    """Fill temp.unreleased with the rows that only NEVER_RELEASED supplied.
+
+    A row also supplied by a released wordnet (or with no provenance, such as
+    CILI's concepts) is kept.
 
     Args:
-        con: Connection to cygnet.db.
+        con: Connection to cygnet.db, opened with uri=True.
+        prov: provenance.db of the same build.
+    """
+    con.execute("ATTACH DATABASE ? AS prov", (f"file:{prov}?mode=ro",))
+    excluded = ",".join("?" * len(NEVER_RELEASED))
+    con.execute("CREATE TEMP TABLE unreleased (tbl TEXT, item INTEGER, "
+                "PRIMARY KEY (tbl, item)) WITHOUT ROWID")
+    con.execute(f"""
+        INSERT INTO temp.unreleased
+        SELECT t.name, p.item_rowid
+        FROM prov.provenance p
+        JOIN prov.prov_tables t ON t.rowid = p.table_rowid
+        JOIN prov.prov_resources r ON r.rowid = p.resource_rowid
+        GROUP BY p.table_rowid, p.item_rowid
+        HAVING SUM(r.code NOT IN ({excluded})) = 0
+    """, sorted(NEVER_RELEASED))
+    con.commit()  # end the insert's transaction, or DETACH finds prov locked
+    con.execute("DETACH DATABASE prov")
+
+
+def coverage_facts(con: sqlite3.Connection, releases: tuple[str, ...],
+                   prov: Path | None = None,
+                   extra_languages: frozenset[str] = frozenset()) -> dict:
+    """Languages, wordnets and size of the merged database.
+
+    NEVER_RELEASED wordnets are left out.  Leaving out their rows as well
+    needs provenance.db; if they are present and it is not given, the table
+    sizes are omitted (so the paper shows ??) rather than overstated.
+
+    Args:
+        con: Connection to cygnet.db, opened with uri=True.
         releases: Resource codes of the multilingual releases.
+        prov: provenance.db of the same build, if available.
+        extra_languages: Language codes to count though the database has no
+            entries in them (wordnets whose download failed).
 
     Returns:
-        Facts under 'cygnet': languages (excluding 'mul'), wordnets (each
-        multilingual release counted once), tufs (TUFS vocabularies among the
-        wordnets), lexicons (every resource but CILI and PWN), and table sizes.
+        Facts under 'cygnet': languages (excluding 'mul', counting the
+        SAME_LANGUAGE pairs once), wordnets (each multilingual release counted
+        once), tufs (TUFS vocabularies among the wordnets), lexicons (every
+        resource but CILI and PWN), and table sizes.
     """
-    codes = [c for (c,) in con.execute("SELECT code FROM resources")
-             if c not in NOT_WORDNETS]
+    all_codes = [c for (c,) in con.execute("SELECT code FROM resources")]
+    unreleased = NEVER_RELEASED.intersection(all_codes)
+    codes = [c for c in all_codes
+             if c not in NOT_WORDNETS and c not in NEVER_RELEASED]
     single = [c for c in codes if not c.startswith(releases)]
     present = {r for r in releases for c in codes if c.startswith(r)}
-    languages = con.execute("""
-        SELECT COUNT(DISTINCT l.code)
+
+    if unreleased and prov is not None:
+        unreleased_rows(con, prov)
+    exact = not unreleased or prov is not None
+    keep = ("NOT EXISTS (SELECT 1 FROM temp.unreleased u "
+            "WHERE u.tbl = '{table}' AND u.item = {alias}.rowid)"
+            if unreleased and prov is not None else "1")
+
+    lang_codes = {c for (c,) in con.execute(f"""
+        SELECT DISTINCT l.code
         FROM entries e JOIN languages l ON l.rowid = e.language_rowid
-        WHERE l.code != 'mul'
-    """).fetchone()[0]
-
-    def count(table: str) -> int:
-        return con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-
-    return {
-        "languages": languages,
+        WHERE l.code != 'mul' AND {keep.format(table='entries', alias='e')}
+    """)}
+    facts = {
+        "languages": len({SAME_LANGUAGE.get(c, c)
+                          for c in lang_codes | extra_languages}),
         "wordnets": len(single) + len(present),
         "tufs": sum(c.startswith("tufs-") for c in single),
         "lexicons": len(codes),
-        "synsets": count("synsets"),
-        "senses": count("senses"),
-        "entries": count("entries"),
-        "definitions": count("definitions"),
-        "examples": count("examples"),
     }
+    if not exact:
+        print(f"warning: {', '.join(sorted(unreleased))} present but no "
+              "provenance.db given; table sizes omitted", file=sys.stderr)
+        return facts
+    for table in SIZE_TABLES:
+        facts[table] = con.execute(
+            f"SELECT COUNT(*) FROM {table} x "
+            f"WHERE {keep.format(table=table, alias='x')}").fetchone()[0]
+    return facts
+
+
+def missing_wordnets(sources: dict, raw_wns: Path) -> list[tuple[str, str]]:
+    """URLs in wordnets.toml that the build has no download for.
+
+    These wordnets belong to this version of Cygnet, though their source could
+    not be fetched (e.g. a site that is down), so the paper still counts them.
+
+    Args:
+        sources: Parsed wordnets.toml.
+        raw_wns: The bin/raw_wns directory.
+
+    Returns:
+        (language, URL) pairs in wordnets.toml order; the language is the
+        wordnets.toml key the URL is listed under.
+    """
+    # Step 2's own matching of URLs to downloaded files; it prints a warning
+    # for each miss, which would only repeat the build log here.
+    spec = importlib.util.spec_from_file_location(
+        "batch_convert", PROJECT_ROOT / "conversion_scripts" / "2_batch_convert_lmfs.py")
+    step2 = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(step2)
+    with contextlib.redirect_stdout(io.StringIO()):
+        return [(lang, url) for lang, urls in sources.items() for url in urls
+                if not step2._match_url(url, lang, raw_wns)]
 
 
 def converted_facts(sources: dict) -> dict:
@@ -196,26 +282,31 @@ def multilingual_facts(
     return facts
 
 
-def baseline_facts(db: Path, releases: tuple[str, ...]) -> dict:
+def baseline_facts(db: Path, releases: tuple[str, ...],
+                   prov: Path | None = None) -> dict:
     """Coverage of an earlier release, measured as coverage_facts() measures this one.
 
     Args:
         db: cygnet.db of the earlier release.
         releases: Resource codes of the multilingual releases.
+        prov: provenance.db of that release, if available.
 
     Returns:
         The same keys as coverage_facts().
     """
     con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     try:
-        return coverage_facts(con, releases)
+        return coverage_facts(con, releases, prov)
     finally:
         con.close()
 
 
 def build_facts(db: Path, presynth: Path, conflicts: Path, toml: Path,
-                raw_wns: Path) -> dict:
+                raw_wns: Path, prov: Path | None = None) -> dict:
     """Every figure the paper cites, as a nested dict.
+
+    cygnet.wordnets and cygnet.languages count the wordnets in the database
+    plus those in wordnets.toml whose download failed, and their languages.
 
     Args:
         db: cygnet.db.
@@ -223,18 +314,25 @@ def build_facts(db: Path, presynth: Path, conflicts: Path, toml: Path,
         conflicts: bin/relation_conflicts.json.
         toml: wordnets.toml.
         raw_wns: bin/raw_wns.
+        prov: provenance.db, needed only if NEVER_RELEASED wordnets are present.
 
     Returns:
         Facts keyed by topic.
     """
     sources = tomllib.loads(toml.read_text(encoding="utf-8"))
     releases = multilingual_releases(sources)
+    missing = missing_wordnets(sources, raw_wns)
+    for lang, url in missing:
+        print(f"counting {url} ({lang}) as a wordnet, though it was not downloaded",
+              file=sys.stderr)
     con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     try:
-        cygnet = coverage_facts(con, releases)
+        cygnet = coverage_facts(con, releases, prov,
+                                frozenset(lang for lang, _ in missing))
         multilingual = multilingual_facts(con, raw_wns, releases)
     finally:
         con.close()
+    cygnet["wordnets"] += len(missing)
     return {
         "cygnet": cygnet,
         "converted": converted_facts(sources),
@@ -276,6 +374,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--db", type=Path, default=PROJECT_ROOT / "web" / "cygnet.db")
+    parser.add_argument("--prov", type=Path,
+                        default=PROJECT_ROOT / "web" / "provenance.db")
     parser.add_argument("--presynth", type=Path,
                         default=PROJECT_ROOT / "bin" / "cygnets_presynth")
     parser.add_argument("--conflicts", type=Path,
@@ -284,15 +384,21 @@ def main() -> int:
     parser.add_argument("--raw", type=Path, default=PROJECT_ROOT / "bin" / "raw_wns")
     parser.add_argument("--baseline", type=Path,
                         help="cygnet.db of an earlier release, measured as first.*")
+    parser.add_argument("--baseline-prov", type=Path,
+                        help="provenance.db of that release, to leave out "
+                             "rows from wordnets it never released")
     reports = PROJECT_ROOT / "reports"
     parser.add_argument("--json", type=Path, default=reports / "facts.json")
     parser.add_argument("--tex", type=Path, default=reports / "facts.tex")
     args = parser.parse_args()
 
-    facts = build_facts(args.db, args.presynth, args.conflicts, args.toml, args.raw)
+    prov = args.prov if args.prov.exists() else None
+    facts = build_facts(args.db, args.presynth, args.conflicts, args.toml, args.raw,
+                        prov)
     if args.baseline:
         sources = tomllib.loads(args.toml.read_text(encoding="utf-8"))
-        facts["first"] = baseline_facts(args.baseline, multilingual_releases(sources))
+        facts["first"] = baseline_facts(args.baseline, multilingual_releases(sources),
+                                        args.baseline_prov)
     for out in (args.json, args.tex):
         out.parent.mkdir(parents=True, exist_ok=True)
     args.json.write_text(json.dumps(facts, indent=2) + "\n", encoding="utf-8")

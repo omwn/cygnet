@@ -117,11 +117,29 @@ run_pipeline() {
         python "$PROJECT_DIR/conversion_scripts/$1" "${@:2}")
 }
 
-# Archive members saved under another name in bin/raw_wns/, so that Step 2
-# finds them by the URL's stem.
-declare -A RAW_RENAMES=(
-    [deWordNet.xml]=odenet.xml  # the ODEnet archive
-)
+# The name an archive member is saved as in bin/raw_wns/, so that Step 2
+# finds it by the URL's stem.  (build.sh must run in bash 3.2, the version
+# macOS ships, which has no associative arrays.)
+raw_rename() {
+    case "$1" in
+        deWordNet.xml) echo odenet.xml ;;  # the ODEnet archive
+        *) echo "$1" ;;
+    esac
+}
+
+# Print the index of $1 among the remaining arguments; fail if it is absent.
+index_of() {
+    local needle="$1" i=0 x
+    shift
+    for x in "$@"; do
+        if [[ "$x" == "$needle" ]]; then
+            echo "$i"
+            return 0
+        fi
+        i=$((i + 1))
+    done
+    return 1
+}
 
 # Download a wordnet archive and extract its XML files into bin/raw_wns/ (flat),
 # writing the names of the extracted files, one per line, to $3.
@@ -159,7 +177,7 @@ download_standalone() {
             ! -name '._*' -print0 |
             while IFS= read -r -d '' f; do
                 dest=$(basename "$f")
-                dest="${RAW_RENAMES[$dest]:-$dest}"
+                dest=$(raw_rename "$dest")
                 cp -f "$f" "$DATA_DIR/bin/raw_wns/$dest" || exit 1
                 echo "$dest"
             done > "$list" || exit 1
@@ -228,77 +246,95 @@ all_present() {
 download_wordnets() {
     local raw="$DATA_DIR/bin/raw_wns"
     local record="$raw/sources.tsv"
-    local -A recorded=() current=()
-    local -a order=() fresh=() names=()
-    local stem url files f fname list
+    # URL -> "file file ..." maps, as pairs of indexed arrays (bash 3.2 has no
+    # associative arrays): rec_* from sources.tsv, cur_* for this run.
+    local -a rec_urls=() rec_files=() cur_urls=() cur_files=()
+    local -a order=() fresh=() names=() keep=()
+    local stem url files f fname list i
     if [[ -f "$record" ]]; then
         while IFS=$'\t' read -r url files; do
-            recorded["$url"]="$files"
+            rec_urls+=("$url")
+            rec_files+=("$files")
         done < "$record"
     fi
     list=$(mktemp)
     FAILED_DOWNLOADS=()
     while IFS=$'\t' read -r stem url; do
-        [[ -v current["$url"] ]] && continue  # listed twice
+        # listed twice
+        index_of "$url" ${cur_urls[@]+"${cur_urls[@]}"} > /dev/null && continue
         order+=("$url")
-        if [[ -v recorded["$url"] ]]; then
-            read -ra names <<< "${recorded[$url]}"
-            if all_present "$raw" "${names[@]}"; then
+        if i=$(index_of "$url" ${rec_urls[@]+"${rec_urls[@]}"}); then
+            read -ra names <<< "${rec_files[i]}"
+            if all_present "$raw" ${names[@]+"${names[@]}"}; then
                 echo "  $stem already present, skipping."
-                current["$url"]="${recorded[$url]}"
+                cur_urls+=("$url")
+                cur_files+=("${rec_files[i]}")
                 continue
             fi
         elif fname=$(direct_xml_name "$url") && [[ -f "$raw/$fname" ]]; then
             echo "  $fname already present, skipping."
-            current["$url"]="$fname"
+            cur_urls+=("$url")
+            cur_files+=("$fname")
             continue
         fi
         if fetch_wordnet "$stem" "$url" "$list"; then
-            current["$url"]=$(tr '\n' ' ' < "$list")
-            current["$url"]="${current[$url]% }"
-            [[ -v recorded["$url"] ]] || fresh+=("$stem")
+            files=$(tr '\n' ' ' < "$list")
+            cur_urls+=("$url")
+            cur_files+=("${files% }")
+            index_of "$url" ${rec_urls[@]+"${rec_urls[@]}"} > /dev/null ||
+                fresh+=("$stem")
         else
             echo "  WARNING: failed to fetch $stem from $url (skipping)" >&2
             FAILED_DOWNLOADS+=("$stem: $url")
             # Keep whatever this URL left before.
-            [[ -v recorded["$url"] ]] && current["$url"]="${recorded[$url]}"
+            if i=$(index_of "$url" ${rec_urls[@]+"${rec_urls[@]}"}); then
+                cur_urls+=("$url")
+                cur_files+=("${rec_files[i]}")
+            fi
         fi
     done < <(get_wordnet_urls)
     rm -f "$list"
 
-    local -A keep=()
-    for url in "${!current[@]}"; do
-        read -ra names <<< "${current[$url]}"
-        for f in "${names[@]}"; do keep["$f"]=1; done
+    for ((i = 0; i < ${#cur_files[@]}; i++)); do
+        read -ra names <<< "${cur_files[i]}"
+        keep+=(${names[@]+"${names[@]}"})
     done
     # Files of URLs no longer listed. If a download failed, they may be the
     # only copy of that wordnet, so keep them (and their record) until it works.
-    for url in "${!recorded[@]}"; do
-        [[ -v current["$url"] ]] && continue
+    for ((i = 0; i < ${#rec_urls[@]}; i++)); do
+        url="${rec_urls[i]}"
+        index_of "$url" ${cur_urls[@]+"${cur_urls[@]}"} > /dev/null && continue
         if [[ ${#FAILED_DOWNLOADS[@]} -gt 0 ]]; then
-            current["$url"]="${recorded[$url]}"
+            cur_urls+=("$url")
+            cur_files+=("${rec_files[i]}")
             order+=("$url")
             continue
         fi
-        read -ra names <<< "${recorded[$url]}"
-        for f in "${names[@]}"; do
-            if [[ ! -v keep["$f"] && -f "$raw/$f" ]]; then
+        read -ra names <<< "${rec_files[i]}"
+        for f in ${names[@]+"${names[@]}"}; do
+            if ! index_of "$f" ${keep[@]+"${keep[@]}"} > /dev/null &&
+                    [[ -f "$raw/$f" ]]; then
                 echo "  Removing $f (its URL is no longer in wordnets.toml)"
                 rm -f "$raw/$f"
             fi
         done
     done
     # Unrecorded files left by an earlier release of a newly recorded archive.
-    for stem in "${fresh[@]}"; do
+    for stem in ${fresh[@]+"${fresh[@]}"}; do
         for f in "$raw/$stem"*.xml "$raw/$stem"*.xml.gz "$raw/$stem"*.xml.xz; do
-            [[ -f "$f" && ! -v keep["$(basename "$f")"] ]] || continue
+            [[ -f "$f" ]] || continue
+            index_of "$(basename "$f")" ${keep[@]+"${keep[@]}"} > /dev/null && continue
             echo "  Removing $(basename "$f") (superseded by the $stem download)"
             rm -f "$f"
         done
     done
 
-    for url in "${order[@]}"; do
-        printf '%s\t%s\n' "$url" "${current[$url]:-}"
+    for url in ${order[@]+"${order[@]}"}; do
+        files=""
+        if i=$(index_of "$url" ${cur_urls[@]+"${cur_urls[@]}"}); then
+            files="${cur_files[i]}"
+        fi
+        printf '%s\t%s\n' "$url" "$files"
     done | grep -v $'\t$' > "$record.tmp" || true
     mv "$record.tmp" "$record"
 }
