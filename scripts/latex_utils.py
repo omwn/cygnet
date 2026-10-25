@@ -36,6 +36,7 @@ WORDNET_NAMES: dict[str, str] = {
     "omw-nl":      "Open Dutch WordNet",
     "omw-nn":      "Norwegian Wordnet (Nynorsk)",
     "omw-pl":      "plWordNet",
+    "plwn":        "plWordNet",
     "omw-ro":      "Romanian Wordnet",
     "omw-sk":      "Slovak WordNet",
     "omw-sl":      "sloWNet",

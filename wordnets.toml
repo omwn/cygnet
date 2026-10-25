@@ -111,8 +111,8 @@ nl = ["https://raw.githubusercontent.com/cltl/OpenDutchWordnet/refs/heads/master
 # Norwegian Nynorsk — OMW Norwegian Nynorsk
 nn = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-nn-2.0.tar.xz"]
 
-# Polish — OMW Polish
-pl = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-pl-2.0.tar.xz"]
+# Polish — plWordNet 5.0
+pl = ["https://clarin-pl.eu/server/api/core/bitstreams/handle/11321/1019/plwordnet-5.0-wn-lmf-1.4-2026-10-23.xml.gz"]
 
 # Portuguese — OpenWordNet-PT
 pt = ["https://github.com/own-pt/openWordnet-PT/releases/download/v1.1.0/own-pt-2026.04.07.tar.xz",
