@@ -13,6 +13,12 @@ import pytest
 from lxml import etree
 
 from cyg.converters import WordNetToCygnetConverter
+from cyg.presynth import (
+    read_manifest,
+    read_manifest_converter,
+    source_hash,
+    write_manifest,
+)
 from cyg.multilex import (
     SharedConcepts,
     build_concept_map,
@@ -320,33 +326,98 @@ def test_merge_order_puts_low_trust_last_worst_last(tmp_path, monkeypatch):
                      "bad-xx-2.xml", "Uz-uz-1.0.xml", "mtg-1.0.xml"]
 
 
-def test_batch_writes_manifest(tmp_path, monkeypatch):
-    """Step 2 lists both converted and reused outputs in the manifest."""
+class _FakeConverter:
+    """Stands in for WordNetToCygnetConverter: reads IDs, writes a stub."""
+
+    def __init__(self, **kwargs):
+        pass
+
+    def read_metadata(self, path):
+        h = read_lexicon_header(Path(path))
+        self.lexicon_id, self.lexicon_version = h.id, h.version
+        return None, None
+
+    def convert_from_tree(self, root):
+        pass
+
+    def save(self, path):
+        Path(path).write_text("<CygnetResource/>")
+
+
+def _run_batch(tmp_path, monkeypatch, presynth_files: dict[str, str]) -> Path:
+    """Run Step 2 on the test release with presynth_files already in place."""
     raw, toml = _raw_release(tmp_path)
     out = tmp_path / "presynth"
-    out.mkdir()
-    _write(out / "kin-ar-0.1.xml", "<CygnetResource/>")    # reused
-    _write(out / "stale-9.xml", "<CygnetResource/>")       # not planned
-
-    class FakeConverter:
-        def __init__(self, **kwargs):
-            pass
-
-        def read_metadata(self, path):
-            h = read_lexicon_header(Path(path))
-            self.lexicon_id, self.lexicon_version = h.id, h.version
-            return None, None
-
-        def convert_from_tree(self, root):
-            pass
-
-        def save(self, path):
-            Path(path).write_text("<CygnetResource/>")
-
-    monkeypatch.setattr(batch, "WordNetToCygnetConverter", FakeConverter)
+    out.mkdir(exist_ok=True)
+    for name, text in presynth_files.items():
+        _write(out / name, text)
+    monkeypatch.setattr(batch, "WordNetToCygnetConverter", _FakeConverter)
     monkeypatch.setattr(batch, "_EN_BASE_IDS", frozenset({"omw-arb"}))
     monkeypatch.setattr(batch, "_EN_BASE_FILENAME_PATTERNS", ("omw-arb",))
     batch.batch_convert(cili_file="cili.xml", toml_path=toml, raw_wns_dir=raw,
                         output_dir=out)
-    planned = (out / "manifest.txt").read_text().split()
-    assert sorted(planned) == ["kin-0.1.xml", "kin-ar-0.1.xml", "omw-arb-0.1.xml"]
+    return out
+
+
+def _current_converter() -> str:
+    return source_hash(batch.CONVERTER_SOURCES)
+
+
+def test_batch_writes_manifest(tmp_path, monkeypatch):
+    """Step 2 lists both converted and reused outputs in the manifest."""
+    manifest = f"# converter {_current_converter()}\nkin-ar-0.1.xml\n"
+    out = _run_batch(tmp_path, monkeypatch, {
+        "manifest.txt": manifest,
+        "kin-ar-0.1.xml": "<old/>",           # reused
+        "stale-9.xml": "<CygnetResource/>",   # not planned
+    })
+    assert sorted(read_manifest(out)) == [
+        "kin-0.1.xml", "kin-ar-0.1.xml", "omw-arb-0.1.xml"]
+    assert read_manifest_converter(out) == _current_converter()
+
+
+def test_batch_reuses_output_of_same_converter(tmp_path, monkeypatch):
+    """An output the same converter made is not converted again."""
+    manifest = f"# converter {_current_converter()}\nkin-ar-0.1.xml\n"
+    out = _run_batch(tmp_path, monkeypatch, {
+        "manifest.txt": manifest, "kin-ar-0.1.xml": "<old/>"})
+    assert (out / "kin-ar-0.1.xml").read_text() == "<old/>"
+
+
+@pytest.mark.parametrize("manifest", [
+    "# converter 0123456789abcdef\nkin-ar-0.1.xml\n",  # another converter
+    "kin-ar-0.1.xml\n",                                 # made before hashes
+    None,                                               # no manifest
+])
+def test_batch_reconverts_output_of_other_converter(tmp_path, monkeypatch, manifest):
+    """An output from another or unknown converter is converted again."""
+    files = {"kin-ar-0.1.xml": "<old/>"}
+    if manifest is not None:
+        files["manifest.txt"] = manifest
+    out = _run_batch(tmp_path, monkeypatch, files)
+    assert (out / "kin-ar-0.1.xml").read_text() == "<CygnetResource/>"
+
+
+def test_batch_reconverts_output_not_in_manifest(tmp_path, monkeypatch):
+    """An output the manifest does not list is converted again."""
+    manifest = f"# converter {_current_converter()}\nomw-arb-0.1.xml\n"
+    out = _run_batch(tmp_path, monkeypatch, {
+        "manifest.txt": manifest, "kin-ar-0.1.xml": "<old/>"})
+    assert (out / "kin-ar-0.1.xml").read_text() == "<CygnetResource/>"
+
+
+def test_source_hash_changes_with_content(tmp_path):
+    a = _write(tmp_path / "a.py", "x = 1\n")
+    first = source_hash([a])
+    assert source_hash([a]) == first and len(first) == 16
+    a.write_text("x = 2\n")
+    assert source_hash([a]) != first
+
+
+def test_manifest_round_trip(tmp_path):
+    write_manifest(tmp_path, ["a-1.xml", "b-2.xml"], "0123456789abcdef")
+    assert read_manifest(tmp_path) == ["a-1.xml", "b-2.xml"]
+    assert read_manifest_converter(tmp_path) == "0123456789abcdef"
+    write_manifest(tmp_path, ["a-1.xml"])
+    assert read_manifest(tmp_path) == ["a-1.xml"]
+    assert read_manifest_converter(tmp_path) is None

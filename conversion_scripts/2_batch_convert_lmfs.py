@@ -9,8 +9,15 @@ from pathlib import Path
 
 import tomllib
 
+import cyg.converters
+import cyg.multilex
 from cyg.converters import WordNetToCygnetConverter
-from cyg.presynth import write_manifest
+from cyg.presynth import (
+    read_manifest,
+    read_manifest_converter,
+    source_hash,
+    write_manifest,
+)
 from cyg.multilex import (
     SharedConcepts,
     build_concept_map,
@@ -27,6 +34,11 @@ MUL_KEY = "mul"
 # Written to the output directory: the outputs this build planned (converted
 # now or reused).  6_synthesise.py merges only these, so outputs left over
 # from earlier builds (a dropped or replaced wordnet) are not merged.
+
+# The code that determines the outputs. An existing output is reused only if
+# the last manifest lists it with the same hash of these files; otherwise it
+# is converted again, so a converter change reaches every wordnet.
+CONVERTER_SOURCES = (cyg.converters.__file__, cyg.multilex.__file__, __file__)
 
 # Lexicon IDs that are valid as the English base (first wordnet processed).
 # Both OEWN and the OMW English wordnet provide the synset backbone.
@@ -226,6 +238,12 @@ def batch_convert(cili_file, toml_path, raw_wns_dir="raw_wns", output_dir="cygne
     xml_files = [p for p in xml_files if p not in skip]
 
     print(f"Found {len(xml_files)} files to process")
+    converter_hash = source_hash(CONVERTER_SOURCES)
+    if read_manifest_converter(output_path) == converter_hash:
+        reusable = set(read_manifest(output_path) or [])
+    else:
+        reusable = set()
+        print(f"Converter {converter_hash} has not made these outputs: converting all")
     print()
 
     success_count = 0
@@ -297,7 +315,7 @@ def batch_convert(cili_file, toml_path, raw_wns_dir="raw_wns", output_dir="cygne
             output_filename = f"{lexicon_id}-{lexicon_version}.xml"
             output_file = output_path / output_filename
 
-            if output_file.exists():
+            if output_file.exists() and output_filename in reusable:
                 print(f"  Skipping {xml_file.name} (output {output_filename} already exists)")
                 skipped_count += 1
                 planned_outputs.append(output_filename)
@@ -318,7 +336,7 @@ def batch_convert(cili_file, toml_path, raw_wns_dir="raw_wns", output_dir="cygne
 
         print()
 
-    write_manifest(output_path, planned_outputs)
+    write_manifest(output_path, planned_outputs, converter_hash)
 
     print("=" * 70)
     print("Batch conversion complete!")

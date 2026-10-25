@@ -7,11 +7,15 @@ planned.  Step 6 and the reporting scripts read them back.
 
 from __future__ import annotations
 
+import hashlib
+from collections.abc import Iterable
 from pathlib import Path
 
-# Lists the outputs Step 2 planned, one per line; anything else in the
-# directory is left over from an earlier build.
+# Lists the outputs Step 2 planned, one per line, after a comment line naming
+# the converter that made them; anything else in the directory is left over
+# from an earlier build.
 MANIFEST_NAME = "manifest.txt"
+_CONVERTER_PREFIX = "# converter "
 
 
 def log_path(xml_path: Path | str) -> Path:
@@ -46,15 +50,33 @@ def stem_resource(stem: str, codes: list[str] | tuple[str, ...]) -> str | None:
     return None
 
 
-def write_manifest(presynth: Path, names: list[str]) -> None:
-    """Record the files Step 2 planned.
+def source_hash(paths: Iterable[Path | str]) -> str:
+    """A short hash of the contents of source files, identifying a converter.
+
+    Args:
+        paths: The source files, in a fixed order.
+
+    Returns:
+        The first 16 hex digits of the SHA-256 of their contents.
+    """
+    digest = hashlib.sha256()
+    for path in paths:
+        digest.update(Path(path).read_bytes())
+    return digest.hexdigest()[:16]
+
+
+def write_manifest(presynth: Path, names: list[str],
+                   converter: str | None = None) -> None:
+    """Record the files Step 2 planned, and the converter that made them.
 
     Args:
         presynth: The pre-synth directory.
         names: The planned XML file names.
+        converter: The converter's source_hash(), if known.
     """
+    header = f"{_CONVERTER_PREFIX}{converter}\n" if converter else ""
     (presynth / MANIFEST_NAME).write_text(
-        "".join(f"{name}\n" for name in names), encoding="utf-8"
+        header + "".join(f"{name}\n" for name in names), encoding="utf-8"
     )
 
 
@@ -70,4 +92,23 @@ def read_manifest(presynth: Path) -> list[str] | None:
     manifest = presynth / MANIFEST_NAME
     if not manifest.exists():
         return None
-    return manifest.read_text(encoding="utf-8").split()
+    return [line for line in manifest.read_text(encoding="utf-8").split("\n")
+            if line and not line.startswith("#")]
+
+
+def read_manifest_converter(presynth: Path) -> str | None:
+    """The converter that made the files in the manifest.
+
+    Args:
+        presynth: The pre-synth directory.
+
+    Returns:
+        Its source_hash(), or None if there is no manifest or it names none.
+    """
+    manifest = presynth / MANIFEST_NAME
+    if not manifest.exists():
+        return None
+    with manifest.open(encoding="utf-8") as f:
+        first = f.readline().rstrip("\n")
+    return first.removeprefix(_CONVERTER_PREFIX) if first.startswith(
+        _CONVERTER_PREFIX) else None
