@@ -166,12 +166,15 @@ def test_archive_skips_appledouble_files(work):
     (pkg / "._own-pt-1.0.xml").write_bytes(b"\x00\x05\x16\x07 not xml")
     subprocess.run(["tar", "cJf", str(work / "own-pt-1.0.tar.xz"),
                     "-C", str(work / "pkg"), "own-pt"], check=True)
+    listing = work / "listing"
     script = (f"set -euo pipefail\nDATA_DIR={work}\n"
+              + "declare -A RAW_RENAMES=()\n"
               + _download_standalone_source()
-              + "download_standalone own-pt file://own-pt-1.0.tar.xz\n")
+              + f"download_standalone own-pt file://own-pt-1.0.tar.xz {listing}\n")
 
     result = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
 
     assert result.returncode == 0, result.stderr
     names = sorted(p.name for p in (work / "bin" / "raw_wns").iterdir())
     assert names == ["own-pt-1.0.xml"]
+    assert listing.read_text() == "own-pt-1.0.xml\n"

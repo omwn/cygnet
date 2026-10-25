@@ -117,9 +117,16 @@ run_pipeline() {
         python "$PROJECT_DIR/conversion_scripts/$1" "${@:2}")
 }
 
-# Download a wordnet archive and extract its XML files into bin/raw_wns/ (flat).
+# Archive members saved under another name in bin/raw_wns/, so that Step 2
+# finds them by the URL's stem.
+declare -A RAW_RENAMES=(
+    [deWordNet.xml]=odenet.xml  # the ODEnet archive
+)
+
+# Download a wordnet archive and extract its XML files into bin/raw_wns/ (flat),
+# writing the names of the extracted files, one per line, to $3.
 download_standalone() {
-    local name="$1" url="$2"
+    local name="$1" url="$2" list="$3"
     (
         # This subshell is invoked as `if ! download_standalone ...; then`,
         # which suspends `set -e` for everything inside it (a well-known
@@ -127,7 +134,7 @@ download_standalone() {
         # under test, including nested subshells). Each step below must
         # therefore check its own exit status explicitly with `|| exit 1`
         # rather than relying on inherited errexit.
-        local tmpdir
+        local tmpdir dest
         tmpdir=$(mktemp -d)
         trap 'rm -rf "$tmpdir"' EXIT
         if [[ "$url" == file://* ]]; then
@@ -147,10 +154,153 @@ download_standalone() {
             tar xf "$tmpdir/archive" -C "$tmpdir/" || exit 1
         fi
         # Skip macOS AppleDouble metadata (._*) that some archives carry.
+        # Overwrite: a file of the same name may be left from an older release.
         find "$tmpdir" \( -name '*.xml' -o -name '*.xml.gz' -o -name '*.xml.xz' \) \
-            ! -name '._*' \
-            -exec cp --update=none {} "$DATA_DIR/bin/raw_wns/" \;
+            ! -name '._*' -print0 |
+            while IFS= read -r -d '' f; do
+                dest=$(basename "$f")
+                dest="${RAW_RENAMES[$dest]:-$dest}"
+                cp -f "$f" "$DATA_DIR/bin/raw_wns/$dest" || exit 1
+                echo "$dest"
+            done > "$list" || exit 1
+        if [[ ! -s "$list" ]]; then
+            echo "  No XML files found in $url" >&2
+            exit 1
+        fi
     )
+}
+
+# The file name a direct-XML URL (possibly compressed) is saved as; fails for
+# archives.
+direct_xml_name() {
+    local url_path="${1%%\?*}"  # strip query string for extension/filename checks
+    [[ "$url_path" == *.xml.gz || "$url_path" == *.xml.xz || "$url_path" == *.xml ]] ||
+        return 1
+    basename "$url_path"
+}
+
+# Fetch one wordnets.toml URL into bin/raw_wns/, writing the names of the files
+# it produced, one per line, to $3.
+fetch_wordnet() {
+    local stem="$1" url="$2" list="$3" fname
+    if ! fname=$(direct_xml_name "$url"); then
+        download_standalone "$stem" "$url" "$list"
+        return
+    fi
+    if [[ "$url" == file://* ]]; then
+        local local_path="${url#file://}"
+        [[ "$local_path" != /* ]] && local_path="$DATA_DIR/$local_path"
+        echo "  Copying $fname..."
+        cp "$local_path" "$DATA_DIR/bin/raw_wns/$fname" || return 1
+    else
+        echo "  Downloading $fname..."
+        if ! curl -fSL -o "$DATA_DIR/bin/raw_wns/$fname" "$url"; then
+            rm -f "$DATA_DIR/bin/raw_wns/$fname"
+            return 1
+        fi
+    fi
+    echo "$fname" > "$list"
+}
+
+# True if every named file ($2...) exists in directory $1 (and there is one).
+all_present() {
+    local dir="$1" f
+    shift
+    [[ $# -gt 0 ]] || return 1
+    for f in "$@"; do
+        [[ -f "$dir/$f" ]] || return 1
+    done
+}
+
+# Download the wordnets in wordnets.toml into bin/raw_wns/.
+#
+# bin/raw_wns/sources.tsv records the files each URL produced
+# ("url<TAB>file file ..."). A URL whose files are all present is skipped;
+# a new or changed URL (e.g. a version bump) is fetched, and the files of a
+# URL no longer listed are deleted, so that Step 2, which finds files by
+# their unversioned stem, never picks up an old release.
+#
+# Files from before this record existed are not listed in it: a direct-XML
+# file of the right name is kept, an archive is fetched again, and any other
+# file matching its stem is deleted.
+#
+# Sets FAILED_DOWNLOADS to "stem: url" for each URL that could not be fetched.
+download_wordnets() {
+    local raw="$DATA_DIR/bin/raw_wns"
+    local record="$raw/sources.tsv"
+    local -A recorded=() current=()
+    local -a order=() fresh=() names=()
+    local stem url files f fname list
+    if [[ -f "$record" ]]; then
+        while IFS=$'\t' read -r url files; do
+            recorded["$url"]="$files"
+        done < "$record"
+    fi
+    list=$(mktemp)
+    FAILED_DOWNLOADS=()
+    while IFS=$'\t' read -r stem url; do
+        [[ -v current["$url"] ]] && continue  # listed twice
+        order+=("$url")
+        if [[ -v recorded["$url"] ]]; then
+            read -ra names <<< "${recorded[$url]}"
+            if all_present "$raw" "${names[@]}"; then
+                echo "  $stem already present, skipping."
+                current["$url"]="${recorded[$url]}"
+                continue
+            fi
+        elif fname=$(direct_xml_name "$url") && [[ -f "$raw/$fname" ]]; then
+            echo "  $fname already present, skipping."
+            current["$url"]="$fname"
+            continue
+        fi
+        if fetch_wordnet "$stem" "$url" "$list"; then
+            current["$url"]=$(tr '\n' ' ' < "$list")
+            current["$url"]="${current[$url]% }"
+            [[ -v recorded["$url"] ]] || fresh+=("$stem")
+        else
+            echo "  WARNING: failed to fetch $stem from $url (skipping)" >&2
+            FAILED_DOWNLOADS+=("$stem: $url")
+            # Keep whatever this URL left before.
+            [[ -v recorded["$url"] ]] && current["$url"]="${recorded[$url]}"
+        fi
+    done < <(get_wordnet_urls)
+    rm -f "$list"
+
+    local -A keep=()
+    for url in "${!current[@]}"; do
+        read -ra names <<< "${current[$url]}"
+        for f in "${names[@]}"; do keep["$f"]=1; done
+    done
+    # Files of URLs no longer listed. If a download failed, they may be the
+    # only copy of that wordnet, so keep them (and their record) until it works.
+    for url in "${!recorded[@]}"; do
+        [[ -v current["$url"] ]] && continue
+        if [[ ${#FAILED_DOWNLOADS[@]} -gt 0 ]]; then
+            current["$url"]="${recorded[$url]}"
+            order+=("$url")
+            continue
+        fi
+        read -ra names <<< "${recorded[$url]}"
+        for f in "${names[@]}"; do
+            if [[ ! -v keep["$f"] && -f "$raw/$f" ]]; then
+                echo "  Removing $f (its URL is no longer in wordnets.toml)"
+                rm -f "$raw/$f"
+            fi
+        done
+    done
+    # Unrecorded files left by an earlier release of a newly recorded archive.
+    for stem in "${fresh[@]}"; do
+        for f in "$raw/$stem"*.xml "$raw/$stem"*.xml.gz "$raw/$stem"*.xml.xz; do
+            [[ -f "$f" && ! -v keep["$(basename "$f")"] ]] || continue
+            echo "  Removing $(basename "$f") (superseded by the $stem download)"
+            rm -f "$f"
+        done
+    done
+
+    for url in "${order[@]}"; do
+        printf '%s\t%s\n' "$url" "${current[$url]:-}"
+    done | grep -v $'\t$' > "$record.tmp" || true
+    mv "$record.tmp" "$record"
 }
 
 # Parse wordnets.toml and emit "stem<TAB>url" lines (no tomllib dependency needed).
@@ -215,47 +365,7 @@ with open(f'{d}/cili_defs.tsv') as fin, open(f'{d}/cili.tsv', 'w', newline='') a
 
     # Wordnets (from wordnets.toml)
     echo "  Downloading wordnets from wordnets.toml..."
-    FAILED_DOWNLOADS=()
-    while IFS=$'\t' read -r stem url; do
-        url_path="${url%%\?*}"  # strip query string for extension/filename checks
-        if [[ "$url_path" == *.xml.gz ]] || [[ "$url_path" == *.xml.xz ]] || [[ "$url_path" == *.xml ]]; then
-            # Direct XML (possibly compressed) — download or copy to bin/raw_wns/
-            fname="$DATA_DIR/bin/raw_wns/$(basename "$url_path")"
-            if [ ! -f "$fname" ]; then
-                if [[ "$url" == file://* ]]; then
-                    local_path="${url#file://}"
-                    [[ "$local_path" != /* ]] && local_path="$DATA_DIR/$local_path"
-                    echo "  Copying $(basename "$url")..."
-                    cp "$local_path" "$fname"
-                else
-                    echo "  Downloading $(basename "$url")..."
-                    if ! curl -fSL -o "$fname" "$url"; then
-                        echo "  WARNING: failed to download $url (skipping)" >&2
-                        rm -f "$fname"
-                        FAILED_DOWNLOADS+=("$stem: $url")
-                    fi
-                fi
-            else
-                echo "  $(basename "$url") already present, skipping."
-            fi
-        else
-            # Archive — extract and copy XMLs flat into bin/raw_wns/
-            if ! compgen -G "$DATA_DIR/bin/raw_wns/${stem}*.xml" > /dev/null 2>&1 && \
-               ! compgen -G "$DATA_DIR/bin/raw_wns/*/${stem}*/*.xml" > /dev/null 2>&1; then
-                if ! download_standalone "$stem" "$url"; then
-                    echo "  WARNING: failed to fetch $stem from $url (skipping)" >&2
-                    FAILED_DOWNLOADS+=("$stem: $url")
-                fi
-            else
-                echo "  $stem already present, skipping."
-            fi
-        fi
-    done < <(get_wordnet_urls)
-
-    # ODEnet archive uses 'deWordNet.xml' internally; rename to match stem.
-    [[ -f "$DATA_DIR/bin/raw_wns/deWordNet.xml" ]] && \
-        [[ ! -f "$DATA_DIR/bin/raw_wns/odenet.xml" ]] && \
-        mv "$DATA_DIR/bin/raw_wns/deWordNet.xml" "$DATA_DIR/bin/raw_wns/odenet.xml" || true
+    download_wordnets
 
     echo "  Downloads complete."
     if [[ ${#FAILED_DOWNLOADS[@]} -gt 0 ]]; then
