@@ -67,6 +67,11 @@ The XML must declare **DTD version 1.1 or later**:
 | `dc:format` | Set to `OMW-LMF` |
 | `confidenceScore` | Confidence in correctness, 0–1; defaults to 1 if omitted. Only values of 1 are considered for ILI inclusion. |
 
+`confidenceScore` is also honoured on individual `Synset`, `Sense`,
+`SynsetRelation` and `SenseRelation` elements, not just on the `Lexicon`
+itself: any one below 0.6 is dropped during conversion (a hard cutoff, not
+currently configurable per resource).
+
 **`id`** — A short, 3–7 character lowercase ASCII identifier for the lexicon
 (e.g. `pwn`, `bhsind`). Lexicon IDs are persistent across versions and
 registered with the ILI maintainers, who keep a list of known IDs. If you do

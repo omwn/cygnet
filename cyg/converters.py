@@ -338,6 +338,30 @@ class ExampleRecord(NamedTuple):
 # Output records are turned into elements this many at a time when written.
 WRITE_CHUNK_SIZE = 10000
 
+# A source's own confidenceScore on a Synset/Sense/Relation (0-1, defaults to
+# 1.0 when unset -- most sources never set it) below this is dropped. A
+# simple hard cutoff, not configurable per resource/UI yet: some sources
+# (e.g. Estonian wordnet) put it on nearly every synset with real variance
+# (0.5 vs 1.0), others barely use it or only ever report 1.0. Revisit once/if
+# cygnet moves to an LMF-based intermediate format that can carry per-row
+# confidence through to the DB for a client-side filter instead (see
+# TODO.md's "Replace the Cygnet XML schema with GWA WN-LMF").
+CONFIDENCE_THRESHOLD = 0.6
+
+
+def below_confidence_threshold(elem: etree.Element) -> bool:
+    """True if *elem*'s own confidenceScore (or dc:confidence) is set and
+    below CONFIDENCE_THRESHOLD. Unset or unparsable defaults to 1.0 (never
+    below threshold) -- most sources never set it at all.
+    """
+    raw = elem.get('confidenceScore') or dc_attr(elem, 'confidence')
+    if not raw:
+        return False
+    try:
+        return float(raw) < CONFIDENCE_THRESHOLD
+    except ValueError:
+        return False
+
 
 class WordNetToCygnetConverter:
     """Converts WordNet LMF lexical resources to Cygnet format."""
@@ -456,6 +480,11 @@ class WordNetToCygnetConverter:
             'unlexicalized_skipped': {
                 'synsets': 0,
                 'senses': 0
+            },
+            'low_confidence_skipped': {
+                'synsets': 0,
+                'senses': 0,
+                'relations': 0,
             },
             'shared_concept_not_found': {
                 'count': 0
@@ -1157,6 +1186,8 @@ class WordNetToCygnetConverter:
             by_ili: dict[str, list[str]] = {}
             for lexicon in lexicons:
                 for synset in lexicon.findall('Synset'):
+                    if below_confidence_threshold(synset):
+                        continue  # dropped outright below; never considered a collision
                     ili = synset.get('ili')
                     if ili not in (None, '', 'in'):
                         by_ili.setdefault(ili, []).append(synset.get('id'))
@@ -1175,6 +1206,11 @@ class WordNetToCygnetConverter:
 
             for synset in lexicon.findall('Synset'):
                 synset_id = synset.get('id')
+
+                if below_confidence_threshold(synset):
+                    self.log['low_confidence_skipped']['synsets'] += 1
+                    continue
+
                 pos = synset.get('partOfSpeech', '')
                 ili = synset.get('ili', '')
 
@@ -1265,6 +1301,10 @@ class WordNetToCygnetConverter:
         logger.info(f"  Total concepts: {self.log['statistics']['concepts']['total']}")
         logger.info(f"  Created {self.log['statistics']['glosses']['created']} glosses")
         logger.warning(f"  Found {self.log['synset_concept_pos_mismatches']['total_count']} synset-concept POS mismatches")
+        if self.log['low_confidence_skipped']['synsets']:
+            logger.warning(
+                f"  Skipped {self.log['low_confidence_skipped']['synsets']} synsets "
+                f"below confidence {CONFIDENCE_THRESHOLD}")
 
     def _new_concept(self, concept_id: str, pos: str, synset_id: str) -> None:
         """Create a Concept that is not in CILI, with its provenance.
@@ -1436,6 +1476,10 @@ class WordNetToCygnetConverter:
                     old_sense_id = sense.get('id')
                     synset_ref = sense.get('synset')
 
+                    if below_confidence_threshold(sense):
+                        self.log['low_confidence_skipped']['senses'] += 1
+                        continue
+
                     if not synset_ref:
                         self.log['sense_missing_synset']['count'] += 1
                         continue
@@ -1498,6 +1542,10 @@ class WordNetToCygnetConverter:
             logger.warning(
                 f"  Found {total_invalid} invalid POS value(s), set to unknown ({breakdown})"
             )
+        if self.log['low_confidence_skipped']['senses']:
+            logger.warning(
+                f"  Skipped {self.log['low_confidence_skipped']['senses']} senses "
+                f"below confidence {CONFIDENCE_THRESHOLD}")
 
     def _get_concept_ontological_category(self, concept_id: str) -> str | None:
         """Get the ontological category for a concept (O(1) lookup)."""
@@ -1713,6 +1761,9 @@ class WordNetToCygnetConverter:
 
                 source_concept = self.synset_to_concept[synset_id]
                 for rel in synset.findall('SynsetRelation'):
+                    if below_confidence_threshold(rel):
+                        self.log['low_confidence_skipped']['relations'] += 1
+                        continue
                     target_synset = rel.get('target')
                     rel_type = self._relation_type(rel)
                     if target_synset in self.synset_to_concept:
@@ -1736,6 +1787,9 @@ class WordNetToCygnetConverter:
 
                     source_sense = self.old_sense_to_new_sense[old_sense_id]
                     for rel in sense.findall('SenseRelation'):
+                        if below_confidence_threshold(rel):
+                            self.log['low_confidence_skipped']['relations'] += 1
+                            continue
                         target_old_sense = rel.get('target')
                         rel_type = self._relation_type(rel)
                         if target_old_sense in self.old_sense_to_new_sense:
@@ -1812,6 +1866,10 @@ class WordNetToCygnetConverter:
         skipped_count = self.log['relation_processing']['skipped_existing_relations']['concept_relations']['count']
         if skipped_count > 0:
             logger.warning(f"  Skipped {skipped_count} concept relations that already exist in relations file")
+        if self.log['low_confidence_skipped']['relations']:
+            logger.warning(
+                f"  Skipped {self.log['low_confidence_skipped']['relations']} relations "
+                f"below confidence {CONFIDENCE_THRESHOLD}")
 
     def pass4_examples(self, root: etree.Element):
         """

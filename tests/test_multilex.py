@@ -349,6 +349,90 @@ def test_other_relation_dc_description_kept_as_label_without_subtype(tmp_path):
     assert all(r.get("subtype_label") == "fuzzynimia" for r in rels)
 
 
+def test_low_confidence_synset_dropped(tmp_path):
+    """A Synset below CONFIDENCE_THRESHOLD is dropped entirely -- no
+    Concept is created for it, and nothing can reference it."""
+    lmf = _LMF_HEAD.format(id="pr", lang="mul") + """\
+    <Synset id="pr-1" ili="in" partOfSpeech="n" dc:identifier="P:1" confidenceScore="0.5">
+      <Definition language="en">one</Definition>
+    </Synset>
+    <Synset id="pr-2" ili="in" partOfSpeech="n" dc:identifier="P:2" confidenceScore="1.0">
+      <Definition language="en">two</Definition>
+    </Synset>
+""" + _LMF_TAIL
+    concepts = build_concept_map(_write(tmp_path / "pr.xml", lmf))
+    root = _convert(tmp_path, lmf, SharedConcepts(concepts, "concepts"))
+    ids = {c.find("Provenance").get("original_id") for c in root.iter("Concept")}
+    assert "pr-1" not in ids
+    assert "pr-2" in ids
+
+
+def test_low_confidence_sense_dropped(tmp_path):
+    """A Sense below CONFIDENCE_THRESHOLD is dropped; its Synset (and any
+    other sense of it) is unaffected."""
+    lmf = _LMF_HEAD.format(id="pr", lang="en") + """\
+    <Synset id="pr-1" ili="in" partOfSpeech="n">
+      <Definition language="en">one</Definition>
+    </Synset>
+    <LexicalEntry id="pr-e-lo">
+      <Lemma writtenForm="lowconf" partOfSpeech="n"/>
+      <Sense id="pr-e-lo-1" synset="pr-1" confidenceScore="0.5"/>
+    </LexicalEntry>
+    <LexicalEntry id="pr-e-hi">
+      <Lemma writtenForm="highconf" partOfSpeech="n"/>
+      <Sense id="pr-e-hi-1" synset="pr-1" confidenceScore="1.0"/>
+    </LexicalEntry>
+""" + _LMF_TAIL
+    root = _convert(tmp_path, lmf)
+    senses = list(root.iter("Sense"))
+    assert len(senses) == 1
+    assert senses[0].find("Provenance").get("original_id") == "pr-e-hi-1"
+
+
+def test_low_confidence_relation_dropped(tmp_path):
+    """A relation below CONFIDENCE_THRESHOLD is dropped; both synsets it
+    would have connected are unaffected."""
+    lmf = _LMF_HEAD.format(id="pr", lang="mul") + """\
+    <Synset id="pr-1" ili="in" partOfSpeech="n" dc:identifier="P:1">
+      <Definition language="en">one</Definition>
+      <SynsetRelation relType="hypernym" target="pr-2" confidenceScore="0.5"/>
+    </Synset>
+    <Synset id="pr-2" ili="in" partOfSpeech="n" dc:identifier="P:2">
+      <Definition language="en">two</Definition>
+    </Synset>
+""" + _LMF_TAIL
+    concepts = build_concept_map(_write(tmp_path / "pr.xml", lmf))
+    root = _convert(tmp_path, lmf, SharedConcepts(concepts, "concepts"))
+    assert list(root.iter("ConceptRelation")) == []
+    ids = {c.find("Provenance").get("original_id") for c in root.iter("Concept")}
+    assert ids == {"pr-1", "pr-2"}
+
+
+def test_confidence_at_threshold_is_kept(tmp_path):
+    """Exactly CONFIDENCE_THRESHOLD (0.6) is kept -- the cutoff is strictly
+    less-than, not less-than-or-equal."""
+    lmf = _LMF_HEAD.format(id="pr", lang="mul") + """\
+    <Synset id="pr-1" ili="in" partOfSpeech="n" dc:identifier="P:1" confidenceScore="0.6">
+      <Definition language="en">one</Definition>
+    </Synset>
+""" + _LMF_TAIL
+    concepts = build_concept_map(_write(tmp_path / "pr.xml", lmf))
+    root = _convert(tmp_path, lmf, SharedConcepts(concepts, "concepts"))
+    assert "pr-1" in {c.find("Provenance").get("original_id") for c in root.iter("Concept")}
+
+
+def test_missing_confidence_defaults_to_kept(tmp_path):
+    """No confidenceScore at all defaults to 1.0 -- never dropped."""
+    lmf = _LMF_HEAD.format(id="pr", lang="mul") + """\
+    <Synset id="pr-1" ili="in" partOfSpeech="n" dc:identifier="P:1">
+      <Definition language="en">one</Definition>
+    </Synset>
+""" + _LMF_TAIL
+    concepts = build_concept_map(_write(tmp_path / "pr.xml", lmf))
+    root = _convert(tmp_path, lmf, SharedConcepts(concepts, "concepts"))
+    assert "pr-1" in {c.find("Provenance").get("original_id") for c in root.iter("Concept")}
+
+
 @pytest.mark.parametrize("code, problem", [
     ("en", None), ("cmn-Hans", None), ("mul", None), ("uk", None),
     ("obj", "invalid"), ("ua", "invalid"), ("", "missing"), (None, "missing"),
