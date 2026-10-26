@@ -494,6 +494,85 @@ class TestConceptNavigation:
 
 
 # ---------------------------------------------------------------------------
+# Stable links by original synset id
+# ---------------------------------------------------------------------------
+
+class TestOriginalIdLink:
+    def test_id_link_opens_concept(self, page: Page, http_server):
+        """#/search?id=oewn-dog-n opens dog (i3) via the provenance DB."""
+        page.goto(http_server + '#/search?id=oewn-dog-n')
+        page.wait_for_selector(
+            'text=All forms expressing this concept', timeout=_DB_LOAD_TIMEOUT
+        )
+        expect(page.locator('text=⟪i3⟫')).to_be_visible()
+
+    def test_id_link_becomes_concept_url(self, page: Page, http_server):
+        page.goto(http_server + '#/search?id=oewn-dog-n')
+        page.wait_for_selector(
+            'text=All forms expressing this concept', timeout=_DB_LOAD_TIMEOUT
+        )
+        assert '#/search?concept=' in page.url
+
+    def test_wn_link_uses_resource_provenance_only(self, page: Page, http_server):
+        """With &wn=, only that resource's small provenance DB is fetched."""
+        fetched = []
+        page.on('request', lambda r: fetched.append(r.url))
+        page.goto(http_server + '#/search?id=oewn-dog-n&wn=wn-en')
+        page.wait_for_selector(
+            'text=All forms expressing this concept', timeout=_DB_LOAD_TIMEOUT
+        )
+        expect(page.locator('text=⟪i3⟫')).to_be_visible()
+        assert any('/provenance/wn-en.db.gz?v=' in u for u in fetched)
+        assert not any(u.endswith('/provenance.db.gz') for u in fetched)
+
+    def test_split_from_another_build_is_not_used(
+        self, page: Page, http_server_with_stale_split
+    ):
+        """A split index whose version differs from manifest.json's is skipped."""
+        fetched = []
+        page.on('request', lambda r: fetched.append(r.url))
+        page.goto(http_server_with_stale_split + '#/search?id=oewn-dog-n&wn=wn-en')
+        page.wait_for_selector(
+            'text=All forms expressing this concept', timeout=_DB_LOAD_TIMEOUT
+        )
+        expect(page.locator('text=⟪i3⟫')).to_be_visible()
+        assert not any('/provenance/wn-en.db.gz' in u for u in fetched)
+        assert any(u.endswith('/provenance.db.gz') for u in fetched)
+
+    def test_failed_index_fetch_is_retried(self, page: Page, http_server):
+        """A failed index.json fetch is not remembered: the next link retries."""
+        page.route('**/provenance/index.json', lambda route: route.abort(), times=1)
+        page.goto(http_server + '#/search?id=oewn-dog-n&wn=wn-en')
+        page.wait_for_selector(
+            'text=All forms expressing this concept', timeout=_DB_LOAD_TIMEOUT
+        )
+        fetched = []
+        page.on('request', lambda r: fetched.append(r.url))
+        page.goto(http_server + '#/search?q=dog')
+        page.goto(http_server + '#/search?id=oewn-dog-n&wn=wn-en')
+        page.wait_for_url('**/#/search?concept=*', timeout=_DB_LOAD_TIMEOUT)
+        assert any(u.endswith('/provenance/index.json') for u in fetched)
+        assert any('/provenance/wn-en.db.gz?v=' in u for u in fetched)
+
+    def test_id_without_resource_prefix_falls_back(self, page: Page, http_server):
+        """oewn-dog-n names no resource (it is in wn-en): use the whole DB."""
+        fetched = []
+        page.on('request', lambda r: fetched.append(r.url))
+        page.goto(http_server + '#/search?id=oewn-dog-n')
+        page.wait_for_selector(
+            'text=All forms expressing this concept', timeout=_DB_LOAD_TIMEOUT
+        )
+        assert any(u.endswith('/provenance.db.gz') for u in fetched)
+
+    def test_unknown_id_stays_on_search(self, page: Page, http_server):
+        page.goto(http_server + '#/search?id=no-such-synset')
+        page.wait_for_selector('input[placeholder*="word"]', timeout=_DB_LOAD_TIMEOUT)
+        expect(
+            page.locator('text=All forms expressing this concept')
+        ).not_to_be_visible()
+
+
+# ---------------------------------------------------------------------------
 # Path finder
 # ---------------------------------------------------------------------------
 
@@ -920,6 +999,34 @@ class TestUrlParams:
 
 
 # ---------------------------------------------------------------------------
+# Header display-language badge: always-visible indicator of the current
+# display language, next to the Settings button.
+# ---------------------------------------------------------------------------
+
+class TestDisplayLanguageHeaderBadge:
+    def test_badge_shows_english_by_default(self, page_ready: Page):
+        """The header badge shows 'English' before any language is chosen."""
+        expect(
+            page_ready.locator('button[title="Change display language"]')
+        ).to_contain_text('English')
+
+    def test_badge_updates_after_changing_display_language(self, page_ready: Page):
+        """Changing 'Display results in' to French updates the header badge."""
+        page_ready.locator('button[title="Settings"]').click()
+        page_ready.wait_for_selector('text=Display results in', timeout=5_000)
+        page_ready.locator('label:has-text("Display results in") + select, '
+                            'label:has-text("Display results in") ~ select').first.select_option('fr')
+        expect(
+            page_ready.locator('button[title="Change display language"]')
+        ).to_contain_text('French')
+
+    def test_badge_click_opens_settings_panel(self, page_ready: Page):
+        """Clicking the badge opens the same Settings panel as the gear icon."""
+        page_ready.locator('button[title="Change display language"]').click()
+        page_ready.wait_for_selector('text=Display results in', timeout=5_000)
+
+
+# ---------------------------------------------------------------------------
 # Wordnets table: sorting and deduplication
 # ---------------------------------------------------------------------------
 
@@ -1088,6 +1195,29 @@ class TestSenseRelations:
         content = page_ready.content()
         assert 'glowing' in content
 
+
+class TestViewTypeLabels:
+    """Concept view and sense view each show an explicit eyebrow label so
+    the two aren't visually confused with each other."""
+
+    def test_concept_view_shows_concept_label(self, page_ready: Page):
+        _search(page_ready, 'dog')
+        page_ready.locator('.concept-inner').first.click()
+        page_ready.wait_for_selector(_CONCEPT_LOADED, timeout=10_000)
+        expect(page_ready.locator('p.uppercase', has_text='Concept')).to_be_visible()
+
+    def test_sense_view_shows_sense_label(self, page_ready: Page):
+        """Clicking a Sense-relations example link (Wordnets tab) opens the
+        standalone sense view, which must say 'Sense'."""
+        _open_wordnet_summary(page_ready)
+        page_ready.wait_for_selector(
+            '[data-testid="wordnet-summary"] div:has-text("ILI %")', timeout=30_000,
+        )
+        summary = page_ready.locator('[data-testid="wordnet-summary"]')
+        row = summary.locator('tr', has_text='opposite').first
+        row.locator('a').first.click()
+        expect(page_ready.locator('p.uppercase', has_text='Sense')).to_be_visible(timeout=10_000)
+
     def _expand_gleaming_card(self, page: Page) -> None:
         """Search for gleaming, wait for the expand arrow, then click the arrow
         (avoiding the concept-inner which would navigate instead of expanding)."""
@@ -1117,16 +1247,18 @@ class TestSenseRelations:
 
 
 class TestVariantFormSearch:
-    """Searching by a variant form (rank > 0) auto-expands the variants section."""
+    """Sense cards stay collapsed by default (for compact results) and expand on click."""
 
-    def test_variant_search_shows_variants_expanded(self, page_ready: Page):
-        """Searching 'doggo' (a variant of 'dog') shows the Variants row without
-        requiring the user to click to expand the sense card."""
+    def test_variant_search_requires_click_to_expand(self, page_ready: Page):
+        """Searching 'doggo' (a variant of 'dog') does NOT show the Variants row
+        until the sense card's expand arrow is clicked."""
         _search(page_ready, 'doggo')
-        page_ready.wait_for_selector('.sense-box', timeout=_SEARCH_TIMEOUT)
-        expect(
-            page_ready.locator('.sense-box').filter(has_text='Variants')
-        ).to_be_visible()
+        box = page_ready.locator('.sense-box').first
+        box.wait_for(timeout=_SEARCH_TIMEOUT)
+        expect(box.filter(has_text='Variants')).not_to_be_visible()
+        # Click the expand arrow, not concept-inner (which has stopPropagation)
+        box.locator('.text-slate-500.text-sm.pt-1').first.click()
+        expect(box.filter(has_text='Variants')).to_be_visible()
 
     def test_lemma_search_does_not_auto_expand(self, page_ready: Page):
         """Searching the canonical lemma 'dog' does NOT auto-expand the variants

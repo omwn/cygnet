@@ -205,6 +205,7 @@ The header has two sides that are independently customisable:
 | `databases.provenance.filename` | `"provenance.db.gz"` | Provenance DB filename; same directory as `index.html` |
 | `databases.provenance.url` | — | Download URL for the provenance DB (shown in About tab) |
 | `databases.provenance.description` | — | One-line description shown in About tab |
+| `databases.provenance.byResource` | — | Directory (relative to `index.html`) of per-resource provenance DBs, as `build.sh` writes them to `web/provenance/`. Links by original id (`#/search?id=<synset id>`) then fetch only that resource's DB instead of the whole provenance DB (see below) |
 | `logo` | OMW logo | Header logo object `{src, url, alt, name}`; `null` to hide right side |
 | `logo.src` | — | Image path (relative to `index.html`) or URL |
 | `logo.url` | — | Link URL; omit to render image without a hyperlink |
@@ -315,6 +316,41 @@ The `--work-dir` flag tells cygnet's pipeline to use that directory for
 intermediate files instead of cygnet's own `bin/` and `web/`.  Cygnet also
 seeds the work directory's `wordnets.toml` from the provided one and skips
 running the test suite (tests are cygnet-internal).
+
+### Links by original id, and per-resource provenance
+
+`#/search?id=<synset id>` opens the synset that its source wordnet gave that
+id (e.g. `#/search?id=omw-kin-Fa-Br-So`).  Unlike `#/search?concept=<rowid>`,
+it survives rebuilds, so use it for links from outside, such as a CILI
+proposal's `dc:source`.  Resolving it needs provenance, and the whole
+provenance DB is large (mostly Princeton and OEWN).  `build.sh` therefore also
+writes `web/provenance/`, with one small DB per resource and an `index.json`.
+To use them, copy the directory and set `byResource`:
+
+```bash
+rm -rf "$PROJECT_DIR/docs/provenance"
+cp -r "$CYGNET_WORK/web/provenance"      "$PROJECT_DIR/docs/provenance"
+```
+
+```json
+"provenance": { "filename": "mywn-provenance.db.gz", "byResource": "provenance/" }
+```
+
+The resource is the longest resource code the id starts with (LMF ids begin
+with their lexicon's id); give it explicitly with `&wn=<resource code>` if the
+ids do not.  If the id is not found there, the whole provenance DB is loaded.
+
+The split files are only used alongside the main DB from the same build:
+each one's `version` (recorded in `web/provenance/index.json`) is checked
+against `manifest.json`'s build version, so the page never needs to load the
+main DB just to validate a split file, and a split file from an older build
+is ignored (falling back to the whole provenance DB) rather than used.
+Always deploy `provenance/` together with the rest of `web/data/`.
+
+A release may have at most 1,000 assets, so attach the directory as a single
+archive (`tar -cf mywn-provenance-by-resource.tar -C docs provenance`) and
+extract it in the Pages workflow after downloading the databases
+(`tar -xf mywn-provenance-by-resource.tar -C docs`).
 
 ---
 

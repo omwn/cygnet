@@ -8,6 +8,7 @@ web/*.db
 web/*.db.gz
 web/summaries/
 web/data/
+web/provenance/
 reports/
 
 # Editor backup files

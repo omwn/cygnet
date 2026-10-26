@@ -176,6 +176,7 @@ def build_test_db(db_path: Path, prov_path: Path,
     b.write_sense_index(data_dir / 'sense-index')
     b.write_ili_index(data_dir)
     b.write_manifest(data_dir, build_version)
+    b.write_resource_provenance(db_path.parent / 'provenance', build_version)
 
     b.finalize(db_path, prov_path, build_version)
     for path in (db_path, prov_path):
@@ -202,10 +203,15 @@ def test_db_dir(tmp_path_factory):
     shutil.copy(prov_path.with_suffix('.db.gz'), serve_dir / 'provenance.db.gz')
     shutil.copytree(db_path.parent / 'summaries', serve_dir / 'summaries')
     shutil.copytree(db_path.parent / 'data', serve_dir / 'data')
+    shutil.copytree(db_path.parent / 'provenance', serve_dir / 'provenance')
+    databases = {
+        **_DEFAULT_DATABASES,
+        'provenance': {**_DEFAULT_DATABASES['provenance'], 'byResource': 'provenance/'},
+    }
     (serve_dir / 'local.json').write_text(json.dumps({
         'title': 'Cygnet',
         'icon': '🦢',
-        'databases': _DEFAULT_DATABASES,
+        'databases': databases,
         'about': {
             'citation': 'Please cite <a href="#">Test Author (2025)</a> when using this resource.',
         },
@@ -270,6 +276,25 @@ def _copy_serve_dir(src: Path, dst: Path, skip: set[str] = frozenset()) -> None:
 def http_server(test_db_dir):
     """Session-scoped HTTP server serving the test DB directory."""
     server, url = _start_server(str(test_db_dir))
+    yield url
+    server.shutdown()
+
+
+@pytest.fixture(scope='session')
+def http_server_with_stale_split(test_db_dir, tmp_path_factory):
+    """HTTP server whose per-resource provenance index is from another build.
+
+    The split index's version no longer matches manifest.json's, as when a
+    browser holds files from before a redeploy; the UI must fall back to
+    the whole provenance DB rather than use them.
+    """
+    stale_dir = tmp_path_factory.mktemp('serve_stale_split')
+    _copy_serve_dir(test_db_dir, stale_dir)
+    index_path = stale_dir / 'provenance' / 'index.json'
+    index = json.loads(index_path.read_text())
+    index['version'] = 'stale-build'
+    index_path.write_text(json.dumps(index))
+    server, url = _start_server(str(stale_dir))
     yield url
     server.shutdown()
 

@@ -2,6 +2,8 @@
 Core merge logic for synthesising pre-converted Cygnet XML files into SQLite.
 """
 
+import gzip
+import itertools
 import json
 import logging
 import re
@@ -2521,6 +2523,72 @@ class MergeBuilder:
         out_dir.mkdir(parents=True, exist_ok=True)
         (out_dir / 'ili-index.json').write_text(
             json.dumps(index, ensure_ascii=False, separators=(',', ':')),
+            encoding='utf-8',
+        )
+        return len(index)
+
+    def write_resource_provenance(self, out_dir: Path, version: str) -> int:
+        """Split provenance.db into one small gzipped database per resource.
+
+        A ``#/search?id=<original_id>`` link needs only the provenance rows
+        of the one resource that id came from, not the whole provenance
+        database (most of it Princeton and OEWN). Each split file carries
+        the same schema as provenance.db (rowids preserved, so queries
+        written for it work unchanged) plus its own ``build_info``, stamped
+        with *version* -- the same string written to ``manifest.json`` by
+        ``write_manifest()`` -- so the browser can validate a split file
+        against the already-fetched manifest without loading the main
+        database just to check it.
+
+        Args:
+            out_dir: Directory to write ``<resource_code>.db.gz`` files and
+                ``index.json`` into.
+            version: Build version string, also written to this file's
+                ``build_info`` table (see ``finalize()``).
+
+        Returns:
+            Number of resource databases written.
+        """
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for stale in out_dir.glob('*.db.gz'):
+            stale.unlink()
+
+        tables = self.prov_cur.execute(
+            'SELECT rowid, name FROM prov_tables'
+        ).fetchall()
+        codes = dict(self.prov_cur.execute('SELECT rowid, code FROM prov_resources'))
+
+        rows_by_resource = self.prov_cur.execute("""
+            SELECT rowid, table_rowid, item_rowid, resource_rowid, version, original_id
+            FROM provenance
+            ORDER BY resource_rowid
+        """)
+        index: dict[str, dict] = {}
+        for res_rowid, group in itertools.groupby(rows_by_resource, key=lambda row: row[3]):
+            rows = list(group)
+            code = codes[res_rowid]
+            db_path = out_dir / f'{code}.db'
+            dst = sqlite3.connect(db_path)
+            dst.executescript(PROV_SCHEMA)
+            dst.execute(
+                'INSERT INTO prov_resources (rowid, code) VALUES (?, ?)', (res_rowid, code))
+            dst.executemany(
+                'INSERT INTO prov_tables (rowid, name) VALUES (?, ?)', tables)
+            dst.executemany('INSERT INTO provenance VALUES (?, ?, ?, ?, ?, ?)', rows)
+            dst.execute('INSERT INTO build_info (version) VALUES (?)', (version,))
+            dst.commit()
+            dst.execute('VACUUM')
+            dst.close()
+            gz_path = Path(f'{db_path}.gz')
+            with open(db_path, 'rb') as fin, gzip.open(gz_path, 'wb', 9) as fout:
+                shutil.copyfileobj(fin, fout)
+            db_path.unlink()
+            index[code] = {'file': f'{code}.db.gz', 'rows': len(rows)}
+
+        (out_dir / 'index.json').write_text(
+            json.dumps({'version': version, 'resources': dict(sorted(index.items()))},
+                       ensure_ascii=False, separators=(',', ':')),
             encoding='utf-8',
         )
         return len(index)

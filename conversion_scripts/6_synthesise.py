@@ -208,6 +208,11 @@ def main() -> None:
     builder.write_manifest(data_dir, build_version)
     print(f'  build version {build_version}')
 
+    print('\nPhase 13: Writing per-resource provenance databases...')
+    n_prov = builder.write_resource_provenance(
+        db_path.parent / 'provenance', build_version)
+    print(f'  {n_prov:,} resource database(s) written')
+
     print('\nFinalising...')
     builder.finalize(db_path, prov_db_path, build_version)
     print('\nDone.')
