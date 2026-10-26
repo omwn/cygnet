@@ -41,7 +41,7 @@ jobs:
           path: |
             web/*.db.gz
             summaries.tar.gz
-          key: release-db-${{ steps.release.outputs.tag }}
+          key: release-db-v2-${{ steps.release.outputs.tag }}
 
       - name: Download release assets
         if: steps.cache-db.outputs.cache-hit != 'true'
