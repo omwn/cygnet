@@ -249,7 +249,7 @@ class TestMergeCaseVariants:
     def test_nfc_and_nfd_variants_merged_to_one_sense(self, builder_unicode_variants):
         """Same concept, same lemma once normalized — must be merged."""
         removed = builder_unicode_variants.merge_case_variants()
-        assert removed == 1
+        assert removed == {'identical': 1, 'variant': 0}
         n = builder_unicode_variants.cur.execute(
             'SELECT COUNT(*) FROM senses'
         ).fetchone()[0]

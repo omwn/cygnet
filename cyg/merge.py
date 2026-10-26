@@ -798,10 +798,11 @@ class MergeBuilder:
         type_rowid = self._rel_type_rowid(rel_type)
         # Unknown types (e.g. a resource's own relType="other" + dc:type
         # subtype, like plWordnet's "fuzzynimia"/"bliskoznaczność") default
-        # to symmetric, same as the bare 'other' entry below -- a type we
-        # have no curated inverse for is far more often a resource's own
-        # reciprocal sub-relation (declared both ways on purpose) than a
-        # genuinely directional one we just haven't catalogued yet.
+        # to symmetric, same as 'other' itself (mapped to None -- no fixed
+        # inverse -- in SENSE_REVERSE_RELATIONS) -- a type we have no
+        # curated inverse for is far more often a resource's own reciprocal
+        # sub-relation (declared both ways on purpose) than a genuinely
+        # directional one we just haven't catalogued yet.
         inv = INVERSE_SENSE_RELATIONS.get(rel_type, rel_type)
 
         # Conflict: same relation type exists with source/target reversed

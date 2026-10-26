@@ -43,6 +43,7 @@ HYPERNYM_TYPES = frozenset({"hypernym", "instance_hypernym"})
 # 'subevent'), wrongly flagging them as "non-standard" in every wordnet
 # that used them.
 STANDARD_CONCEPT_RELATIONS = frozenset({
+    "other",
     "hypernym", "hyponym",
     "instance_hypernym", "instance_hyponym",
     "mero_member", "holo_member",
@@ -58,6 +59,7 @@ STANDARD_CONCEPT_RELATIONS = frozenset({
 }) | frozenset(INVERSE_CONCEPT_RELATIONS) | frozenset(INVERSE_CONCEPT_RELATIONS.values())
 
 STANDARD_SENSE_RELATIONS = frozenset({
+    "other",
     "antonym", "derivation", "pertainym", "participle",
     "also", "similar", "state",
     "domain_topic", "has_domain_topic",
