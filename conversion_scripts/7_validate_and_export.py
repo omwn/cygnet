@@ -198,8 +198,9 @@ def generate_xml(
 
     # ---- SenseRelationLayer ----
     sense_rel_layer = ET.SubElement(root, 'SenseRelationLayer')
-    for sr_rowid, source_rowid, target_rowid, rel_type in cur.execute("""
-        SELECT sr.rowid, sr.source_rowid, sr.target_rowid, rt.type
+    for sr_rowid, source_rowid, target_rowid, rel_type, subtype, subtype_label in cur.execute("""
+        SELECT sr.rowid, sr.source_rowid, sr.target_rowid, rt.type,
+               sr.subtype, sr.subtype_label
         FROM sense_relations sr
         JOIN relation_types rt ON sr.type_rowid = rt.rowid
         ORDER BY sr.rowid
@@ -216,13 +217,18 @@ def generate_xml(
             sense_rel_layer, 'SenseRelation',
             relation_type=rel_type, source=src, target=tgt,
         )
+        if subtype:
+            rel.set('subtype', subtype)
+        if subtype_label:
+            rel.set('subtype_label', subtype_label)
         if include_provenance:
             add_provenance(rel, prov, 'sense_relations', sr_rowid)
 
     # ---- ConceptRelationLayer ----
     concept_rel_layer = ET.SubElement(root, 'ConceptRelationLayer')
-    for cr_rowid, source_rowid, target_rowid, rel_type in cur.execute("""
-        SELECT sr.rowid, sr.source_rowid, sr.target_rowid, rt.type
+    for cr_rowid, source_rowid, target_rowid, rel_type, subtype, subtype_label in cur.execute("""
+        SELECT sr.rowid, sr.source_rowid, sr.target_rowid, rt.type,
+               sr.subtype, sr.subtype_label
         FROM synset_relations sr
         JOIN relation_types rt ON sr.type_rowid = rt.rowid
         ORDER BY sr.rowid
@@ -239,6 +245,10 @@ def generate_xml(
             concept_rel_layer, 'ConceptRelation',
             relation_type=rel_type, source=src, target=tgt,
         )
+        if subtype:
+            rel.set('subtype', subtype)
+        if subtype_label:
+            rel.set('subtype_label', subtype_label)
         if include_provenance:
             add_provenance(rel, prov, 'synset_relations', cr_rowid)
 

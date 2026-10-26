@@ -556,7 +556,8 @@
 
             // Get sense relations
             const senseRels = cachedExec(`
-                SELECT rt.type, sr.target_rowid as target, sr.rowid as rid
+                SELECT rt.type, sr.target_rowid as target, sr.rowid as rid,
+                       sr.subtype, sr.subtype_label
                 FROM sense_relations sr
                 JOIN relation_types rt ON sr.type_rowid = rt.rowid
                 WHERE sr.source_rowid = ?
@@ -564,7 +565,9 @@
             const sr = senseRels.map(rel => ({
                 t: RELATION_TO_SHORT[rel.type] || rel.type,
                 to: rel.target,
-                rid: rel.rid
+                rid: rel.rid,
+                subtype: rel.subtype || undefined,
+                subtypeLabel: rel.subtype_label || undefined,
             }));
 
             return {
@@ -637,7 +640,8 @@
 
             // Get concept relations
             const rels = cachedExec(`
-                SELECT rt.type, sr.target_rowid as target, sr.rowid as rid
+                SELECT rt.type, sr.target_rowid as target, sr.rowid as rid,
+                       sr.subtype, sr.subtype_label
                 FROM synset_relations sr
                 JOIN relation_types rt ON sr.type_rowid = rt.rowid
                 WHERE sr.source_rowid = ?
@@ -645,7 +649,9 @@
             const cr = rels.map(rel => ({
                 t: RELATION_TO_SHORT[rel.type] || rel.type,
                 to: rel.target,
-                rid: rel.rid
+                rid: rel.rid,
+                subtype: rel.subtype || undefined,
+                subtypeLabel: rel.subtype_label || undefined,
             }));
 
             // Get ARASAAC pictogram IDs
@@ -3155,6 +3161,7 @@
                                                         senseRelsByType[rel.t].push({
                                                             fromLemma: sd.l, toSenseId: toId, rid: rel.rid,
                                                             toForm: rel.toForm, toConcept: rel.toConcept,
+                                                            subtype: rel.subtype, subtypeLabel: rel.subtypeLabel,
                                                         });
                                                     });
                                                 });
@@ -3249,6 +3256,11 @@
                                                                                     {li?.form || `#${rel.to}`}
                                                                                     {<LangBadge lang={li?.lang} currentLang={definitionLanguage} ml="ml-0.5" />}
                                                                                 </a>
+                                                                                {rel.subtypeLabel && (
+                                                                                    <span className="text-slate-400 text-xs italic" title={rel.subtype || ''}>
+                                                                                        ({rel.subtypeLabel})
+                                                                                    </span>
+                                                                                )}
                                                                                 {renderCompactProvenance('synsets', rel.to)}
                                                                             </span>
                                                                         );
@@ -3272,7 +3284,7 @@
                                                                 return (
                                                                 <div key={`sr-${relType}`} className="flex gap-2 flex-wrap items-baseline">
                                                                     <span className="text-slate-500 italic flex-shrink-0">{getRelLabel(relType)}:</span>
-                                                                    {shown.map(({ fromLemma, toSenseId, rid, toForm, toConcept }, i) => {
+                                                                    {shown.map(({ fromLemma, toSenseId, rid, toForm, toConcept, subtype, subtypeLabel }, i) => {
                                                                         // toForm/toConcept are precomputed on the relation itself
                                                                         // (mirroring write_wordnet_summaries()'s src_form/tgt_form) so
                                                                         // the target label never waits on a separate sense fetch --
@@ -3296,6 +3308,11 @@
                                                                                 )}
                                                                                 {li?.lang && li.lang !== definitionLanguage && conceptLabel === targetLabel && (
                                                                                     <LangBadge lang={li.lang} currentLang={definitionLanguage} ml="" />
+                                                                                )}
+                                                                                {subtypeLabel && (
+                                                                                    <span className="text-slate-400 text-xs italic" title={subtype || ''}>
+                                                                                        ({subtypeLabel})
+                                                                                    </span>
                                                                                 )}
                                                                                 {renderCompactProvenance('senses', parseInt(toSenseId))}
                                                                             </span>

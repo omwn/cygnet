@@ -9,6 +9,7 @@ import gc
 import html
 import json
 import logging
+import re
 import sys
 from collections import OrderedDict, defaultdict
 from pathlib import Path
@@ -318,6 +319,11 @@ class RelationRecord(NamedTuple):
     relation_type: str
     source: str
     target: str
+    # A finer-grained sub-relation code/label the source gives beyond
+    # relation_type (see WordNetToCygnetConverter._relation_subtype()), or None for
+    # the vast majority of relations and for a generated inverse.
+    subtype: str | None = None
+    subtype_label: str | None = None
 
 
 class ExampleRecord(NamedTuple):
@@ -1531,18 +1537,58 @@ class WordNetToCygnetConverter:
         return None
 
     @staticmethod
+    def _shorten_uri(value: str) -> str:
+        """The local name of a URI-shaped value: its last path segment or
+        fragment (e.g. "https://w3id.org/own/schema/agent" -> "agent").
+        Returns *value* unchanged if it isn't URI-shaped.
+        """
+        if '://' not in value:
+            return value
+        return re.split(r'[/#]', value.rstrip('/'))[-1]
+
+    @staticmethod
     def _relation_type(rel: etree.Element) -> str:
         """A relation's type: its dc:type when relType is 'other' and one is given.
 
         LMF expresses relations outside its fixed list as relType="other"
         with dc:type naming the real relation (e.g. "possessive").  Keeping
         only 'other' would merge distinct relations and make inverse pairs
-        look like reversed duplicates.
+        look like reversed duplicates. A source that uses its own ontology's
+        URI instead of a bare word (e.g. own-pt's "https://w3id.org/own/
+        schema/agent") is shortened to its local name, so it still matches
+        the catalog.
         """
         rel_type = rel.get('relType')
-        if rel_type == 'other':
-            return dc_attr(rel, 'type') or rel_type
-        return rel_type
+        if rel_type != 'other':
+            return rel_type
+        raw = dc_attr(rel, 'type')
+        return WordNetToCygnetConverter._shorten_uri(raw) if raw else rel_type
+
+    @staticmethod
+    def _relation_subtype(rel: etree.Element, resolved_type: str) -> tuple[str | None, str | None]:
+        """A finer-grained sub-relation code and/or human-readable label the
+        source gives beyond *resolved_type*, or (None, None) when there is
+        none.
+
+        Some sources attach a dc:type more specific than their relType
+        (e.g. plWordnet's relType="diminutive" dc:type="plwn:56" -- a
+        particular diminutive subtype), which _relation_type() does not
+        otherwise surface since it only substitutes dc:type for relType=
+        "other". dc:description (or dc:relation, for the one case that
+        names the general relation family instead of the specific
+        sub-code -- see plWordnet's "unresolved aspect orientation"
+        export-compatibility relations) gives a human-readable label for it,
+        in the source's own language.
+
+        A URI-shaped dc:type (own-pt's own ontology) is treated as another
+        spelling of the relation type itself, not a finer subtype --
+        _relation_type() already resolved it, so it carries no extra
+        information here.
+        """
+        raw = dc_attr(rel, 'type')
+        subtype = raw if raw and '://' not in raw and raw != resolved_type else None
+        label = dc_attr(rel, 'description') or dc_attr(rel, 'relation')
+        return subtype, label
 
     def pass3_relations(self, root: etree.Element):
         """
@@ -1640,6 +1686,15 @@ class WordNetToCygnetConverter:
         logger.info("  Loading all relations...")
         raw_concept_relations = []
         raw_sense_relations = []
+        # (source, target, relation_type) -> (subtype, subtype_label), for
+        # the relations that have one -- kept alongside rather than in the
+        # raw/final tuples themselves, since those also drive dedup and
+        # missing-inverse generation (process_relations(), below) that must
+        # stay keyed on exactly (source, target, type) as before. A
+        # generated inverse is deliberately not looked up here: it has no
+        # subtype of its own.
+        concept_subtypes: dict[tuple[str, str, str], tuple[str | None, str | None]] = {}
+        sense_subtypes: dict[tuple[str, str, str], tuple[str | None, str | None]] = {}
 
         for lexicon in root.findall('Lexicon') + root.findall('LexiconExtension'):
             # Load Concept Relations (from Synsets)
@@ -1666,6 +1721,9 @@ class WordNetToCygnetConverter:
                         if rel_type in swapped_types:
                             src, tgt = tgt, src
                         raw_concept_relations.append((src, tgt, rel_type))
+                        subtype, label = self._relation_subtype(rel, rel_type)
+                        if subtype or label:
+                            concept_subtypes[(src, tgt, rel_type)] = (subtype, label)
 
             # Load Sense Relations
             lexical_entries = lexicon.findall('LexicalEntry') + lexicon.findall('ExternalLexicalEntry')
@@ -1683,6 +1741,9 @@ class WordNetToCygnetConverter:
                         if target_old_sense in self.old_sense_to_new_sense:
                             target_sense = self.old_sense_to_new_sense[target_old_sense]
                             raw_sense_relations.append((source_sense, target_sense, rel_type))
+                            subtype, label = self._relation_subtype(rel, rel_type)
+                            if subtype or label:
+                                sense_subtypes[(source_sense, target_sense, rel_type)] = (subtype, label)
 
         logger.info(f"    Loaded {len(raw_concept_relations)} concept relations")
         logger.info(f"    Loaded {len(raw_sense_relations)} sense relations")
@@ -1734,11 +1795,15 @@ class WordNetToCygnetConverter:
         logger.info("  Recording relations...")
 
         for source, target, rel_type in final_concept_relations:
-            self.concept_relations.append(RelationRecord(rel_type, source, target))
+            subtype, label = concept_subtypes.get((source, target, rel_type), (None, None))
+            self.concept_relations.append(
+                RelationRecord(rel_type, source, target, subtype, label))
             self.log['statistics']['relations']['concept_relations_created'] += 1
 
         for source, target, rel_type in final_sense_relations:
-            self.sense_relations.append(RelationRecord(rel_type, source, target))
+            subtype, label = sense_subtypes.get((source, target, rel_type), (None, None))
+            self.sense_relations.append(
+                RelationRecord(rel_type, source, target, subtype, label))
             self.log['statistics']['relations']['sense_relations_created'] += 1
 
         logger.info(f"  Created {self.log['statistics']['relations']['concept_relations_created']} concept relations")
@@ -2002,6 +2067,10 @@ class WordNetToCygnetConverter:
         """The ConceptRelation or SenseRelation element for a record."""
         relation = etree.Element(tag, relation_type=rec.relation_type,
                                  source=rec.source, target=rec.target)
+        if rec.subtype:
+            relation.set('subtype', rec.subtype)
+        if rec.subtype_label:
+            relation.set('subtype_label', rec.subtype_label)
         self._provenance(relation)
         return relation
 

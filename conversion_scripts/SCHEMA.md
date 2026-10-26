@@ -173,25 +173,36 @@ A synset may have definitions in multiple languages.
 Directed relations between synsets (hypernymy, meronymy, etc.).
 Both forward and inverse directions are stored explicitly.
 
+`subtype`/`subtype_label` hold a finer-grained sub-relation the source
+gives beyond `type_rowid` (e.g. plWordnet's `dc:type="plwn:56"` on a
+`relType="diminutive"` relation, with `dc:description` as its
+human-readable label) -- NULL for the vast majority of relations, and
+always NULL for an inverse this pipeline generated itself.
+
 ```sql
 CREATE TABLE synset_relations (
-    rowid        INTEGER PRIMARY KEY,
-    source_rowid INTEGER NOT NULL REFERENCES synsets(rowid),
-    target_rowid INTEGER NOT NULL REFERENCES synsets(rowid),
-    type_rowid   INTEGER NOT NULL REFERENCES relation_types(rowid)
+    rowid         INTEGER PRIMARY KEY,
+    source_rowid  INTEGER NOT NULL REFERENCES synsets(rowid),
+    target_rowid  INTEGER NOT NULL REFERENCES synsets(rowid),
+    type_rowid    INTEGER NOT NULL REFERENCES relation_types(rowid),
+    subtype       TEXT,
+    subtype_label TEXT
 );
 ```
 
 ### sense_relations
 
 Directed relations between senses (antonymy, derivation, etc.).
+Same `subtype`/`subtype_label` convention as `synset_relations`.
 
 ```sql
 CREATE TABLE sense_relations (
-    rowid        INTEGER PRIMARY KEY,
-    source_rowid INTEGER NOT NULL REFERENCES senses(rowid),
-    target_rowid INTEGER NOT NULL REFERENCES senses(rowid),
-    type_rowid   INTEGER NOT NULL REFERENCES relation_types(rowid)
+    rowid         INTEGER PRIMARY KEY,
+    source_rowid  INTEGER NOT NULL REFERENCES senses(rowid),
+    target_rowid  INTEGER NOT NULL REFERENCES senses(rowid),
+    type_rowid    INTEGER NOT NULL REFERENCES relation_types(rowid),
+    subtype       TEXT,
+    subtype_label TEXT
 );
 ```
 

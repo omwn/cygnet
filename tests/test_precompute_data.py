@@ -320,3 +320,87 @@ class TestFinalizeWritesBuildInfo:
         assert prov_conn.execute('SELECT version FROM build_info').fetchone() == (
             '20260101000000',
         )
+
+
+class TestConceptDetailsSubtype:
+    """cr/sr entries carry subtype/subtypeLabel when the relation has one
+    (see cyg.converters.WordNetToCygnetConverter._relation_subtype()) --
+    plWordnet's dc:type on a recognized relType, not just its 'other' case.
+    """
+
+    _BODY = """\
+<Concept id="cili.dog" ontological_category="NOUN" status="1">
+  <Provenance resource="wn-a" version="1.0"/>
+</Concept>
+<Concept id="cili.doggie" ontological_category="NOUN" status="1">
+  <Provenance resource="wn-a" version="1.0"/>
+</Concept>
+<Gloss definiendum="cili.dog" language="en">
+  <AnnotatedSentence>dog</AnnotatedSentence>
+  <Provenance resource="wn-a" version="1.0"/>
+</Gloss>
+<Gloss definiendum="cili.doggie" language="en">
+  <AnnotatedSentence>doggie</AnnotatedSentence>
+  <Provenance resource="wn-a" version="1.0"/>
+</Gloss>
+<Lexeme id="lex.en.dog" language="en" grammatical_category="NOUN">
+  <Wordform form="dog"/>
+  <Provenance resource="wn-a" version="1.0"/>
+</Lexeme>
+<Lexeme id="lex.en.doggie" language="en" grammatical_category="NOUN">
+  <Wordform form="doggie"/>
+  <Provenance resource="wn-a" version="1.0"/>
+</Lexeme>
+<Sense id="sense.dog" signifier="lex.en.dog" signified="cili.dog">
+  <Provenance resource="wn-a" version="1.0"/>
+</Sense>
+<Sense id="sense.doggie" signifier="lex.en.doggie" signified="cili.doggie">
+  <Provenance resource="wn-a" version="1.0"/>
+</Sense>
+<ConceptRelation relation_type="diminutive" source="cili.dog" target="cili.doggie"
+    subtype="plwn:56" subtype_label="deminutywność">
+  <Provenance resource="wn-a" version="1.0"/>
+</ConceptRelation>
+<SenseRelation relation_type="antonym" source="sense.dog" target="sense.doggie"
+    subtype="plwn:99" subtype_label="przeciwstawność">
+  <Provenance resource="wn-a" version="1.0"/>
+</SenseRelation>
+"""
+
+    @pytest.fixture()
+    def builder_subtype(self, builder, tmp_path):
+        (tmp_path / 'wn.xml').write_text(wn_xml('wn-a', self._BODY))
+        builder.process_file(tmp_path / 'wn.xml')
+        builder.create_indexes()
+        builder.insert_resources()
+        builder.dog_rowid = builder.cur.execute(
+            "SELECT rowid FROM synsets WHERE ili = 'dog'"
+        ).fetchone()[0]
+        return builder
+
+    def test_concept_relation_subtype(self, builder_subtype, tmp_path):
+        out_dir = tmp_path / 'concepts'
+        builder_subtype.write_concept_details(out_dir)
+        dog = json.loads((out_dir / f'{builder_subtype.dog_rowid}.json').read_text())
+        rel = next(r for r in dog['cr'] if r['type'] == 'diminutive')
+        assert rel['subtype'] == 'plwn:56'
+        assert rel['subtypeLabel'] == 'deminutywność'
+
+    def test_sense_relation_subtype(self, builder_subtype, tmp_path):
+        out_dir = tmp_path / 'concepts'
+        builder_subtype.write_concept_details(out_dir)
+        dog = json.loads((out_dir / f'{builder_subtype.dog_rowid}.json').read_text())
+        dog_sense = next(s for s in dog['senses'].values() if s['l'] == 'dog')
+        rel = next(r for r in dog_sense['sr'] if r['type'] == 'antonym')
+        assert rel['subtype'] == 'plwn:99'
+        assert rel['subtypeLabel'] == 'przeciwstawność'
+
+    def test_relation_without_subtype_omits_the_keys(self, builder_precompute, tmp_path):
+        """The common case (no subtype) must not bloat every relation
+        entry with null subtype/subtypeLabel fields."""
+        out_dir = tmp_path / 'concepts'
+        builder_precompute.write_concept_details(out_dir)
+        dog = json.loads((out_dir / f'{builder_precompute.dog_rowid}.json').read_text())
+        rel = next(r for r in dog['cr'] if r['type'] == 'hypernym')
+        assert 'subtype' not in rel
+        assert 'subtypeLabel' not in rel

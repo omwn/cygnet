@@ -353,6 +353,8 @@
       <xs:attribute name="relation_type" type="SenseRelationType" use="required"/>
       <xs:attribute name="source" type="xs:string" use="required"/>
       <xs:attribute name="target" type="xs:string" use="required"/>
+      <xs:attribute name="subtype" type="xs:string" use="optional"/>
+      <xs:attribute name="subtype_label" type="xs:string" use="optional"/>
     </xs:complexType>
   </xs:element>
 
@@ -394,6 +396,8 @@
       <xs:attribute name="relation_type" type="ConceptRelationType" use="required"/>
       <xs:attribute name="source" type="xs:string" use="required"/>
       <xs:attribute name="target" type="xs:string" use="required"/>
+      <xs:attribute name="subtype" type="xs:string" use="optional"/>
+      <xs:attribute name="subtype_label" type="xs:string" use="optional"/>
     </xs:complexType>
   </xs:element>
 

@@ -90,6 +90,21 @@ Each entry maps a **DB relation name** to its display metadata:
 
 **To change a display name without changing DB data**: edit only `relations.json` — no Python or DB changes needed.
 
+### Relation subtypes (`subtype`/`subtypeLabel`)
+
+A relation can carry a finer-grained sub-relation code beyond its catalogued
+type — e.g. plWordnet tags a `diminutive` relation with its own
+`dc:type="plwn:56"`, which `has_diminutive`/`diminutive` alone doesn't
+capture (see `WordNetToCygnetConverter._relation_subtype()` in
+`cyg/converters.py`). When present, `cr`/`sr` relation entries carry
+`subtype` (the raw sub-code) and `subtypeLabel` (a human-readable label,
+usually `dc:description`, in the source's own language — not translated).
+Both are `undefined`/absent, not empty strings, for the vast majority of
+relations that have no subtype. Shown as a small parenthetical next to the
+relation's target in the concept/sense text view, with `subtype` as a
+hover tooltip; no other render path (relation graph, path finder, search
+results) surfaces it yet.
+
 ---
 
 ## Tabs

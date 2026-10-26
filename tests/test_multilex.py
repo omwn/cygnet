@@ -274,6 +274,81 @@ def test_other_relation_uses_dc_type(tmp_path):
     assert all(t != "other" for _, t, _ in rels)
 
 
+def test_uri_dc_type_is_shortened_and_not_a_subtype(tmp_path):
+    """A URI-shaped dc:type (own-pt's own ontology) names the relation
+    itself -- shortened to its local name, not kept as a subtype, since it
+    carries no extra information beyond that name.
+    """
+    lmf = _LMF_HEAD.format(id="pr", lang="mul") + """\
+    <Synset id="pr-1" ili="in" partOfSpeech="n" dc:identifier="P:1">
+      <Definition language="en">first person</Definition>
+      <SynsetRelation relType="other"
+          dc:type="https://w3id.org/own/schema/agent" target="pr-1-Poss"/>
+    </Synset>
+    <Synset id="pr-1-Poss" ili="in" partOfSpeech="a" dc:identifier="P:1;Poss">
+      <Definition language="en">first person possessive</Definition>
+      <SynsetRelation relType="other"
+          dc:type="https://w3id.org/own/schema/agent" target="pr-1"/>
+    </Synset>
+""" + _LMF_TAIL
+    concepts = build_concept_map(_write(tmp_path / "pr.xml", lmf))
+    root = _convert(tmp_path, lmf, SharedConcepts(concepts, "concepts"))
+    rels = list(root.iter("ConceptRelation"))
+    assert any(r.get("relation_type") == "agent" for r in rels)
+    assert all(r.get("subtype") is None for r in rels)
+
+
+def test_subtype_on_a_standard_relation_type_is_kept(tmp_path):
+    """A dc:type that refines a *recognized* relType (not just "other"),
+    like plWordnet's relType="diminutive" dc:type="plwn:56", is real extra
+    information _relation_type() alone drops -- it must survive as subtype,
+    with dc:description as its human-readable label.
+    """
+    lmf = _LMF_HEAD.format(id="pr", lang="mul") + """\
+    <Synset id="pr-1" ili="in" partOfSpeech="n" dc:identifier="P:1">
+      <Definition language="en">dog</Definition>
+      <SynsetRelation relType="diminutive" dc:type="plwn:56"
+          dc:description="deminutywność" target="pr-1-Dim"/>
+    </Synset>
+    <Synset id="pr-1-Dim" ili="in" partOfSpeech="n" dc:identifier="P:1;Dim">
+      <Definition language="en">doggie</Definition>
+      <SynsetRelation relType="has_diminutive" dc:type="plwn:56"
+          dc:description="deminutywność" target="pr-1"/>
+    </Synset>
+""" + _LMF_TAIL
+    concepts = build_concept_map(_write(tmp_path / "pr.xml", lmf))
+    root = _convert(tmp_path, lmf, SharedConcepts(concepts, "concepts"))
+    rels = {r.get("relation_type"): r for r in root.iter("ConceptRelation")}
+    assert rels["diminutive"].get("subtype") == "plwn:56"
+    assert rels["diminutive"].get("subtype_label") == "deminutywność"
+
+
+def test_other_relation_dc_description_kept_as_label_without_subtype(tmp_path):
+    """relType="other" + dc:type="plwn:19" + dc:description="fuzzynimia":
+    dc:type already became the relation_type itself (via _relation_type()),
+    so it is not a *further* subtype of relation_type -- but the
+    human-readable dc:description is still worth keeping as a label.
+    """
+    lmf = _LMF_HEAD.format(id="pr", lang="mul") + """\
+    <Synset id="pr-1" ili="in" partOfSpeech="n" dc:identifier="P:1">
+      <Definition language="en">one</Definition>
+      <SynsetRelation relType="other" dc:type="plwn:19"
+          dc:description="fuzzynimia" target="pr-1-B"/>
+    </Synset>
+    <Synset id="pr-1-B" ili="in" partOfSpeech="n" dc:identifier="P:1;B">
+      <Definition language="en">two</Definition>
+      <SynsetRelation relType="other" dc:type="plwn:19"
+          dc:description="fuzzynimia" target="pr-1"/>
+    </Synset>
+""" + _LMF_TAIL
+    concepts = build_concept_map(_write(tmp_path / "pr.xml", lmf))
+    root = _convert(tmp_path, lmf, SharedConcepts(concepts, "concepts"))
+    rels = [r for r in root.iter("ConceptRelation") if r.get("relation_type") == "plwn:19"]
+    assert rels
+    assert all(r.get("subtype") is None for r in rels)
+    assert all(r.get("subtype_label") == "fuzzynimia" for r in rels)
+
+
 @pytest.mark.parametrize("code, problem", [
     ("en", None), ("cmn-Hans", None), ("mul", None), ("uk", None),
     ("obj", "invalid"), ("ua", "invalid"), ("", "missing"), (None, "missing"),

@@ -77,16 +77,28 @@ CREATE TABLE definitions (
     translated_from_rowid INTEGER REFERENCES languages(rowid)
 );
 CREATE TABLE synset_relations (
-    rowid        INTEGER PRIMARY KEY,
-    source_rowid INTEGER NOT NULL REFERENCES synsets(rowid),
-    target_rowid INTEGER NOT NULL REFERENCES synsets(rowid),
-    type_rowid   INTEGER NOT NULL REFERENCES relation_types(rowid)
+    rowid         INTEGER PRIMARY KEY,
+    source_rowid  INTEGER NOT NULL REFERENCES synsets(rowid),
+    target_rowid  INTEGER NOT NULL REFERENCES synsets(rowid),
+    type_rowid    INTEGER NOT NULL REFERENCES relation_types(rowid),
+    -- A finer-grained sub-relation code the source gives beyond type_rowid
+    -- (e.g. plWordnet's dc:type="plwn:56" on a relType="diminutive"
+    -- relation), when there is one. NULL for the vast majority of
+    -- relations, and for an inverse this builder generated itself.
+    subtype       TEXT,
+    -- Human-readable label for subtype (dc:description, or dc:relation for
+    -- the one case that names the general relation family instead of the
+    -- specific sub-code -- see plWordnet's "unresolved aspect orientation"
+    -- export-compatibility relations), in the source's own language.
+    subtype_label TEXT
 );
 CREATE TABLE sense_relations (
-    rowid        INTEGER PRIMARY KEY,
-    source_rowid INTEGER NOT NULL REFERENCES senses(rowid),
-    target_rowid INTEGER NOT NULL REFERENCES senses(rowid),
-    type_rowid   INTEGER NOT NULL REFERENCES relation_types(rowid)
+    rowid         INTEGER PRIMARY KEY,
+    source_rowid  INTEGER NOT NULL REFERENCES senses(rowid),
+    target_rowid  INTEGER NOT NULL REFERENCES senses(rowid),
+    type_rowid    INTEGER NOT NULL REFERENCES relation_types(rowid),
+    subtype       TEXT,
+    subtype_label TEXT
 );
 CREATE TABLE examples (
     rowid   INTEGER PRIMARY KEY,
@@ -793,6 +805,8 @@ class MergeBuilder:
         if not source or not target:
             return
 
+        subtype = elem.get('subtype')
+        subtype_label = elem.get('subtype_label')
         prov_elems = elem.findall('Provenance')
         current_resource = prov_elems[0].get('resource') if prov_elems else ''
         type_rowid = self._rel_type_rowid(rel_type)
@@ -834,7 +848,8 @@ class MergeBuilder:
             self._sense_rel_keys[key] = current_resource
             sr_rowid = self._next_sense_rel_id
             self._next_sense_rel_id += 1
-            self._sense_rels_buf.append((sr_rowid, source, target, type_rowid))
+            self._sense_rels_buf.append(
+                (sr_rowid, source, target, type_rowid, subtype, subtype_label))
             self.n_prov += self._insert_prov('sense_relations', sr_rowid, prov_elems)
             self.n_sense_rels += 1
 
@@ -845,7 +860,8 @@ class MergeBuilder:
                 self._sense_rel_keys[inv_key] = ''
                 inv_rowid = self._next_sense_rel_id
                 self._next_sense_rel_id += 1
-                self._sense_rels_buf.append((inv_rowid, target, source, inv_type))
+                self._sense_rels_buf.append(
+                    (inv_rowid, target, source, inv_type, None, None))
                 self.n_sense_rels += 1
 
     def _do_concept_relation(self, elem) -> None:
@@ -855,6 +871,8 @@ class MergeBuilder:
         if not source or not target:
             return
 
+        subtype = elem.get('subtype')
+        subtype_label = elem.get('subtype_label')
         prov_elems = elem.findall('Provenance')
         current_resource = prov_elems[0].get('resource') if prov_elems else ''
         type_rowid = self._rel_type_rowid(rel_type)
@@ -890,7 +908,8 @@ class MergeBuilder:
             self._synset_rel_keys[key] = current_resource
             cr_rowid = self._next_synset_rel_id
             self._next_synset_rel_id += 1
-            self._synset_rels_buf.append((cr_rowid, source, target, type_rowid))
+            self._synset_rels_buf.append(
+                (cr_rowid, source, target, type_rowid, subtype, subtype_label))
             self.n_prov += self._insert_prov('synset_relations', cr_rowid, prov_elems)
             self.n_synset_rels += 1
             if rel_type in HYPERNYM_TYPES:
@@ -905,7 +924,8 @@ class MergeBuilder:
                 self._synset_rel_keys[inv_key] = ''
                 inv_rowid = self._next_synset_rel_id
                 self._next_synset_rel_id += 1
-                self._synset_rels_buf.append((inv_rowid, target, source, inv_type))
+                self._synset_rels_buf.append(
+                    (inv_rowid, target, source, inv_type, None, None))
                 self.n_synset_rels += 1
                 if inv in HYPERNYM_TYPES:
                     self._track_hypernym(inv_rowid, target, source, inv_type, inv)
@@ -1006,7 +1026,8 @@ class MergeBuilder:
         if self._sense_rels_buf:
             self.cur.executemany(
                 'INSERT INTO sense_relations '
-                '(rowid, source_rowid, target_rowid, type_rowid) VALUES (?, ?, ?, ?)',
+                '(rowid, source_rowid, target_rowid, type_rowid, subtype, subtype_label) '
+                'VALUES (?, ?, ?, ?, ?, ?)',
                 self._sense_rels_buf,
             )
             self._sense_rels_buf.clear()
@@ -1015,7 +1036,8 @@ class MergeBuilder:
         if self._synset_rels_buf:
             self.cur.executemany(
                 'INSERT INTO synset_relations '
-                '(rowid, source_rowid, target_rowid, type_rowid) VALUES (?, ?, ?, ?)',
+                '(rowid, source_rowid, target_rowid, type_rowid, subtype, subtype_label) '
+                'VALUES (?, ?, ?, ?, ?, ?)',
                 self._synset_rels_buf,
             )
             self._synset_rels_buf.clear()
@@ -2149,24 +2171,34 @@ class MergeBuilder:
             return segments
 
         sense_rels: dict[int, list[dict]] = {}
-        for source_rowid, rel_type, target_rowid, rid in self.cur.execute("""
-            SELECT sr.source_rowid, rt.type, sr.target_rowid, sr.rowid
+        for source_rowid, rel_type, target_rowid, rid, subtype, subtype_label in self.cur.execute("""
+            SELECT sr.source_rowid, rt.type, sr.target_rowid, sr.rowid,
+                   sr.subtype, sr.subtype_label
             FROM sense_relations sr JOIN relation_types rt ON sr.type_rowid = rt.rowid
         """):
-            sense_rels.setdefault(source_rowid, []).append({
+            entry = {
                 'type': rel_type, 'to': target_rowid, 'rid': rid,
                 'toForm': sense_to_lemma.get(target_rowid, ''),
                 'toConcept': sense_to_synset.get(target_rowid),
-            })
+            }
+            if subtype:
+                entry['subtype'] = subtype
+            if subtype_label:
+                entry['subtypeLabel'] = subtype_label
+            sense_rels.setdefault(source_rowid, []).append(entry)
 
         concept_rels: dict[int, list[dict]] = {}
-        for source_rowid, rel_type, target_rowid, rid in self.cur.execute("""
-            SELECT sr.source_rowid, rt.type, sr.target_rowid, sr.rowid
+        for source_rowid, rel_type, target_rowid, rid, subtype, subtype_label in self.cur.execute("""
+            SELECT sr.source_rowid, rt.type, sr.target_rowid, sr.rowid,
+                   sr.subtype, sr.subtype_label
             FROM synset_relations sr JOIN relation_types rt ON sr.type_rowid = rt.rowid
         """):
-            concept_rels.setdefault(source_rowid, []).append(
-                {'type': rel_type, 'to': target_rowid, 'rid': rid}
-            )
+            entry = {'type': rel_type, 'to': target_rowid, 'rid': rid}
+            if subtype:
+                entry['subtype'] = subtype
+            if subtype_label:
+                entry['subtypeLabel'] = subtype_label
+            concept_rels.setdefault(source_rowid, []).append(entry)
 
         defs_by_synset: dict[int, list[tuple]] = {}
         for def_rowid, synset_rowid, definition, def_lang_rowid, translated_from in self.cur.execute(
