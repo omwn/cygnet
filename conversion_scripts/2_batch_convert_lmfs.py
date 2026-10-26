@@ -3,7 +3,6 @@
 Batch convert GlobalWordNet XML files to Cygnet XML format.
 """
 
-import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,6 +10,7 @@ from pathlib import Path
 import tomllib
 
 from cyg.converters import WordNetToCygnetConverter
+from cyg.presynth import write_manifest
 from cyg.multilex import (
     SharedConcepts,
     build_concept_map,
@@ -18,6 +18,7 @@ from cyg.multilex import (
     language_problem,
     match_language,
     read_lexicon_header,
+    url_stem,
 )
 
 # wordnets.toml key for multi-lexicon releases linked by a 'mul' concepts lexicon.
@@ -26,7 +27,6 @@ MUL_KEY = "mul"
 # Written to the output directory: the outputs this build planned (converted
 # now or reused).  6_synthesise.py merges only these, so outputs left over
 # from earlier builds (a dropped or replaced wordnet) are not merged.
-MANIFEST_NAME = "manifest.txt"
 
 # Lexicon IDs that are valid as the English base (first wordnet processed).
 # Both OEWN and the OMW English wordnet provide the synset backbone.
@@ -35,21 +35,9 @@ _EN_BASE_IDS: frozenset[str] = frozenset({"oewn", "omw-en"})
 _EN_BASE_FILENAME_PATTERNS: tuple[str, ...] = ("english-wordnet", "omw-en")
 
 
-def _url_stem(url: str) -> str:
-    """Derive a file-matching prefix from a download URL."""
-    name = url.split("?")[0].rstrip("/").split("/")[-1]
-    for ext in (".tar.xz", ".tar.gz", ".tar.bz2", ".zip", ".xz", ".gz"):
-        if name.endswith(ext):
-            name = name[: -len(ext)]
-            break
-    if name.endswith(".xml"):
-        name = name[:-4]
-    return re.sub(r"[-_]\d[\d.]*$", "", name)
-
-
 # Some hosts (e.g. SADiLaR's DSpace bitstream URLs) put no filename in the
 # URL at all — it's just ".../download" — so the extracted content's actual
-# name bears no relation to anything _url_stem() can derive. Map those
+# name bears no relation to anything url_stem() can derive. Map those
 # language codes directly to their real resource stem.
 _KNOWN_STEM_OVERRIDES = {
     "xh": "wnxho",
@@ -100,7 +88,7 @@ def _match_url(url: str, lang: str, raw_wns_dir: Path) -> list[Path]:
     Returns:
         Matching XML paths (empty, with a warning, if there are none)
     """
-    stem = _url_stem(url)
+    stem = url_stem(url)
     matches = (
         sorted(raw_wns_dir.glob(f"{stem}*.xml"))
         + sorted(raw_wns_dir.glob(f"{stem}*.xml.gz"))
@@ -330,9 +318,7 @@ def batch_convert(cili_file, toml_path, raw_wns_dir="raw_wns", output_dir="cygne
 
         print()
 
-    (output_path / MANIFEST_NAME).write_text(
-        "".join(f"{name}\n" for name in planned_outputs), encoding="utf-8"
-    )
+    write_manifest(output_path, planned_outputs)
 
     print("=" * 70)
     print("Batch conversion complete!")

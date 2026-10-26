@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from conftest import MergeBuilder, build_test_db, wn_xml
+from cyg.merge import fold_lemma, reading_clusters
 
 _WORDNETS_DIR = Path(__file__).parent / 'wordnets'
 
@@ -214,7 +215,7 @@ class TestMergeCaseVariants:
 
     def test_two_senses_collapse_to_one(self, builder_case_variants):
         removed = builder_case_variants.merge_case_variants()
-        assert removed == 1
+        assert removed == {'identical': 0, 'variant': 1}
         n = builder_case_variants.cur.execute(
             'SELECT COUNT(*) FROM senses'
         ).fetchone()[0]
@@ -230,7 +231,7 @@ class TestMergeCaseVariants:
     def test_polysemous_same_lemma_not_merged(self, builder_polysemy):
         """Same lemma, different synsets — must NOT be merged."""
         removed = builder_polysemy.merge_case_variants()
-        assert removed == 0
+        assert removed == {'identical': 0, 'variant': 0}
         n = builder_polysemy.cur.execute(
             'SELECT COUNT(*) FROM senses'
         ).fetchone()[0]
@@ -253,6 +254,145 @@ class TestMergeCaseVariants:
             'SELECT COUNT(*) FROM senses'
         ).fetchone()[0]
         assert n == 1
+
+
+    def test_merged_entry_keeps_one_lemma(self, builder_case_variants):
+        """The moved variant becomes a non-lemma form, not a second lemma."""
+        builder_case_variants.merge_case_variants()
+        lemmas = [r[0] for r in builder_case_variants.cur.execute(
+            'SELECT f.form FROM forms f JOIN senses s USING (entry_rowid) '
+            'WHERE f.rank = 0'
+        ).fetchall()]
+        assert lemmas == ['dog']
+
+
+    def test_reading_lookup_uses_pronunciation_index(self, builder_case_variants):
+        """Signatures look pronunciations up by form without a table scan."""
+        plan = ' '.join(r[3] for r in builder_case_variants.cur.execute(
+            'EXPLAIN QUERY PLAN SELECT p.pronunciation FROM forms f '
+            'LEFT JOIN pronunciations p ON p.form_rowid = f.rowid '
+            'WHERE f.entry_rowid = 1'
+        ).fetchall())
+        assert 'idx_pronunciations_form' in plan
+
+def _variant_lexeme(lid: str, lemma: str, others: tuple[str, ...] = (),
+                    lang: str = 'ja') -> str:
+    """Return a Lexeme with a sense for cili.h1."""
+    forms = ''.join(f'<Wordform form="{f}"/>' for f in (lemma, *others))
+    return (
+        f'<Lexeme id="{lid}" language="{lang}" grammatical_category="NOUN">'
+        f'{forms}<Provenance resource="wn-a" version="1.0"/></Lexeme>'
+        f'<Sense id="s.{lid}" signifier="{lid}" signified="cili.h1">'
+        f'<Provenance resource="wn-a" version="1.0"/></Sense>'
+    )
+
+
+_H1 = """\
+<Concept id="cili.h1" ontological_category="NOUN" status="1">
+  <Provenance resource="wn-a" version="1.0"/>
+</Concept>
+<Gloss definiendum="cili.h1" language="en">
+  <AnnotatedSentence>a thing</AnnotatedSentence>
+  <Provenance resource="wn-a" version="1.0"/>
+</Gloss>
+"""
+
+
+def _load_lexemes(builder, tmp_path, *lexemes: str):
+    (tmp_path / 'wn.xml').write_text(wn_xml('wn-a', _H1 + ''.join(lexemes)))
+    builder.process_file(tmp_path / 'wn.xml')
+    builder.create_indexes()
+    return builder
+
+
+def _n_senses(builder) -> int:
+    return builder.cur.execute('SELECT COUNT(*) FROM senses').fetchone()[0]
+
+
+class TestMergeVariantsReadings:
+    """Homographs with different readings stay apart (issue #22)."""
+
+    def test_homographs_with_different_readings_kept(self, builder, tmp_path):
+        b = _load_lexemes(builder, tmp_path,
+                          _variant_lexeme('l1', '物', ('ブツ', 'ぶつ')),
+                          _variant_lexeme('l2', '物', ('モノ', 'もの')))
+        assert b.merge_case_variants() == {'identical': 0, 'variant': 0}
+        assert _n_senses(b) == 2
+
+    def test_same_readings_merged(self, builder, tmp_path):
+        b = _load_lexemes(builder, tmp_path,
+                          _variant_lexeme('l1', '物', ('もの',)),
+                          _variant_lexeme('l2', '物', ('モノ', 'もの')))
+        assert b.merge_case_variants() == {'identical': 1, 'variant': 0}
+        assert _n_senses(b) == 1
+
+    def test_bare_entry_merged_with_single_reading(self, builder, tmp_path):
+        b = _load_lexemes(builder, tmp_path,
+                          _variant_lexeme('l1', '物'),
+                          _variant_lexeme('l2', '物', ('もの',)))
+        assert b.merge_case_variants()['identical'] == 1
+        assert _n_senses(b) == 1
+
+    def test_ambiguous_bare_entry_kept(self, builder, tmp_path):
+        """A bare 物 could go with either reading, so nothing merges."""
+        b = _load_lexemes(builder, tmp_path,
+                          _variant_lexeme('l1', '物'),
+                          _variant_lexeme('l2', '物', ('ぶつ',)),
+                          _variant_lexeme('l3', '物', ('もの',)))
+        b.merge_case_variants()
+        assert _n_senses(b) == 3
+
+    def test_full_width_variant_merged(self, builder, tmp_path):
+        b = _load_lexemes(builder, tmp_path,
+                          _variant_lexeme('l1', 'VIP'),
+                          _variant_lexeme('l2', 'ＶＩＰ'))
+        assert b.merge_case_variants() == {'identical': 0, 'variant': 1}
+
+    def test_non_ascii_case_variant_merged(self, builder, tmp_path):
+        b = _load_lexemes(builder, tmp_path,
+                          _variant_lexeme('l1', 'Москва', lang='ru'),
+                          _variant_lexeme('l2', 'москва', lang='ru'))
+        assert b.merge_case_variants() == {'identical': 0, 'variant': 1}
+
+    def test_spelling_variants_not_merged(self, builder, tmp_path):
+        b = _load_lexemes(builder, tmp_path,
+                          _variant_lexeme('l1', 'hiruk pikuk', lang='id'),
+                          _variant_lexeme('l2', 'hiruk-pikuk', lang='id'),
+                          _variant_lexeme('l3', '嘆息'),
+                          _variant_lexeme('l4', '歎息'))
+        b.merge_case_variants()
+        assert _n_senses(b) == 4
+
+
+class TestFoldLemma:
+    """fold_lemma() folds case and width only."""
+
+    @pytest.mark.parametrize('form, folded', [
+        ('Bank', 'bank'),
+        ('ＶＩＰ', 'vip'),
+        ('４月', '4月'),
+        ('ｶﾞｽ', 'ガス'),
+        ('UNIXシステム', 'unixシステム'),
+        ('ΟΔΟΣ', 'οδος'),
+    ])
+    def test_folded(self, form, folded):
+        assert fold_lemma(form) == folded
+
+    @pytest.mark.parametrize('form', ['garcía', 'm²', 'ϱ', 'hiruk-pikuk', 'ジャム・セッション'])
+    def test_unchanged(self, form):
+        assert fold_lemma(form) == form
+
+
+class TestReadingClusters:
+    """reading_clusters() groups entries with compatible readings."""
+
+    def test_subset_joins_superset(self):
+        a, b = frozenset({'x'}), frozenset({'x', 'y'})
+        assert reading_clusters({1: a, 2: b}) == [[1, 2]]
+
+    def test_ambiguous_entries_group_by_signature(self):
+        e, x, y = frozenset(), frozenset({'x'}), frozenset({'y'})
+        assert reading_clusters({1: e, 2: x, 3: y, 4: e}) == [[1, 4], [2], [3]]
 
 
 # ---------------------------------------------------------------------------
@@ -534,14 +674,72 @@ class TestCheckAndRemoveNewCycles:
 
 
 # ---------------------------------------------------------------------------
-# resolve_residual_cycles / LOW_TRUST_RESOURCES tie-break
+# Same concept pair given as both hypernym and instance_hypernym
 # ---------------------------------------------------------------------------
 
-# Base wordnet: three concepts plus a trusted edge a2->a3. Deliberately
-# omits the a1<->a2<->a3<->a1 back-edges so no per-file cycle exists yet —
-# those are added by two more files below to build a genuinely *residual*
-# cycle (one check_and_remove_new_cycles is never even asked to look at).
-_RESIDUAL_BASE_BODY = """\
+def _count_hyper_rows(builder, src_ili: str, tgt_ili: str) -> int:
+    """Rows of hypernym or instance_hypernym from src to tgt."""
+    return builder.cur.execute(
+        """
+        SELECT COUNT(*) FROM synset_relations sr
+        JOIN synsets s1 ON s1.rowid = sr.source_rowid
+        JOIN synsets s2 ON s2.rowid = sr.target_rowid
+        JOIN relation_types rt ON rt.rowid = sr.type_rowid
+        WHERE s1.ili = ? AND s2.ili = ?
+          AND rt.type IN ('hypernym', 'instance_hypernym')
+        """,
+        (src_ili.replace('cili.', ''), tgt_ili.replace('cili.', '')),
+    ).fetchone()[0]
+
+
+class TestDoubledPairCycle:
+    """A cycle-closing pair stated as both relation types must be removed
+    in full: deleting only one of the two rows leaves the cycle in place."""
+
+    def test_both_rows_removed_and_no_cycle_left(self, builder, tmp_path):
+        (tmp_path / 'chain.xml').write_text(wn_xml('wn-a', _CHAIN_BODY))
+        builder.process_file(tmp_path / 'chain.xml')
+
+        (tmp_path / 'back.xml').write_text(wn_xml('wn-b', """\
+<ConceptRelation relation_type="hypernym" source="cili.a3" target="cili.a1">
+  <Provenance resource="wn-b" version="1.0"/>
+</ConceptRelation>
+<ConceptRelation relation_type="instance_hypernym" source="cili.a3" target="cili.a1">
+  <Provenance resource="wn-b" version="1.0"/>
+</ConceptRelation>
+"""))
+        first = builder._next_synset_rel_id
+        builder.process_file(tmp_path / 'back.xml')
+        removed = builder.check_and_remove_new_cycles('wn-b', first)
+
+        assert removed == 2
+        assert _count_hyper_rows(builder, 'cili.a3', 'cili.a1') == 0
+        assert builder.detect_cycles() == 0
+        # One log record per removed row, not one row logged twice
+        rels = sorted(c['rel'] for c in builder._conflicts['cycles'])
+        assert rels == ['hypernym', 'instance_hypernym']
+
+
+# ---------------------------------------------------------------------------
+# Merge order: LOW_TRUST_RESOURCES merged last, so they lose conflicts
+# ---------------------------------------------------------------------------
+
+_SYNTH_PATH = Path(__file__).parent.parent / 'conversion_scripts' / '6_synthesise.py'
+
+
+def _load_synth():
+    import importlib.util
+    import sys
+    spec = importlib.util.spec_from_file_location('6_synthesise', _SYNTH_PATH)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules['6_synthesise'] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+# Three concepts plus a trusted edge a2->a3. Two low-trust files add
+# a1->a2 and a3->a1; together they close a cycle.
+_TRUST_BASE_BODY = """\
 <Concept id="cili.a1" ontological_category="NOUN" status="1">
   <Provenance resource="wn-a" version="1.0"/>
 </Concept>
@@ -551,94 +749,52 @@ _RESIDUAL_BASE_BODY = """\
 <Concept id="cili.a3" ontological_category="NOUN" status="1">
   <Provenance resource="wn-a" version="1.0"/>
 </Concept>
-<Gloss definiendum="cili.a1" language="en">
-  <AnnotatedSentence>alpha</AnnotatedSentence>
-  <Provenance resource="wn-a" version="1.0"/>
-</Gloss>
-<Gloss definiendum="cili.a2" language="en">
-  <AnnotatedSentence>beta</AnnotatedSentence>
-  <Provenance resource="wn-a" version="1.0"/>
-</Gloss>
-<Gloss definiendum="cili.a3" language="en">
-  <AnnotatedSentence>gamma</AnnotatedSentence>
-  <Provenance resource="wn-a" version="1.0"/>
-</Gloss>
 <ConceptRelation relation_type="hypernym" source="cili.a2" target="cili.a3">
-  <Provenance resource="wn-trusted" version="1.0"/>
+  <Provenance resource="wn-a" version="1.0"/>
 </ConceptRelation>
 """
 
 
-def _has_hypernym(builder, src_ili: str, tgt_ili: str) -> bool:
-    row = builder.cur.execute(
-        """
-        SELECT 1 FROM synset_relations sr
-        JOIN synsets s1 ON s1.rowid = sr.source_rowid
-        JOIN synsets s2 ON s2.rowid = sr.target_rowid
-        JOIN relation_types rt ON rt.rowid = sr.type_rowid
-        WHERE s1.ili = ? AND s2.ili = ? AND rt.type = 'hypernym'
-        """,
-        (src_ili.replace('cili.', ''), tgt_ili.replace('cili.', '')),
-    ).fetchone()
-    return row is not None
+class TestLowTrustMergedLast:
+    """Merging in merge_order() means the worst low-trust wordnet is the one
+    whose edge is removed, even though its filename sorts first."""
 
-
-class TestResolveResidualCyclesTrustOrder:
-    """resolve_residual_cycles() must rank by LOW_TRUST_RESOURCES order, not
-    by merge-order rowid, when more than one low-trust resource is involved.
-    """
-
-    def _build_residual_cycle(self, builder, tmp_path):
-        """a1->a2 (mild)->a3 (trusted)->a1 (worst), 'worst' merged first."""
-        (tmp_path / 'base.xml').write_text(wn_xml('wn-a', _RESIDUAL_BASE_BODY))
-        builder.process_file(tmp_path / 'base.xml')
-
-        (tmp_path / 'worst.xml').write_text(wn_xml('wn-worst', """\
+    def _merge(self, builder, tmp_path, monkeypatch):
+        synth = _load_synth()
+        monkeypatch.setattr(synth, 'LOW_TRUST_RESOURCES', ('Wn-worst', 'wn-mild'))
+        files = {
+            # 'Wn-worst' sorts before everything else by filename (uppercase)
+            'Wn-worst-1.0.xml': wn_xml('Wn-worst', """\
 <ConceptRelation relation_type="hypernym" source="cili.a3" target="cili.a1">
-  <Provenance resource="wn-worst" version="1.0"/>
+  <Provenance resource="Wn-worst" version="1.0"/>
 </ConceptRelation>
-"""))
-        builder.process_file(tmp_path / 'worst.xml')
-
-        (tmp_path / 'mild.xml').write_text(wn_xml('wn-mild', """\
+"""),
+            'wn-a-1.0.xml': wn_xml('wn-a', _TRUST_BASE_BODY),
+            'wn-mild-1.0.xml': wn_xml('wn-mild', """\
 <ConceptRelation relation_type="hypernym" source="cili.a1" target="cili.a2">
   <Provenance resource="wn-mild" version="1.0"/>
 </ConceptRelation>
-"""))
-        builder.process_file(tmp_path / 'mild.xml')
-        builder.create_indexes()
+"""),
+        }
+        for name, xml in files.items():
+            (tmp_path / name).write_text(xml)
+        order = synth.merge_order(sorted(tmp_path.glob('*.xml')))
+        for f in order:
+            first = builder._next_synset_rel_id
+            builder.process_file(f)
+            builder.check_and_remove_new_cycles(f.stem, first)
+        return [f.name for f in order]
 
-    def test_worst_ranked_resource_loses_despite_lower_rowid(
-        self, builder, tmp_path, monkeypatch
-    ):
-        """'wn-worst' merges first (lower rowid) but is ranked worse than
-        'wn-mild' in LOW_TRUST_RESOURCES — its edge must be the one removed,
-        not the mild resource's, even though a naive rowid tie-break within
-        a boolean is-low-trust group would pick the opposite.
-        """
-        monkeypatch.setattr(
-            'cyg.merge.LOW_TRUST_RESOURCES', ('wn-worst', 'wn-mild')
-        )
-        self._build_residual_cycle(builder, tmp_path)
+    def test_order_puts_worst_last(self, builder, tmp_path, monkeypatch):
+        names = self._merge(builder, tmp_path, monkeypatch)
+        assert names == ['wn-a-1.0.xml', 'wn-mild-1.0.xml', 'Wn-worst-1.0.xml']
 
-        removed = builder.resolve_residual_cycles()
-
-        assert removed == 1
+    def test_worst_edge_removed_others_kept(self, builder, tmp_path, monkeypatch):
+        self._merge(builder, tmp_path, monkeypatch)
         assert builder.detect_cycles() == 0
-        assert not _has_hypernym(builder, 'cili.a3', 'cili.a1')
-        assert _has_hypernym(builder, 'cili.a1', 'cili.a2')
-        assert _has_hypernym(builder, 'cili.a2', 'cili.a3')
-
-    def test_trusted_edge_never_removed(self, builder, tmp_path, monkeypatch):
-        """The non-low-trust edge always survives regardless of rank order."""
-        monkeypatch.setattr(
-            'cyg.merge.LOW_TRUST_RESOURCES', ('wn-worst', 'wn-mild')
-        )
-        self._build_residual_cycle(builder, tmp_path)
-
-        builder.resolve_residual_cycles()
-
-        assert _has_hypernym(builder, 'cili.a2', 'cili.a3')
+        assert _count_hyper_rows(builder, 'cili.a3', 'cili.a1') == 0
+        assert _count_hyper_rows(builder, 'cili.a1', 'cili.a2') == 1
+        assert _count_hyper_rows(builder, 'cili.a2', 'cili.a3') == 1
 
 
 # ---------------------------------------------------------------------------

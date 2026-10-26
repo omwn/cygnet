@@ -308,6 +308,18 @@ def test_synthesise_without_manifest_merges_everything(tmp_path):
     assert len(synth.select_files(tmp_path)) == 3
 
 
+def test_merge_order_puts_low_trust_last_worst_last(tmp_path, monkeypatch):
+    """Low-trust wordnets go after all others (worst last) but before mtg."""
+    monkeypatch.setattr(synth, "LOW_TRUST_RESOURCES", ("Uz-uz", "bad-xx"))
+    names = ("Uz-uz-1.0.xml", "bad-xx-2.xml", "cili-1.0.xml", "fr-1.xml",
+             "mtg-1.0.xml", "oewn-2025.xml", "zz-1.xml")
+    for name in names:
+        _write(tmp_path / name, "<CygnetResource/>")
+    order = [f.name for f in synth.merge_order(sorted(tmp_path.glob("*.xml")))]
+    assert order == ["cili-1.0.xml", "oewn-2025.xml", "fr-1.xml", "zz-1.xml",
+                     "bad-xx-2.xml", "Uz-uz-1.0.xml", "mtg-1.0.xml"]
+
+
 def test_batch_writes_manifest(tmp_path, monkeypatch):
     """Step 2 lists both converted and reused outputs in the manifest."""
     raw, toml = _raw_release(tmp_path)

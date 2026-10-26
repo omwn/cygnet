@@ -25,8 +25,8 @@ bg = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-bg-2.0.tar.xz
 # Catalan — OMW Catalan
 ca = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-ca-2.0.tar.xz"]
 
-# Chinese (Mandarin) — OMW Chinese
-cmn = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-cmn-2.0.tar.xz",
+# Chinese (Mandarin) — Chinese Open Wordnet (COW)
+cmn = ["https://github.com/bond-lab/cow/releases/download/v1.1/cow-1.1.tar.xz",
 "https://github.com/omwn/tufs/releases/download/v2026.04.06/tufs-zh-2026.04.06.tar.xz"]
 
 # Danish — DanNet
@@ -73,7 +73,7 @@ it = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-it-2.0.tar.xz
 #"https://github.com/valeq/IWN-OMW/raw/refs/heads/main/data/LMF-XML/IWN-OMW_LMF_v1.0.xml"
 
 # Irish 
-ga = ["https://github.com/kscanne/wordnet-gaeilge/releases/download/v1.1/lsg-lmf.zip"]
+ga = ["http://irishwn.teanga.io/downloads/gfong-0.1.xml.gz"]
 
 # Hungarian - Hungarian WordNet
 hu = ["https://github.com/igamasniak/omw-converters/releases/download/v0.1/HungarianWordNet.xml.xz"]
@@ -81,19 +81,16 @@ hu = ["https://github.com/igamasniak/omw-converters/releases/download/v0.1/Hunga
 # Estonian 
 et = ["https://gitlab.keeleressursid.ee/avalik/data/-/raw/master/estwn/estwn-et-2.7/estwn-et-2.7.0.xml?inline=false"]
 
-# Japanese
-# ToDo get better
-ja = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-ja-2.0.tar.xz",
+# Japanese — Japanese WordNet (wnja)
+ja = ["https://github.com/bond-lab/wnja/releases/download/v2.1/wnja-2.1.tar.xz",
 "https://github.com/omwn/tufs/releases/download/v2026.04.06/tufs-ja-2026.04.06.tar.xz"]
 
-# Malay
-# ToDo get better
-zsm = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-zsm-2.0.tar.xz",
+# Malay — Wordnet Bahasa (Malaysian Malay)
+zsm = ["https://github.com/bond-lab/Bahasa-Wordnet/releases/download/v1.5/wnb-zsm-1.5.tar.xz",
 "https://github.com/omwn/tufs/releases/download/v2026.04.06/tufs-ms-2026.04.06.tar.xz"]
 
-# Indonesian
-# ToDo get better
-id = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-id-2.0.tar.xz",
+# Indonesian — Wordnet Bahasa (Indonesian)
+id = ["https://github.com/bond-lab/Bahasa-Wordnet/releases/download/v1.5/wnb-id-1.5.tar.xz",
 "https://github.com/omwn/tufs/releases/download/v2026.04.06/tufs-id-2026.04.06.tar.xz"]
 
 # Kurdish (Kurmanji) — KurdNet
@@ -101,6 +98,9 @@ kmr = ["https://github.com/sinaahmadi/kurdnet/releases/download/kurdnet-1.0.tar.
 
 # Lithuanian — OMW Lithuanian
 lt = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-lt-2.0.tar.xz"]
+
+# White Hmong — Hmong Ontology Wordnet (hmnont)
+mww = ["https://github.com/fcbond/hmong-ontology/releases/download/v2026-10-20/hmnont.xml.gz"]
 
 # Norwegian Bokmål — OMW Norwegian Bokmål
 nb = ["https://github.com/igamasniak/omw-converters/releases/download/v0.1/NorwegianWordNet.xml.xz"]
@@ -111,11 +111,11 @@ nl = ["https://raw.githubusercontent.com/cltl/OpenDutchWordnet/refs/heads/master
 # Norwegian Nynorsk — OMW Norwegian Nynorsk
 nn = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-nn-2.0.tar.xz"]
 
-# Polish — OMW Polish
-pl = ["https://github.com/omwn/omw-data/releases/download/v2.0/omw-pl-2.0.tar.xz"]
+# Polish — plWordNet 5.0
+pl = ["https://clarin-pl.eu/server/api/core/bitstreams/handle/11321/1019/plwordnet-5.0-wn-lmf-1.4-2026-10-23.xml.gz"]
 
 # Portuguese — OpenWordNet-PT
-pt = [ "https://github.com/own-pt/openWordnet-PT/releases/download/v1.0.0/own-pt.tar.gz",
+pt = ["https://github.com/own-pt/openWordnet-PT/releases/download/v1.1.0/own-pt-2026.04.07.tar.xz",
 "https://github.com/omwn/tufs/releases/download/v2026.04.06/tufs-pt-2026.04.06.tar.xz"]
 
 # Romanian — OMW Romanian
@@ -215,9 +215,6 @@ uk = ["https://github.com/hdaSprachtechnologie/ukrajinet/raw/refs/heads/main/ukr
 # Welsh - WordNet Cymraeg
 cy = ["https://github.com/igamasniak/omw-converters/releases/download/v0.1/WelshWordNet.xml.xz"]
 
-# Bengali - BanglaNet
-bn = ["https://github.com/igamasniak/omw-converters/releases/download/v0.1/BengaliWordNet.xml.xz"]
-
 # Scottish Gaelic - The Unified Scottish Gaelic Wordnet
 gd = ["https://github.com/igamasniak/omw-converters/releases/download/v0.1/ScottishGaelicWordNet.xml.xz"]
 
@@ -238,3 +235,10 @@ la = ["https://github.com/igamasniak/omw-converters/releases/download/v0.1/Latin
 
 # Ancient Greek - Ancient Greek WordNet
 grc = ["https://github.com/igamasniak/omw-converters/releases/download/v0.1/AncientGreekWordNet.xml.xz"]
+
+# Old Irish - GréasánFocal Oscailte na Gaeilge (Old Irish Wordnet)
+sga = ["https://goidelc.teanga.io/downloads/sga-wordnet-0.1.xml.gz"]
+
+# Multilingual — OMW Kinship and OMW Pronouns (concept lexicon + per-language lexicons)
+mul = ["https://github.com/omwn/omw-kinship/releases/download/v0.1/omw-kin-0.1.tar.xz",
+       "https://github.com/omwn/omw-pronoun/releases/download/v0.1/omw-pronoun-0.1.tar.xz"]

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -22,6 +21,7 @@ from pathlib import Path
 from lxml import etree as ET
 
 from cyg.merge import INVERSE_CONCEPT_RELATIONS, INVERSE_SENSE_RELATIONS
+from cyg.presynth import log_path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PRESYNTH_DIR = PROJECT_ROOT / "bin" / "cygnets_presynth"
@@ -633,36 +633,30 @@ def check_glossed_concepts_without_senses(data: WordnetData) -> Issue | None:
 
 def load_json_log(xml_path: Path) -> dict:
     """Load the per-file converter log (``{stem}_log.json``) alongside *xml_path*."""
-    log_path = xml_path.with_name(xml_path.stem + "_log.json")
-    if not log_path.exists():
+    path = log_path(xml_path)
+    if not path.exists():
         return {}
-    with open(log_path, encoding='utf-8') as f:
+    with open(path, encoding='utf-8') as f:
         return json.load(f)
 
 
 def parse_conflicts_json(
     resource_id: str, xml_stem: str
-) -> tuple[list[dict], list[dict], list[dict]]:
+) -> tuple[list[dict], list[dict]]:
     """Load conflict records for this resource from the structured JSON conflict log.
-
-    Cycle records come from two distinct checks and are kept separate: a
-    per-file check (``check_and_remove_new_cycles``, runs right after this
-    file is merged) and a final whole-graph check
-    (``resolve_residual_cycles``, runs once after every file is merged) that
-    catches cross-resource cycles no single per-file check could see — see
-    that function's docstring in cyg/merge.py for why a per-file check alone
-    isn't sufficient.
 
     Args:
         resource_id: The wordnet's resource ID (e.g. ``'dn'``).
         xml_stem: The pre-synth filename stem (e.g. ``'dn-2025-07-03'``).
 
     Returns:
-        ``(reversed_rels, file_cycles, residual_cycles)`` — record dicts for
-        this resource, with cycles split by which check found them.
+        ``(reversed_rels, cycles)`` — record dicts for this resource.
+        Reversed relations are matched on resource ID; cycles on the
+        pre-synth filename stem, which is what check_and_remove_new_cycles()
+        logs them under.
     """
     if not CONFLICTS_JSON.exists():
-        return [], [], []
+        return [], []
 
     with open(CONFLICTS_JSON, encoding='utf-8') as fh:
         data = json.load(fh)
@@ -671,23 +665,11 @@ def parse_conflicts_json(
         r for r in data.get('reversed_relations', [])
         if r.get('resource_id') == resource_id
     ]
-    all_cycles = data.get('cycles', [])
-    # Per-file cycles are logged under the pre-synth filename stem (with
-    # version, e.g. 'UzWordnet-uz-1.0') since that's what check_and_remove_
-    # new_cycles() is called with. Residual cycles are logged under the bare
-    # resource code (e.g. 'UzWordnet-uz', no version) since resolve_residual_
-    # cycles() attributes them via provenance lookup, not the source
-    # filename — so residual records must be matched against resource_id,
-    # not xml_stem, or they never attach to any wordnet's report.
-    file_cycles = [
-        c for c in all_cycles
-        if not c.get('residual') and c.get('xml_stem') == xml_stem
+    cycles = [
+        c for c in data.get('cycles', [])
+        if c.get('xml_stem') == xml_stem
     ]
-    residual_cycles = [
-        c for c in all_cycles
-        if c.get('residual') and c.get('xml_stem') == resource_id
-    ]
-    return reversed_rels, file_cycles, residual_cycles
+    return reversed_rels, cycles
 
 
 # ---------------------------------------------------------------------------
@@ -874,6 +856,28 @@ def issues_from_json_log(log: dict, log_path: Path | None = None) -> list[Issue]
             items=[],
         ))
 
+    # ILIs given to more than one synset; dropped from all of them
+    repeated = log.get("repeated_ili", {}).get("synsets", {})
+    if repeated:
+        _add(Issue(
+            severity="WARNING",
+            title="ILIs shared by more than one synset",
+            total=len(repeated),
+            explanation=(
+                f"{len(repeated):,} ILI(s) are each assigned to more than one synset. "
+                "An ILI identifies a single concept, and it is not clear which synset "
+                "is right, so none of them is linked to it: each is stored under a "
+                "wordnet-local identifier instead."
+            ),
+            recommendation=(
+                "Keep each ILI on exactly one synset: merge synsets that are true "
+                "duplicates, and remove or correct the ILI on the others."
+            ),
+            items=[f"{ili}: {', '.join(ids)}"
+                   for ili, ids in list(repeated.items())[:MAX_EXAMPLES]],
+            source_hint=f"{log_path.name} (repeated_ili)" if log_path else "",
+        ))
+
     # Senses whose synset could not be resolved during conversion
     sense_miss = log.get("sense_missing_synset", {}).get("count", 0)
     if sense_miss:
@@ -940,8 +944,7 @@ def issues_from_json_log(log: dict, log_path: Path | None = None) -> list[Issue]
 
 def issues_from_conflicts_log(
     reversed_rels: list[dict],
-    file_cycles: list[dict],
-    residual_cycles: list[dict],
+    cycles: list[dict],
     data: WordnetData,
     xml_stem: str = "",
 ) -> list[Issue]:
@@ -980,7 +983,7 @@ def issues_from_conflicts_log(
             source_hint=f"{CONFLICTS_JSON.name} (reversed_relations, resource_id={data.resource_id})",
         ))
 
-    def _cycle_items(cycles: list[dict]) -> list[str]:
+    if cycles:
         items = []
         for rec in cycles[:MAX_EXAMPLES]:
             src, rel, tgt = rec['src'], rec['rel'], rec['tgt']
@@ -990,15 +993,12 @@ def issues_from_conflicts_log(
                 f"{label_concept(src, data)} {rel} {label_concept(tgt, data)}"
                 f"  (chain: {labelled_chain})"
             )
-        return items
-
-    if file_cycles:
         issues.append(Issue(
             severity="CRITICAL",
             title="Hypernym cycles spanning multiple wordnets",
-            total=len(file_cycles),
+            total=len(cycles),
             explanation=(
-                f"Cygnet removed {len(file_cycles):,} hypernym relation(s) from this "
+                f"Cygnet removed {len(cycles):,} hypernym relation(s) from this "
                 "wordnet because, together with relations from other wordnets already "
                 "in the database at the time this file was merged, they formed a cycle "
                 "in the IS-A hierarchy. The 'existing chain' shows the path that was "
@@ -1009,35 +1009,8 @@ def issues_from_conflicts_log(
                 "Check whether the hypernym direction is correct. "
                 "If the other wordnet's chain is wrong, report it there."
             ),
-            items=_cycle_items(file_cycles),
+            items=items,
             source_hint=f"{CONFLICTS_JSON.name} (cycles, xml_stem={xml_stem or data.resource_id})",
-        ))
-
-    if residual_cycles:
-        issues.append(Issue(
-            severity="CRITICAL",
-            title="Hypernym cycles found only after the full build (residual)",
-            total=len(residual_cycles),
-            explanation=(
-                f"Cygnet removed {len(residual_cycles):,} more hypernym relation(s) from "
-                "this wordnet during a final whole-graph check that runs once every "
-                "wordnet has been merged. These cycles involve resources merged both "
-                "before AND after this file, so no single per-file check — including "
-                "the one that produces the 'Hypernym cycles spanning multiple wordnets' "
-                "section above — could have caught them earlier. This wordnet's relation "
-                "was judged the more likely error (see cyg.merge.LOW_TRUST_RESOURCES) "
-                "and removed to keep the merged hierarchy acyclic."
-            ),
-            recommendation=(
-                "Check the hypernym direction for the relation on the left of each entry "
-                "below. If this wordnet is right and the chain is wrong, report it to the "
-                "other wordnet's maintainers instead."
-            ),
-            items=_cycle_items(residual_cycles),
-            source_hint=(
-                f"{CONFLICTS_JSON.name} (cycles, xml_stem={xml_stem or data.resource_id}, "
-                "residual=true)"
-            ),
         ))
 
     return issues
@@ -1149,16 +1122,14 @@ def collect_issues(path: Path) -> tuple[WordnetData, list[Issue], dict] | None:
         issue.source_hint = path.name
 
     # Augment with converter log (created at pre-synth time)
-    log_path = path.with_name(path.stem + "_log.json")
     json_log = load_json_log(path)
-    issues.extend(issues_from_json_log(json_log, log_path if log_path.exists() else None))
+    log = log_path(path)
+    issues.extend(issues_from_json_log(json_log, log if log.exists() else None))
 
     # Augment with merge-time relation conflicts log
-    reversed_rels, file_cycles, residual_cycles = parse_conflicts_json(
-        data.resource_id, path.stem
-    )
+    reversed_rels, cycles = parse_conflicts_json(data.resource_id, path.stem)
     issues.extend(issues_from_conflicts_log(
-        reversed_rels, file_cycles, residual_cycles, data, xml_stem=path.stem
+        reversed_rels, cycles, data, xml_stem=path.stem
     ))
 
     return data, issues, json_log
@@ -1194,7 +1165,6 @@ _DENOMINATOR_KEY_FOR_TITLE = {
     # concepts rather than creating new ones (e.g. odwn-nl).
     "Hypernym loops (cycles in the is-a hierarchy)": "relation_graph_nodes",
     "Hypernym cycles spanning multiple wordnets": "relations",
-    "Hypernym cycles found only after the full build (residual)": "relations",
     "Relations reversed relative to another wordnet": "relations",
     "Contradictory relation directions within this file": "relations",
     "Self-referential relations": "relations",

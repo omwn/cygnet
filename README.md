@@ -214,8 +214,8 @@ uv run pytest tests/ -v
 - **UI tests** (`tests/test_ui.py`) — Playwright/Chromium end-to-end tests
   against a small test database built from `tests/wordnets/`
 
-Tests run automatically on every push to `main` and on pull requests via
-GitHub Actions (`.github/workflows/tests.yml`).
+The suite runs on 4 workers by default (pytest-xdist, set in `pyproject.toml`);
+add `-n 0` to run serially, e.g. when debugging a single test.
 
 ---
 

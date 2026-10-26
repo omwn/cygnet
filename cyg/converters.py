@@ -3,14 +3,17 @@ Converters for transforming external lexical resources into Cygnet format.
 """
 
 import argparse
+import ctypes
+import ctypes.util
+import gc
 import html
 import json
-import gzip
 import logging
-import lzma
 import sys
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from pathlib import Path
+from typing import Any, Callable, NamedTuple
+
 from lxml import etree
 
 from cyg.multilex import (
@@ -19,13 +22,57 @@ from cyg.multilex import (
     dc_identifier,
     encode_for_xml_id,
     fix_language,
+    open_xml,
 )
+from cyg.presynth import log_path as presynth_log_path
 import spacy
 import pyinflect
 from nltk.stem import WordNetLemmatizer
 import nltk
 
 logger = logging.getLogger(__name__)
+
+# spaCy docs kept by WordNetToCygnetConverter._get_doc.
+DOC_CACHE_SIZE = 4096
+# Examples whose spaCy docs are parsed together in one nlp.pipe() batch:
+# batching gives the same docs as one nlp() call each, 4-12 times faster.
+EXAMPLE_BATCH_SIZE = 1000
+# Characters that end a token, for deciding whether a match needs spaCy.
+TOKEN_BOUNDARIES = frozenset(' .,!?;:"\'()[]{}-\u2014\u2013\n\t/\\')
+# Words of a multi-word form that need not match the example.
+FUNCTION_WORDS = frozenset({'a', 'an', 'the', 'of', 'in', 'on', 'at', 'to', 'for',
+                            'with', 'by', 'from'})
+
+
+def at_token_boundaries(text: str, start: int, end: int) -> bool:
+    """True if text[start:end] begins and ends at a token boundary.
+
+    Args:
+        text: The text
+        start: Start offset of the span
+        end: End offset of the span
+
+    Returns:
+        Whether the span needs no expansion to whole tokens
+    """
+    return ((start == 0 or text[start - 1] in TOKEN_BOUNDARIES)
+            and (end >= len(text) or text[end] in TOKEN_BOUNDARIES))
+
+
+def release_memory() -> None:
+    """Collect garbage and return freed heap memory to the operating system.
+
+    glibc keeps memory freed by libxml2 for reuse by this process, so without
+    malloc_trim() clearing a large tree does not lower its footprint. Does
+    nothing beyond gc.collect() where malloc_trim is unavailable.
+    """
+    gc.collect()
+    libc_name = ctypes.util.find_library('c')
+    if libc_name is None:
+        return
+    malloc_trim = getattr(ctypes.CDLL(libc_name), 'malloc_trim', None)
+    if malloc_trim is not None:
+        malloc_trim(0)
 
 NEW_POS_LABELS = {
     'n': 'NOUN',
@@ -244,6 +291,48 @@ def _spacy_candidates(lang: str) -> list[str]:
     candidates.append(f'{lang}_core_news_sm')
     candidates.append(_SPACY_FALLBACK)
     return candidates
+class ConceptRecord(NamedTuple):
+    """A Concept created for a synset not in CILI."""
+    id: str
+    ontological_category: str
+    original_id: str  # the source synset
+
+
+class GlossRecord(NamedTuple):
+    """A Gloss: one definition of a concept."""
+    definiendum: str
+    language: str
+    text: str
+
+
+class SenseRecord(NamedTuple):
+    """A Sense linking a lexeme to a concept."""
+    id: str
+    signifier: str  # lexeme ID
+    signified: str  # concept ID
+    original_id: str  # the source sense
+
+
+class RelationRecord(NamedTuple):
+    """A ConceptRelation or SenseRelation."""
+    relation_type: str
+    source: str
+    target: str
+
+
+class ExampleRecord(NamedTuple):
+    """An Example with text[start:end] annotated as an instance of a sense."""
+    original_id: str
+    sense: str
+    text: str
+    start: int
+    end: int
+
+
+# Output records are turned into elements this many at a time when written.
+WRITE_CHUNK_SIZE = 10000
+
+
 class WordNetToCygnetConverter:
     """Converts WordNet LMF lexical resources to Cygnet format."""
 
@@ -293,19 +382,22 @@ class WordNetToCygnetConverter:
         self.lexentry_to_lexeme: dict[str, str] = {}
 
         # CILI data structures
-        self.cili_concepts: dict[str, etree.Element] = {}
+        # CILI concept ID -> its ontological category (None if it has none)
+        self.cili_concepts: dict[str, str | None] = {}
         self.cili_glosses: dict[str, str] = {}
 
         # Relations file data structures
         self.existing_concept_relations: set[tuple[str, str, str]] = set()
 
         # Output data structures
-        self.concepts: list[etree.Element] = []
+        # Output, kept as records (lexemes as elements, since merging edits
+        # them) and turned into elements only when written
+        self.concepts: list[ConceptRecord] = []
         self.lexemes: list[etree.Element] = []
-        self.senses: list[etree.Element] = []
-        self.glosses: list[etree.Element] = []
-        self.sense_relations: list[etree.Element] = []
-        self.concept_relations: list[etree.Element] = []
+        self.senses: list[SenseRecord] = []
+        self.glosses: list[GlossRecord] = []
+        self.sense_relations: list[RelationRecord] = []
+        self.concept_relations: list[RelationRecord] = []
 
         # Logging
         self.log = {
@@ -347,6 +439,10 @@ class WordNetToCygnetConverter:
             },
             'missing_cili_concepts': {
                 'count': 0
+            },
+            'repeated_ili': {
+                'count': 0,
+                'synsets': {}  # ili -> ids of the synsets sharing it
             },
             'missing_lemmas': {
                 'count': 0
@@ -405,14 +501,19 @@ class WordNetToCygnetConverter:
         self.lexicon_language = None
 
         # Example processing
-        self.examples: list[etree.Element] = []
+        self.examples: list[ExampleRecord] = []
 
         # NLP tools (loaded in convert())
         self.nlp = None
         self.nltk_lemmatizer = None
 
         # Caching for performance
-        self.doc_cache: dict[str, any] = {}  # spaCy document cache
+        # spaCy documents, most recently used last. Bounded: a doc holds its
+        # tensors, and an unbounded cache of every example text took about
+        # 1 GB for plWordNet, though each text is only reused within one call.
+        self.doc_cache: OrderedDict[str, spacy.tokens.Doc] = OrderedDict()
+        # Docs parsed in advance for the current batch of examples
+        self.prefetched_docs: dict[str, spacy.tokens.Doc] = {}
         self.form_cache: dict[str, set[str]] = {}  # morphological forms cache
         self.nltk_cache: dict[str, frozenset[str]] = {}  # NLTK lemmas per token
 
@@ -420,7 +521,7 @@ class WordNetToCygnetConverter:
         self.concept_to_senses: dict[str, list[str]] = defaultdict(list)
 
         # Lookup dictionaries for fast access (populated in pass2)
-        self.sense_lookup: dict[str, etree.Element] = {}
+        self.sense_lookup: dict[str, str] = {}  # sense ID -> lexeme ID
         self.lexeme_lookup: dict[str, etree.Element] = {}
 
         # Lookup dictionary for concept ontological categories (populated in pass1)
@@ -436,7 +537,7 @@ class WordNetToCygnetConverter:
 
     def read_metadata(self, input_path: str) -> tuple[etree.Element, etree.ElementTree]:
         """Parse the input file and extract metadata without full conversion."""
-        with self._open_file(input_path) as f:
+        with open_xml(input_path) as f:
             tree = etree.parse(f)
         root = tree.getroot()
 
@@ -458,18 +559,6 @@ class WordNetToCygnetConverter:
         self.lexicon_language = self.language_override or fix_language(source_language)
         if self.lexicon_language:
             self.lexicon_attrs['language'] = self.lexicon_language
-
-    def _open_file(self, filepath: str):
-        """
-        Open a file for reading, automatically handling compression.
-        Supports .xml, .xml.gz, and .xml.xz files.
-        """
-        if filepath.endswith('.gz'):
-            return gzip.open(filepath, 'rb')
-        elif filepath.endswith('.xz'):
-            return lzma.open(filepath, 'rb')
-        else:
-            return open(filepath, 'rb')
 
     def _normalize_pos(self, pos: str) -> str:
         """
@@ -672,9 +761,17 @@ class WordNetToCygnetConverter:
         return added_count
     def _get_doc(self, text: str):
         """Get spaCy doc with caching."""
-        if text not in self.doc_cache:
-            self.doc_cache[text] = self.nlp(text)
-        return self.doc_cache[text]
+        doc = self.prefetched_docs.get(text)
+        if doc is not None:
+            return doc
+        doc = self.doc_cache.get(text)
+        if doc is None:
+            doc = self.doc_cache[text] = self.nlp(text)
+            if len(self.doc_cache) > DOC_CACHE_SIZE:
+                self.doc_cache.popitem(last=False)
+        else:
+            self.doc_cache.move_to_end(text)
+        return doc
 
 
     def _get_all_forms(self, word: str) -> set[str]:
@@ -769,14 +866,11 @@ class WordNetToCygnetConverter:
 
     def _match_multi_word(self, form_words: list[str], text: str) -> str | None:
         """Match a multi-word expression using morphological form matching."""
-        # Identify content words (not function words)
-        function_words = {'a', 'an', 'the', 'of', 'in', 'on', 'at', 'to', 'for', 'with', 'by', 'from'}
-
         # Get all forms for content words in the MWE
         content_word_forms = []
         for word in form_words:
             word_lower = word.lower()
-            if word_lower not in function_words:
+            if word_lower not in FUNCTION_WORDS:
                 forms = self._get_all_forms(word_lower)
                 content_word_forms.append(forms)
 
@@ -844,11 +938,40 @@ class WordNetToCygnetConverter:
         Returns:
             Tuple of (sense_id, matched_wordform) or (None, None) if no match
         """
-        text_lower = text.lower()
-
         # Sort candidates by length (longest first) to prefer longer matches
         candidates_sorted = sorted(candidates, key=lambda x: len(x[1]), reverse=True)
+        match = self._cheap_match(text.lower(), candidates_sorted)
+        if match is not None:
+            return match
 
+        # Strategy 3: Try morphological matching with spaCy (EXPENSIVE)
+        for sense_id, form in candidates_sorted:
+            form_words = form.split()
+
+            if len(form_words) == 1:
+                # Single word matching
+                result = self._match_single_word(form, text)
+                if result:
+                    return sense_id, result
+            else:
+                # Multi-word expression matching
+                result = self._match_multi_word(form_words, text)
+                if result:
+                    return sense_id, result
+
+        return None, None
+
+    def _cheap_match(self, text_lower: str, candidates_sorted: list[tuple[str, str]]
+                     ) -> tuple[str, str] | None:
+        """Match a candidate by string comparison alone, without spaCy.
+
+        Args:
+            text_lower: The lowercased example text
+            candidates_sorted: (sense_id, wordform) pairs, longest form first
+
+        Returns:
+            (sense_id, wordform) of the first match, or None
+        """
         # Strategy 1: Try exact match first (CHEAP - no NLP processing)
         for sense_id, form in candidates_sorted:
             if form.lower() in text_lower:
@@ -875,35 +998,12 @@ class WordNetToCygnetConverter:
                                 match_count += 1
                         if match_count == len(form_words):
                             return sense_id, form
-
-        # Strategy 3: Try morphological matching with spaCy (EXPENSIVE - full NLP pipeline)
-        for sense_id, form in candidates_sorted:
-            form_words = form.split()
-
-            if len(form_words) == 1:
-                # Single word matching
-                result = self._match_single_word(form, text)
-                if result:
-                    return sense_id, result
-            else:
-                # Multi-word expression matching
-                result = self._match_multi_word(form_words, text)
-                if result:
-                    return sense_id, result
-
-        return None, None
+        return None
 
     def _expand_to_token_boundaries(self, text: str, match_start: int, match_end: int) -> tuple[int, int]:
         """Expand match to complete token boundaries."""
         # Stage 1: Check if already at boundaries (CHEAP)
-        token_boundaries = {' ', '.', ',', '!', '?', ';', ':', '"', "'", "'", '"', '"',
-                            '(', ')', '[', ']', '{', '}', '-', '—', '–',
-                            '\n', '\t', '/', '\\'}
-
-        at_start = (match_start == 0 or text[match_start - 1] in token_boundaries)
-        at_end = (match_end >= len(text) or text[match_end] in token_boundaries)
-
-        if at_start and at_end:
+        if at_token_boundaries(text, match_start, match_end):
             return match_start, match_end
 
         # Stage 2: Use spaCy to find actual token boundaries (EXPENSIVE)
@@ -929,10 +1029,6 @@ class WordNetToCygnetConverter:
 
         return new_start, new_end
 
-    def _encode_for_xml_id(self, text: str) -> str:
-        """Convert any Unicode string to a safe XML ID, one-to-one (see encode_for_xml_id)."""
-        return encode_for_xml_id(text)
-
     def _normalize_text(self, text: str) -> str:
         """Normalize text for comparison (whitespace and punctuation)."""
         if not text:
@@ -952,7 +1048,7 @@ class WordNetToCygnetConverter:
             return
         fixes_before = self.log['statistics']['html_entity_fixes']['count']
         logger.info(f"Loading CILI from {self.cili_path}...")
-        with self._open_file(self.cili_path) as f:
+        with open_xml(self.cili_path) as f:
             tree = etree.parse(f)
         root = tree.getroot()
 
@@ -961,7 +1057,7 @@ class WordNetToCygnetConverter:
         if concept_layer is not None:
             for concept in concept_layer.findall('Concept'):
                 concept_id = concept.get('id')
-                self.cili_concepts[concept_id] = concept
+                self.cili_concepts[concept_id] = concept.get('ontological_category')
 
         # Load glosses
         gloss_layer = root.find('GlossLayer')
@@ -1002,7 +1098,7 @@ class WordNetToCygnetConverter:
             return
 
         logger.info(f"Loading existing relations from {self.relations_path}...")
-        with self._open_file(self.relations_path) as f:
+        with open_xml(self.relations_path) as f:
             tree = etree.parse(f)
         root = tree.getroot()
 
@@ -1046,8 +1142,25 @@ class WordNetToCygnetConverter:
         """
         logger.info("\nPass 1: Converting Synsets to Concepts and Glosses...")
 
+        lexicons = root.findall('Lexicon') + root.findall('LexiconExtension')
+
+        # An ILI identifies one synset.  If several synsets share one we
+        # cannot tell which is right, so none of them is linked to it.
+        repeated = self.log['repeated_ili']['synsets']
+        if self.shared is None:
+            by_ili: dict[str, list[str]] = {}
+            for lexicon in lexicons:
+                for synset in lexicon.findall('Synset'):
+                    ili = synset.get('ili')
+                    if ili not in (None, '', 'in'):
+                        by_ili.setdefault(ili, []).append(synset.get('id'))
+            repeated.update({i: ids for i, ids in by_ili.items() if len(ids) > 1})
+            for ili, ids in repeated.items():
+                logger.warning(f"  ILI {ili} shared by {', '.join(ids)}: dropped")
+            self.log['repeated_ili']['count'] = len(repeated)
+
         # Process all lexicons (including extensions)
-        for lexicon in root.findall('Lexicon') + root.findall('LexiconExtension'):
+        for lexicon in lexicons:
             if self.lexicon_id is None:
                 self.lexicon_id = lexicon.get('id')
                 self._set_language(lexicon.get('language'))
@@ -1076,22 +1189,13 @@ class WordNetToCygnetConverter:
 
                 # Check if ILI is valid
                 is_valid_ili = ili and ili not in ['', 'in']
+                if ili in repeated:
+                    is_valid_ili = False
 
                 if shared_id is not None and not shared_id.startswith('cili.'):
                     # Concepts lexicon: a stable id shared with its members.
                     concept_id = shared_id
-                    concept = etree.Element('Concept',
-                                            id=concept_id,
-                                            ontological_category=pos,
-                                            status='1')
-                    from_elem = etree.SubElement(concept, 'Provenance',
-                                                 resource=self.lexicon_id,
-                                                 version=self.lexicon_version)
-                    from_elem.set('original_id', synset_id)
-                    self.concepts.append(concept)
-                    self.created_concepts.add(concept_id)
-                    self.log['statistics']['concepts']['newly_created'] += 1
-                    self.log['statistics']['concepts']['total'] += 1
+                    self._new_concept(concept_id, pos, synset_id)
                 elif is_valid_ili or shared_id is not None:
                     if shared_id is not None:
                         ili = shared_id.removeprefix('cili.')
@@ -1104,23 +1208,10 @@ class WordNetToCygnetConverter:
                         # Create new concept instead
                         concept_id = f"{self.lexicon_id}.i{self.concept_counter}"
                         self.concept_counter += 1
-                        concept = etree.Element('Concept',
-                                                id=concept_id,
-                                                ontological_category=pos,
-                                                status='1')
-                        # Add Provenance element
-                        from_elem = etree.SubElement(concept, 'Provenance',
-                                                     resource=self.lexicon_id,
-                                                     version=self.lexicon_version)
-                        from_elem.set('original_id', synset_id)
-                        self.concepts.append(concept)
-                        self.created_concepts.add(concept_id)
-                        self.log['statistics']['concepts']['newly_created'] += 1
-                        self.log['statistics']['concepts']['total'] += 1
+                        self._new_concept(concept_id, pos, synset_id)
                     else:
                         # Check POS match
-                        cili_concept = self.cili_concepts[concept_id]
-                        cili_ontological_category = cili_concept.get('ontological_category', '')
+                        cili_ontological_category = self.cili_concepts[concept_id] or ''
 
                         if pos != cili_ontological_category:
                             # Update summary statistics
@@ -1144,19 +1235,7 @@ class WordNetToCygnetConverter:
                     concept_id = f"{self.lexicon_id}.i{self.concept_counter}"
                     self.concept_counter += 1
 
-                    concept = etree.Element('Concept',
-                                            id=concept_id,
-                                            ontological_category=pos,
-                                            status='1')
-                    # Add Provenance element
-                    from_elem = etree.SubElement(concept, 'Provenance',
-                                                 resource=self.lexicon_id,
-                                                 version=self.lexicon_version)
-                    from_elem.set('original_id', synset_id)
-                    self.concepts.append(concept)
-                    self.created_concepts.add(concept_id)
-                    self.log['statistics']['concepts']['newly_created'] += 1
-                    self.log['statistics']['concepts']['total'] += 1
+                    self._new_concept(concept_id, pos, synset_id)
                 # Store mapping
                 self.synset_to_concept[synset_id] = concept_id
 
@@ -1171,20 +1250,8 @@ class WordNetToCygnetConverter:
                         definition_elem.get('language', self.lexicon_language))
 
                     if should_add_gloss:
-                        gloss = etree.Element('Gloss',
-                                              definiendum=concept_id,
-                                              language=definition_lang)
-
-                        # Create AnnotatedSentence container for the definition text
-                        annotated_sentence = etree.SubElement(gloss, 'AnnotatedSentence')
-                        annotated_sentence.text = definition_text
-
-                        # Add Provenance element
-                        from_elem = etree.SubElement(gloss, 'Provenance',
-                                                  resource=self.lexicon_id,
-                                                  version=self.lexicon_version)
-
-                        self.glosses.append(gloss)
+                        self.glosses.append(
+                            GlossRecord(concept_id, definition_lang, definition_text))
                         self.log['statistics']['glosses']['created'] += 1
 
         logger.info(f"  Created {self.log['statistics']['concepts']['newly_created']} new concepts")
@@ -1192,6 +1259,19 @@ class WordNetToCygnetConverter:
         logger.info(f"  Total concepts: {self.log['statistics']['concepts']['total']}")
         logger.info(f"  Created {self.log['statistics']['glosses']['created']} glosses")
         logger.warning(f"  Found {self.log['synset_concept_pos_mismatches']['total_count']} synset-concept POS mismatches")
+
+    def _new_concept(self, concept_id: str, pos: str, synset_id: str) -> None:
+        """Create a Concept that is not in CILI, with its provenance.
+
+        Args:
+            concept_id: The new concept's id.
+            pos: Its ontological category.
+            synset_id: The source synset it was made from.
+        """
+        self.concepts.append(ConceptRecord(concept_id, pos, synset_id))
+        self.created_concepts.add(concept_id)
+        self.log['statistics']['concepts']['newly_created'] += 1
+        self.log['statistics']['concepts']['total'] += 1
 
     def pass2_lexical_entries_to_lexemes_and_senses(self, root: etree.Element):
         """
@@ -1202,10 +1282,9 @@ class WordNetToCygnetConverter:
         # First, build a map of concept IDs to their ontological categories
         concept_pos_map = {}
         for concept in self.concepts:
-            concept_pos_map[concept.get('id')] = concept.get('ontological_category')
+            concept_pos_map[concept.id] = concept.ontological_category
         # Also include CILI concepts
-        for concept_id, concept_elem in self.cili_concepts.items():
-            concept_pos_map[concept_id] = concept_elem.get('ontological_category')
+        concept_pos_map.update(self.cili_concepts)
 
         for lexicon in root.findall('Lexicon') + root.findall('LexiconExtension'):
             # Also check for ExternalLexicalEntry in extensions
@@ -1248,7 +1327,7 @@ class WordNetToCygnetConverter:
                 all_wordforms_sorted.extend(remaining)
 
                 # Build lexeme ID
-                encoded_forms = [self._encode_for_xml_id(f) for f in all_wordforms_sorted]
+                encoded_forms = [encode_for_xml_id(f) for f in all_wordforms_sorted]
                 lexeme_id = f"{self.lexicon_language}.{grammatical_category}.{'-'.join(encoded_forms)}"
 
                 # Create deduplication key
@@ -1394,18 +1473,9 @@ class WordNetToCygnetConverter:
                     # Store mapping
                     self.old_sense_to_new_sense[old_sense_id] = new_sense_id
 
-                    # Create Sense element
-                    sense_elem = etree.Element('Sense',
-                                               id=new_sense_id,
-                                               signifier=lexeme_id,
-                                               signified=concept_id)
-                    # Add Provenance element
-                    from_elem = etree.SubElement(sense_elem, 'Provenance',
-                                                 resource=self.lexicon_id,
-                                                 version=self.lexicon_version)
-                    from_elem.set('original_id', old_sense_id)
-                    self.senses.append(sense_elem)
-                    self.sense_lookup[new_sense_id] = sense_elem
+                    self.senses.append(SenseRecord(new_sense_id, lexeme_id,
+                                                   concept_id, old_sense_id))
+                    self.sense_lookup[new_sense_id] = lexeme_id
                     self.created_senses.add(sense_key)
                     self.log['statistics']['senses']['created'] += 1
 
@@ -1661,28 +1731,14 @@ class WordNetToCygnetConverter:
         logger.warning(f"    Found {mismatch_count} ontological category mismatches")
 
         # Create XML elements
-        logger.info("  Creating XML elements...")
+        logger.info("  Recording relations...")
 
         for source, target, rel_type in final_concept_relations:
-            concept_rel = etree.Element('ConceptRelation',
-                                        relation_type=rel_type,
-                                        source=source,
-                                        target=target)
-            from_elem = etree.SubElement(concept_rel, 'Provenance',
-                                         resource=self.lexicon_id,
-                                         version=self.lexicon_version)
-            self.concept_relations.append(concept_rel)
+            self.concept_relations.append(RelationRecord(rel_type, source, target))
             self.log['statistics']['relations']['concept_relations_created'] += 1
 
         for source, target, rel_type in final_sense_relations:
-            sense_rel = etree.Element('SenseRelation',
-                                      relation_type=rel_type,
-                                      source=source,
-                                      target=target)
-            from_elem = etree.SubElement(sense_rel, 'Provenance',
-                                         resource=self.lexicon_id,
-                                         version=self.lexicon_version)
-            self.sense_relations.append(sense_rel)
+            self.sense_relations.append(RelationRecord(rel_type, source, target))
             self.log['statistics']['relations']['sense_relations_created'] += 1
 
         logger.info(f"  Created {self.log['statistics']['relations']['concept_relations_created']} concept relations")
@@ -1695,6 +1751,9 @@ class WordNetToCygnetConverter:
     def pass4_examples(self, root: etree.Element):
         """
         Pass 4: Process examples from Synsets and Senses, tagging with sense annotations.
+
+        This is the last pass, so once the example texts are collected the
+        input tree is cleared to free its memory before spaCy is loaded.
         """
         logger.info("\nPass 4: Processing examples...")
 
@@ -1703,91 +1762,59 @@ class WordNetToCygnetConverter:
             logger.info("  No examples")
             return
 
-        self._initialize_nlp_tools()
-
-        # Build concept_to_senses mapping (for synset examples)
-        for sense_elem in self.senses:
-            sense_id = sense_elem.get('id')
-            concept_id = sense_elem.get('signified')
-            self.concept_to_senses[concept_id].append(sense_id)
-
-        example_counter = 1
+        # (text, is_synset_example, concept or old sense ID), synset examples first
+        examples: list[tuple[str, bool, str]] = []
         total_examples = 0
-
-        # Count total examples first
-        for lexicon in root.findall('Lexicon') + root.findall('LexiconExtension'):
-            synsets = lexicon.findall('Synset') + lexicon.findall('ExternalSynset')
-            for synset in synsets:
-                total_examples += len(synset.findall('Example'))
-
-            lexical_entries = lexicon.findall('LexicalEntry') + lexicon.findall('ExternalLexicalEntry')
-            for entry in lexical_entries:
-                senses = entry.findall('Sense') + entry.findall('ExternalSense')
-                for sense in senses:
-                    total_examples += len(sense.findall('Example'))
+        lexicons = root.findall('Lexicon') + root.findall('LexiconExtension')
+        for lexicon in lexicons:
+            for synset in lexicon.findall('Synset') + lexicon.findall('ExternalSynset'):
+                synset_examples = synset.findall('Example')
+                total_examples += len(synset_examples)
+                concept_id = self.synset_to_concept.get(synset.get('id'))
+                if concept_id is None:
+                    continue
+                examples.extend((ex.text, True, concept_id)
+                                for ex in synset_examples if ex.text)
+        for lexicon in lexicons:
+            entries = (lexicon.findall('LexicalEntry')
+                       + lexicon.findall('ExternalLexicalEntry'))
+            for entry in entries:
+                for sense in entry.findall('Sense') + entry.findall('ExternalSense'):
+                    sense_examples = sense.findall('Example')
+                    total_examples += len(sense_examples)
+                    examples.extend((ex.text, False, sense.get('id'))
+                                    for ex in sense_examples if ex.text)
+        del lexicons
+        root.clear()
+        release_memory()
 
         self.log['statistics']['examples']['total_found'] = total_examples
         logger.info(f"  Total examples to process: {total_examples}")
 
-        # Process synset examples
-        for lexicon in root.findall('Lexicon') + root.findall('LexiconExtension'):
-            synsets = lexicon.findall('Synset') + lexicon.findall('ExternalSynset')
-            for synset in synsets:
-                synset_id = synset.get('id')
+        self._initialize_nlp_tools()
 
-                # Get concept for this synset
-                if synset_id not in self.synset_to_concept:
-                    continue
+        # Build concept_to_senses mapping (for synset examples)
+        for sense in self.senses:
+            self.concept_to_senses[sense.signified].append(sense.id)
 
-                concept_id = self.synset_to_concept[synset_id]
-
-                for example in synset.findall('Example'):
-                    if example.text:
-                        raw = example.text.strip()
-                        unescaped = html.unescape(raw)
-                        if unescaped != raw:
-                            self.log['statistics']['html_entity_fixes']['count'] += 1
-                        self._process_single_example(
-                            unescaped,
-                            f"ex_{example_counter}",
-                            is_synset_example=True,
-                            concept_id=concept_id
-                        )
-                        example_counter += 1
-
-                        # Progress logging
-                        if example_counter % 10000 == 0:
-                            logger.info(
-                                f"    Processed {example_counter}/{total_examples} examples "
-                                f"(skipped: {self.log['statistics']['examples']['skipped']})")
-
-        # Process sense examples
-        for lexicon in root.findall('Lexicon') + root.findall('LexiconExtension'):
-            lexical_entries = lexicon.findall('LexicalEntry') + lexicon.findall('ExternalLexicalEntry')
-            for entry in lexical_entries:
-                senses = entry.findall('Sense') + entry.findall('ExternalSense')
-                for sense in senses:
-                    old_sense_id = sense.get('id')
-
-                    for example in sense.findall('Example'):
-                        if example.text:
-                            raw = example.text.strip()
-                            unescaped = html.unescape(raw)
-                            if unescaped != raw:
-                                self.log['statistics']['html_entity_fixes']['count'] += 1
-                            self._process_single_example(
-                                unescaped,
-                                f"ex_{example_counter}",
-                                is_synset_example=False,
-                                old_sense_id=old_sense_id
-                            )
-                            example_counter += 1
-
-                            # Progress logging
-                            if example_counter % 100 == 0:
-                                logger.info(
-                                    f"    Processed {example_counter}/{total_examples} examples "
-                                    f"(skipped: {self.log['statistics']['examples']['skipped']})")
+        for start in range(0, len(examples), EXAMPLE_BATCH_SIZE):
+            batch = []
+            for text, is_synset, owner in examples[start:start + EXAMPLE_BATCH_SIZE]:
+                raw = text.strip()
+                unescaped = html.unescape(raw)
+                if unescaped != raw:
+                    self.log['statistics']['html_entity_fixes']['count'] += 1
+                concept_id, old_sense_id = (owner, None) if is_synset else (None, owner)
+                batch.append((unescaped, is_synset, concept_id, old_sense_id))
+            self._prefetch_docs([(text, self._example_candidates(*rest))
+                                 for text, *rest in batch])
+            for example_counter, (text, *rest) in enumerate(batch, start + 1):
+                self._process_single_example(text, f"ex_{example_counter}", *rest)
+                if example_counter % 10000 == 0:
+                    logger.info(
+                        f"    Processed {example_counter}/{len(examples)} examples "
+                        f"(skipped: {self.log['statistics']['examples']['skipped']})")
+        self.prefetched_docs = {}
 
         logger.info(f"  Examples processed: {self.log['statistics']['examples']['processed']}")
         logger.warning(f"  Examples skipped: {self.log['statistics']['examples']['skipped']}")
@@ -1802,47 +1829,91 @@ class WordNetToCygnetConverter:
             self.log['statistics']['examples']['success_rate_pct'] = round(success_rate, 1)
             logger.info(f"  Success rate: {success_rate:.1f}%")
 
+    def _example_candidates(self, is_synset_example: bool, concept_id: str | None,
+                            old_sense_id: str | None) -> list[tuple[str, str]] | None:
+        """The (sense_id, wordform) pairs an example may be annotated with.
+
+        Args:
+            is_synset_example: Whether the example belongs to a synset
+            concept_id: The synset's concept (synset examples)
+            old_sense_id: The source sense ID (sense examples)
+
+        Returns:
+            The candidates, possibly none; None if a sense example's sense
+            was not converted.
+        """
+        if is_synset_example:
+            candidates = []
+            # For each sense of the concept, all written wordforms of its lexeme
+            for sense_id in self.concept_to_senses.get(concept_id, []):
+                lexeme_id = self.sense_lookup.get(sense_id)
+                if lexeme_id is None:
+                    continue
+                for form in self._get_lexeme_written_forms(lexeme_id):
+                    candidates.append((sense_id, form))
+            return candidates
+
+        if old_sense_id not in self.old_sense_to_new_sense:
+            return None
+        sense_id = self.old_sense_to_new_sense[old_sense_id]
+        lexeme_id = self.sense_lookup.get(sense_id)
+        if lexeme_id is None:
+            return None
+        return [(sense_id, form) for form in self._get_lexeme_written_forms(lexeme_id)]
+
+    def _prefetch_docs(self,
+                       batch: list[tuple[str, list[tuple[str, str]] | None]]) -> None:
+        """Parse in one nlp.pipe() batch the docs these examples will need.
+
+        Mirrors _find_best_match and _expand_to_token_boundaries: if a cheap
+        match lies on token boundaries no doc is needed; if it does not, the
+        doc of the lowercased text is; if there is no cheap match, the docs
+        of the text and the candidate words are. (A spaCy match is a whole
+        token, so it rarely needs the lowercased text too.) Any doc missed
+        here is parsed on demand, so this only affects speed.
+
+        Args:
+            batch: (example text, its candidates) pairs
+        """
+        needed: dict[str, None] = {}  # insertion-ordered set
+        for text, candidates in batch:
+            if not candidates:
+                continue
+            candidates_sorted = sorted(candidates, key=lambda x: len(x[1]),
+                                       reverse=True)
+            text_lower = text.lower()
+            match = self._cheap_match(text_lower, candidates_sorted)
+            if match is not None:
+                start = text_lower.find(match[1].lower())
+                end = start + len(match[1])
+                if start != -1 and not at_token_boundaries(text_lower, start, end):
+                    needed[text_lower] = None
+                continue
+            needed[text] = None
+            for _sense_id, form in candidates_sorted:
+                form_words = form.split()
+                if len(form_words) == 1:
+                    words = [form.lower()]
+                else:
+                    words = [w.lower() for w in form_words
+                             if w.lower() not in FUNCTION_WORDS]
+                for word in words:
+                    for w in (word, word.strip('-')):
+                        if w and w not in self.form_cache:
+                            needed[w] = None
+        texts = [t for t in needed if t not in self.doc_cache]
+        self.prefetched_docs = dict(zip(texts, self.nlp.pipe(texts, batch_size=256)))
+
     def _process_single_example(self, text: str, example_id: str,
                                 is_synset_example: bool = False,
                                 concept_id: str = None,
                                 old_sense_id: str = None):
         """Process a single example and create annotated token."""
-        candidates = []
-
-        if is_synset_example:
-            # Get all senses for this concept
-            sense_ids = self.concept_to_senses.get(concept_id, [])
-
-            # For each sense, get all written wordforms from its lexeme
-            for sense_id in sense_ids:
-                sense_elem = self.sense_lookup.get(sense_id)
-                if sense_elem is None:
-                    continue
-
-                lexeme_id = sense_elem.get('signifier')
-                written_forms = self._get_lexeme_written_forms(lexeme_id)
-
-                for form in written_forms:
-                    candidates.append((sense_id, form))
-
-        else:
-            # Sense example - get the new sense ID
-            if old_sense_id not in self.old_sense_to_new_sense:
-                self.log['examples']['skipped'] += 1
-                return
-
-            sense_id = self.old_sense_to_new_sense[old_sense_id]
-            sense_elem = self.sense_lookup.get(sense_id)
-
-            if sense_elem is None:
-                self.log['examples']['skipped'] += 1
-                return
-
-            lexeme_id = sense_elem.get('signifier')
-            written_forms = self._get_lexeme_written_forms(lexeme_id)
-
-            for form in written_forms:
-                candidates.append((sense_id, form))
+        candidates = self._example_candidates(is_synset_example, concept_id,
+                                              old_sense_id)
+        if candidates is None:
+            self.log['examples']['skipped'] += 1
+            return
 
         if not candidates:
             self.log['statistics']['examples']['skipped'] += 1
@@ -1881,31 +1952,73 @@ class WordNetToCygnetConverter:
         match_end = pos + len(wordform)
         expanded_start, expanded_end = self._expand_to_token_boundaries(text_lower, pos, match_end)
 
-        # Create Example element using ORIGINAL text (not lowercased)
-        example_elem = etree.Element('Example')
+        # The element uses the ORIGINAL text (not lowercased)
+        self.examples.append(
+            ExampleRecord(example_id, sense_id, text, expanded_start, expanded_end))
 
-        # Create AnnotatedSentence container
-        annotated_sentence = etree.SubElement(example_elem, 'AnnotatedSentence')
+    def _provenance(self, parent: etree.Element, **attrs: str) -> None:
+        """Add this lexicon's Provenance element to parent."""
+        etree.SubElement(parent, 'Provenance', resource=self.lexicon_id,
+                         version=self.lexicon_version, **attrs)
 
-        # Add text before token (original capitalization)
-        if expanded_start > 0:
-            annotated_sentence.text = text[:expanded_start]
+    def _concept_element(self, rec: ConceptRecord) -> etree.Element:
+        """The Concept element for a record."""
+        concept = etree.Element('Concept', id=rec.id,
+                                ontological_category=rec.ontological_category,
+                                status='1')
+        self._provenance(concept, original_id=rec.original_id)
+        return concept
 
-        # Create AnnotatedToken (original capitalization)
-        annotated_token = etree.SubElement(annotated_sentence, 'AnnotatedToken', sense=sense_id)
-        annotated_token.text = text[expanded_start:expanded_end]
+    def _sense_element(self, rec: SenseRecord) -> etree.Element:
+        """The Sense element for a record."""
+        sense = etree.Element('Sense', id=rec.id, signifier=rec.signifier,
+                              signified=rec.signified)
+        self._provenance(sense, original_id=rec.original_id)
+        return sense
 
-        # Add text after token (original capitalization)
-        if expanded_end < len(text):
-            annotated_token.tail = text[expanded_end:]
+    def _gloss_element(self, rec: GlossRecord) -> etree.Element:
+        """The Gloss element for a record."""
+        gloss = etree.Element('Gloss', definiendum=rec.definiendum,
+                              language=rec.language)
+        etree.SubElement(gloss, 'AnnotatedSentence').text = rec.text
+        self._provenance(gloss)
+        return gloss
 
-        # Add Provenance element with original_id
-        from_elem = etree.SubElement(example_elem, 'Provenance',
-                                     resource=self.lexicon_id,
-                                     version=self.lexicon_version)
-        from_elem.set('original_id', example_id)
+    def _example_element(self, rec: ExampleRecord) -> etree.Element:
+        """The Example element for a record, its sense word annotated."""
+        example = etree.Element('Example')
+        annotated_sentence = etree.SubElement(example, 'AnnotatedSentence')
+        if rec.start > 0:
+            annotated_sentence.text = rec.text[:rec.start]
+        annotated_token = etree.SubElement(annotated_sentence, 'AnnotatedToken',
+                                           sense=rec.sense)
+        annotated_token.text = rec.text[rec.start:rec.end]
+        if rec.end < len(rec.text):
+            annotated_token.tail = rec.text[rec.end:]
+        self._provenance(example, original_id=rec.original_id)
+        return example
 
-        self.examples.append(example_elem)
+    def _relation_element(self, tag: str, rec: RelationRecord) -> etree.Element:
+        """The ConceptRelation or SenseRelation element for a record."""
+        relation = etree.Element(tag, relation_type=rec.relation_type,
+                                 source=rec.source, target=rec.target)
+        self._provenance(relation)
+        return relation
+
+    def _output_layers(self
+                       ) -> list[tuple[str, list, Callable[[Any], etree.Element]]]:
+        """The output layers in order: (tag, records, record -> element)."""
+        return [
+            ('ConceptLayer', self.concepts, self._concept_element),
+            ('LexemeLayer', self.lexemes, lambda lexeme: lexeme),
+            ('SenseLayer', self.senses, self._sense_element),
+            ('GlossLayer', self.glosses, self._gloss_element),
+            ('ExampleLayer', self.examples, self._example_element),
+            ('SenseRelationLayer', self.sense_relations,
+             lambda rec: self._relation_element('SenseRelation', rec)),
+            ('ConceptRelationLayer', self.concept_relations,
+             lambda rec: self._relation_element('ConceptRelation', rec)),
+        ]
 
     def build_output_xml(self) -> etree.Element:
         """Build the output CygnetResource XML tree."""
@@ -1915,42 +2028,50 @@ class WordNetToCygnetConverter:
         cygnet_root = etree.Element('CygnetResource', **self.lexicon_attrs)
 
         # Add layers only if they have content
-        if self.concepts:
-            concept_layer = etree.SubElement(cygnet_root, 'ConceptLayer')
-            for concept in self.concepts:
-                concept_layer.append(concept)
-
-        if self.lexemes:
-            lexeme_layer = etree.SubElement(cygnet_root, 'LexemeLayer')
-            for lexeme in self.lexemes:
-                lexeme_layer.append(lexeme)
-
-        if self.senses:
-            sense_layer = etree.SubElement(cygnet_root, 'SenseLayer')
-            for sense in self.senses:
-                sense_layer.append(sense)
-
-        if self.glosses:
-            gloss_layer = etree.SubElement(cygnet_root, 'GlossLayer')
-            for gloss in self.glosses:
-                gloss_layer.append(gloss)
-
-        if self.examples:
-            example_layer = etree.SubElement(cygnet_root, 'ExampleLayer')
-            for example in self.examples:
-                example_layer.append(example)
-
-        if self.sense_relations:
-            sense_rel_layer = etree.SubElement(cygnet_root, 'SenseRelationLayer')
-            for rel in self.sense_relations:
-                sense_rel_layer.append(rel)
-
-        if self.concept_relations:
-            concept_rel_layer = etree.SubElement(cygnet_root, 'ConceptRelationLayer')
-            for rel in self.concept_relations:
-                concept_rel_layer.append(rel)
-
+        for tag, records, make in self._output_layers():
+            if records:
+                layer = etree.SubElement(cygnet_root, tag)
+                for rec in records:
+                    layer.append(make(rec))
         return cygnet_root
+
+    def write_output_xml(self, output_path: str) -> None:
+        """Write the output XML a chunk at a time, as build_output_xml() would.
+
+        The bytes are those of writing the whole tree with pretty_print, but
+        only WRITE_CHUNK_SIZE elements exist at once: each chunk is
+        pretty-printed inside a stand-in root and layer, which give it the
+        same indentation, and those two wrapper lines are cut off.
+
+        Args:
+            output_path: The file to write
+        """
+        root = etree.Element('CygnetResource', **self.lexicon_attrs)
+        root_tag = etree.tostring(root, encoding='unicode')
+        layers = [(tag, records, make)
+                  for tag, records, make in self._output_layers() if records]
+        with open(output_path, 'w', encoding='utf-8', newline='') as f:
+            f.write("<?xml version='1.0' encoding='UTF-8'?>\n")
+            if not layers:
+                f.write(root_tag + '\n')
+                return
+            f.write(root_tag[:-2] + '>\n')  # '<CygnetResource .../>' -> start tag
+            for tag, records, make in layers:
+                head = f'<R>\n  <{tag}>\n'
+                tail = f'  </{tag}>\n</R>\n'
+                f.write(f'  <{tag}>\n')
+                for start in range(0, len(records), WRITE_CHUNK_SIZE):
+                    wrapper = etree.Element('R')
+                    layer = etree.SubElement(wrapper, tag)
+                    for rec in records[start:start + WRITE_CHUNK_SIZE]:
+                        layer.append(make(rec))
+                    chunk = etree.tostring(wrapper, pretty_print=True,
+                                           encoding='unicode')
+                    if not (chunk.startswith(head) and chunk.endswith(tail)):
+                        raise RuntimeError(f'unexpected serialisation of {tag}')
+                    f.write(chunk[len(head):-len(tail)])
+                f.write(f'  </{tag}>\n')
+            f.write('</CygnetResource>\n')
 
     def convert_from_tree(self, root: etree.Element):
         """Convert from an already-parsed XML tree."""
@@ -1976,19 +2097,12 @@ class WordNetToCygnetConverter:
 
     def save(self, output_path: str):
         """Build output XML and save to file with log."""
-        # Build output
-        output_root = self.build_output_xml()
-        output_tree = etree.ElementTree(output_root)
-
         # Derive log filename from output
-        log_path = output_path[:-4] + '_log.json'
+        log_path = str(presynth_log_path(output_path))
 
         # Write output XML
         logger.info(f"Writing output to {output_path}...")
-        output_tree.write(output_path,
-                          pretty_print=True,
-                          xml_declaration=True,
-                          encoding='UTF-8')
+        self.write_output_xml(output_path)
 
         # Write log
         logger.info(f"Writing log to {log_path}...")

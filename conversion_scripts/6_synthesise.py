@@ -15,10 +15,10 @@ from pathlib import Path
 from lxml import etree
 
 from cyg.converters import DIRECTION_SWAP_CONFIG_FILENAME
-from cyg.merge import MergeBuilder
+from cyg.merge import LOW_TRUST_RESOURCES, MergeBuilder
+from cyg.presynth import MANIFEST_NAME, read_manifest, stem_resource
 
 
-MANIFEST_NAME = 'manifest.txt'  # written by 2_batch_convert_lmfs.py
 
 
 def select_files(input_dir: Path) -> list[Path]:
@@ -35,11 +35,11 @@ def select_files(input_dir: Path) -> list[Path]:
         Files to merge, sorted by name
     """
     all_files = sorted(input_dir.glob('*.xml'))
-    manifest = input_dir / MANIFEST_NAME
-    if not manifest.exists():
+    manifest = read_manifest(input_dir)
+    if manifest is None:
         print(f'  Warning: no {MANIFEST_NAME}; merging every file in {input_dir}')
         return all_files
-    planned = set(manifest.read_text(encoding='utf-8').split())
+    planned = set(manifest)
     keep, ignored = [], []
     for f in all_files:
         if f.name in planned or 'cili' in f.stem or 'mtg' in f.stem:
@@ -66,6 +66,45 @@ def is_concepts_lexicon(path: Path) -> bool:
     return False
 
 
+def low_trust_rank(path: Path) -> int | None:
+    """Position of the file's resource in LOW_TRUST_RESOURCES, or None.
+
+    A pre-synth stem is the resource code plus a version ('UzWordnet-uz-1.0').
+    """
+    code = stem_resource(path.stem, LOW_TRUST_RESOURCES)
+    return None if code is None else LOW_TRUST_RESOURCES.index(code)
+
+
+def merge_order(all_files: list[Path]) -> list[Path]:
+    """Order pre-synth files for merging.
+
+    When two wordnets disagree, the one merged first wins: a reversed
+    relation is skipped, and a cycle is broken by removing the edge from the
+    file that closed it. So the order is: CILI, the English base (most
+    trusted), the 'mul' concept lexicons (their members need their concepts),
+    every other wordnet, then LOW_TRUST_RESOURCES with the worst last, and
+    finally the machine-translated glosses (mtg).
+    """
+    def group(f: Path) -> tuple[int, int]:
+        if 'cili' in f.stem:
+            return (0, 0)
+        if 'oewn' in f.stem:
+            return (1, 0)
+        # Machine-translated glosses (mtg) reference definiendum concepts from
+        # every other resource — _do_gloss() silently drops a Gloss if its
+        # concept isn't registered yet, so mtg must be processed last.
+        if 'mtg' in f.stem:
+            return (5, 0)
+        if is_concepts_lexicon(f):
+            return (2, 0)
+        rank = low_trust_rank(f)
+        if rank is not None:
+            return (4, -rank)  # list is worst first; merge worst last
+        return (3, 0)
+
+    return sorted(all_files, key=group)  # stable: keeps name order in a group
+
+
 def main() -> None:
     sys.stdout.reconfigure(line_buffering=True)
 
@@ -82,20 +121,7 @@ def main() -> None:
 
     db_path.parent.mkdir(exist_ok=True)
 
-    all_files = select_files(input_dir)
-    cili_files = [f for f in all_files if 'cili' in f.stem]
-    oewn_files = [f for f in all_files if 'oewn' in f.stem]
-    # Machine-translated glosses (mtg) reference definiendum concepts from
-    # every other resource — _do_gloss() silently drops a Gloss if its
-    # concept isn't registered yet, so mtg must be processed last.
-    mtg_files = [f for f in all_files if 'mtg' in f.stem]
-    rest = [
-        f for f in all_files
-        if f not in cili_files and f not in oewn_files and f not in mtg_files
-    ]
-    concept_files = [f for f in rest if is_concepts_lexicon(f)]
-    other_files = [f for f in rest if f not in concept_files]
-    xml_files = cili_files + oewn_files + concept_files + other_files + mtg_files
+    xml_files = merge_order(select_files(input_dir))
     print(f'Found {len(xml_files)} pre-synth files to merge')
 
     builder = MergeBuilder(db_path, prov_db_path)
@@ -133,15 +159,11 @@ def main() -> None:
     print('\nCreating indexes...')
     builder.create_indexes()
 
-    print('\nPhase 1b: Resolving residual cycles...')
-    n_resolved = builder.resolve_residual_cycles()
-    if n_resolved:
-        print(f'  Removed {n_resolved:,} residual cycle-causing relation(s)'
-              f' (see {conflicts_path})')
-
+    # The per-file check above should leave no cycles; this is a release gate.
+    print('\nPhase 1b: Checking that no cycles remain...')
     n_cycles = builder.detect_cycles()
     if n_cycles:
-        print(f'  ERROR: {n_cycles:,} cycle(s) remain after resolution — '
+        print(f'  ERROR: {n_cycles:,} cycle(s) remain after per-file removal — '
               f'refusing to build a release with a cyclic hypernym hierarchy')
         builder.write_conflicts_json(conflicts_path)
         sys.exit(1)
@@ -152,7 +174,8 @@ def main() -> None:
 
     print('\nPhase 2: Merging case-variant lexemes...')
     removed = builder.merge_case_variants()
-    print(f'  Removed {removed:,} duplicate senses from case-variant merge')
+    print(f'  Removed {removed["identical"]:,} duplicate senses of identical lemmas '
+          f'and {removed["variant"]:,} of case/width variants')
 
     print('\nPhase 3: Cascade-deleting synsets without definitions...')
     counts = builder.cascade_delete()
