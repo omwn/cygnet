@@ -790,7 +790,13 @@ class MergeBuilder:
         prov_elems = elem.findall('Provenance')
         current_resource = prov_elems[0].get('resource') if prov_elems else ''
         type_rowid = self._rel_type_rowid(rel_type)
-        inv = INVERSE_SENSE_RELATIONS.get(rel_type)
+        # Unknown types (e.g. a resource's own relType="other" + dc:type
+        # subtype, like plWordnet's "fuzzynimia"/"bliskoznaczność") default
+        # to symmetric, same as the bare 'other' entry below -- a type we
+        # have no curated inverse for is far more often a resource's own
+        # reciprocal sub-relation (declared both ways on purpose) than a
+        # genuinely directional one we just haven't catalogued yet.
+        inv = INVERSE_SENSE_RELATIONS.get(rel_type, rel_type)
 
         # Conflict: same relation type exists with source/target reversed
         if inv != rel_type:
@@ -845,7 +851,9 @@ class MergeBuilder:
         prov_elems = elem.findall('Provenance')
         current_resource = prov_elems[0].get('resource') if prov_elems else ''
         type_rowid = self._rel_type_rowid(rel_type)
-        inv = INVERSE_CONCEPT_RELATIONS.get(rel_type)
+        # See the matching comment in _do_sense_relation: unknown types
+        # default to symmetric rather than directional.
+        inv = INVERSE_CONCEPT_RELATIONS.get(rel_type, rel_type)
 
         if inv != rel_type:
             reverse_key = (target, source, type_rowid)

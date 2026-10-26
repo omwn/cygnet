@@ -123,6 +123,31 @@ class TestSynsetRelationConflict:
 
         assert builder.n_rel_conflicts == 0
 
+    def test_unknown_relation_type_defaults_to_symmetric(self, builder, tmp_path, caplog):
+        """
+        A relation type with no curated entry in INVERSE_CONCEPT_RELATIONS
+        (e.g. a resource's own relType="other" + dc:type subtype, like
+        plWordnet's "plwn:108" for "fuzzynimia_synsetow") defaults to
+        symmetric rather than directional -- both directions explicitly
+        asserted should not be flagged as a reversed conflict, since a
+        resource declaring its own custom relation both ways is far more
+        often intentional reciprocity than an error.
+        """
+        wn_a = tmp_path / 'wn-a.xml'
+        wn_a.write_text(wn_xml('wn-a', BASE_CONCEPTS + BASE_LEXEMES_AND_SENSES + """\
+<ConceptRelation relation_type="plwn:108" source="cili.i1" target="cili.i2">
+  <Provenance resource="wn-a" version="1.0"/>
+</ConceptRelation>
+<ConceptRelation relation_type="plwn:108" source="cili.i2" target="cili.i1">
+  <Provenance resource="wn-a" version="1.0"/>
+</ConceptRelation>
+"""))
+
+        with caplog.at_level(logging.WARNING, logger='synthesise'):
+            builder.process_file(wn_a)
+
+        assert builder.n_rel_conflicts == 0
+
     def test_no_conflict_on_normal_relations(self, builder, tmp_path, caplog):
         """Single-source wordnet with correct hypernym should produce zero conflicts."""
         wn_a = tmp_path / 'wn-a.xml'
@@ -238,6 +263,23 @@ class TestSenseRelationConflict:
         with caplog.at_level(logging.WARNING, logger='synthesise'):
             builder.process_file(wn_a)
             builder.process_file(wn_b)
+
+        assert builder.n_rel_conflicts == 0
+
+    def test_unknown_sense_relation_type_defaults_to_symmetric(self, builder, tmp_path, caplog):
+        """Sense-level counterpart of the concept-level test above."""
+        wn_a = tmp_path / 'wn-a.xml'
+        wn_a.write_text(wn_xml('wn-a', BASE_CONCEPTS_SENSE_REL + """\
+<SenseRelation relation_type="plwn:19" source="sense.run" target="sense.running">
+  <Provenance resource="wn-a" version="1.0"/>
+</SenseRelation>
+<SenseRelation relation_type="plwn:19" source="sense.running" target="sense.run">
+  <Provenance resource="wn-a" version="1.0"/>
+</SenseRelation>
+"""))
+
+        with caplog.at_level(logging.WARNING, logger='synthesise'):
+            builder.process_file(wn_a)
 
         assert builder.n_rel_conflicts == 0
 
