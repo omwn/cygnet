@@ -408,6 +408,41 @@ def test_low_confidence_relation_dropped(tmp_path):
     assert ids == {"pr-1", "pr-2"}
 
 
+def test_low_confidence_definition_dropped(tmp_path):
+    """A Definition below CONFIDENCE_THRESHOLD is dropped, but its Synset is
+    kept -- e.g. an untranslated placeholder gloss flagged with a low score
+    shouldn't block the rest of the synset."""
+    lmf = _LMF_HEAD.format(id="pr", lang="mul") + """\
+    <Synset id="pr-1" ili="in" partOfSpeech="n" dc:identifier="P:1">
+      <Definition language="en" confidenceScore="0.0">placeholder</Definition>
+      <Definition language="ga" confidenceScore="1.0">real</Definition>
+    </Synset>
+""" + _LMF_TAIL
+    concepts = build_concept_map(_write(tmp_path / "pr.xml", lmf))
+    root = _convert(tmp_path, lmf, SharedConcepts(concepts, "concepts"))
+    ids = {c.find("Provenance").get("original_id") for c in root.iter("Concept")}
+    assert "pr-1" in ids
+    glosses = [g.find("AnnotatedSentence").text for g in root.iter("Gloss")]
+    assert "real" in glosses
+    assert "placeholder" not in glosses
+
+
+def test_low_confidence_only_definition_leaves_synset_glossless(tmp_path):
+    """If every Definition on a Synset is below threshold, the Synset is
+    still kept (it just ends up with no gloss) -- confidence filtering never
+    cascades into dropping the synset itself."""
+    lmf = _LMF_HEAD.format(id="pr", lang="mul") + """\
+    <Synset id="pr-1" ili="in" partOfSpeech="n" dc:identifier="P:1">
+      <Definition language="en" confidenceScore="0.5">placeholder</Definition>
+    </Synset>
+""" + _LMF_TAIL
+    concepts = build_concept_map(_write(tmp_path / "pr.xml", lmf))
+    root = _convert(tmp_path, lmf, SharedConcepts(concepts, "concepts"))
+    ids = {c.find("Provenance").get("original_id") for c in root.iter("Concept")}
+    assert "pr-1" in ids
+    assert list(root.iter("Gloss")) == []
+
+
 def test_confidence_at_threshold_is_kept(tmp_path):
     """Exactly CONFIDENCE_THRESHOLD (0.6) is kept -- the cutoff is strictly
     less-than, not less-than-or-equal."""

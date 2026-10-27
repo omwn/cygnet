@@ -485,6 +485,7 @@ class WordNetToCygnetConverter:
                 'synsets': 0,
                 'senses': 0,
                 'relations': 0,
+                'definitions': 0,
             },
             'shared_concept_not_found': {
                 'count': 0
@@ -1287,6 +1288,9 @@ class WordNetToCygnetConverter:
                 # stamping every definition with self.lexicon_language.
                 should_add_gloss = not (self.skip_cili_defns and concept_id.startswith('cili.'))
                 for definition_elem in synset.findall('Definition'):
+                    if below_confidence_threshold(definition_elem):
+                        self.log['low_confidence_skipped']['definitions'] += 1
+                        continue
                     definition_text = self._extract_text_content(definition_elem)
                     definition_lang = fix_language(
                         definition_elem.get('language', self.lexicon_language))
@@ -1304,6 +1308,10 @@ class WordNetToCygnetConverter:
         if self.log['low_confidence_skipped']['synsets']:
             logger.warning(
                 f"  Skipped {self.log['low_confidence_skipped']['synsets']} synsets "
+                f"below confidence {CONFIDENCE_THRESHOLD}")
+        if self.log['low_confidence_skipped']['definitions']:
+            logger.warning(
+                f"  Skipped {self.log['low_confidence_skipped']['definitions']} definitions "
                 f"below confidence {CONFIDENCE_THRESHOLD}")
 
     def _new_concept(self, concept_id: str, pos: str, synset_id: str) -> None:

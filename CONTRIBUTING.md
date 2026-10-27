@@ -68,9 +68,11 @@ The XML must declare **DTD version 1.1 or later**:
 | `confidenceScore` | Confidence in correctness, 0–1; defaults to 1 if omitted. Only values of 1 are considered for ILI inclusion. |
 
 `confidenceScore` is also honoured on individual `Synset`, `Sense`,
-`SynsetRelation` and `SenseRelation` elements, not just on the `Lexicon`
-itself: any one below 0.6 is dropped during conversion (a hard cutoff, not
-currently configurable per resource).
+`SynsetRelation`, `SenseRelation` and `Definition` elements, not just on the
+`Lexicon` itself: any one below 0.6 is dropped during conversion (a hard
+cutoff, not currently configurable per resource). A `Definition` below
+threshold is dropped even if it's the synset's only one — the synset itself
+is kept, just without that gloss.
 
 **`id`** — A short, 3–7 character lowercase ASCII identifier for the lexicon
 (e.g. `pwn`, `bhsind`). Lexicon IDs are persistent across versions and
