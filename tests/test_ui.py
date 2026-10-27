@@ -1092,6 +1092,48 @@ class TestWordnetsTable:
 
 
 # ---------------------------------------------------------------------------
+# About tab — small-build per-wordnet table
+# ---------------------------------------------------------------------------
+
+class TestAboutSmallBuildTable:
+    """The test DB has 2 real wordnets (wn-en, wn-fr) plus CILI -- well under
+    the 6-wordnet threshold, so the About tab should break totals down
+    per-wordnet rather than only showing the aggregate stats cards."""
+
+    def _open_about(self, page: Page) -> None:
+        page.locator('button', has_text='About').click(force=True)
+        page.wait_for_selector('text=Wordnets in this build', timeout=_SEARCH_TIMEOUT)
+
+    def test_small_build_table_shown(self, page_ready: Page):
+        self._open_about(page_ready)
+        heading = page_ready.locator('h3', has_text='Wordnets in this build')
+        expect(heading).to_have_count(1)
+
+    def test_small_build_table_excludes_cili(self, page_ready: Page):
+        """CILI is a bookkeeping resource, not a contributed wordnet -- it
+        must not appear in this breakdown (unlike the Wordnets tab table,
+        where it does)."""
+        self._open_about(page_ready)
+        table = page_ready.locator('h3', has_text='Wordnets in this build').locator(
+            'xpath=following-sibling::div[1]//table')
+        rows = table.locator('tbody tr')
+        expect(rows).to_have_count(2)
+        names = [rows.nth(i).locator('td').nth(1).text_content().strip() for i in range(2)]
+        assert not any('CILI' in n or 'Collaborative Interlingual' in n for n in names)
+
+    def test_small_build_table_shows_language_and_counts(self, page_ready: Page):
+        self._open_about(page_ready)
+        table = page_ready.locator('h3', has_text='Wordnets in this build').locator(
+            'xpath=following-sibling::div[1]//table')
+        rows = table.locator('tbody tr')
+        row_texts = [rows.nth(i).text_content() for i in range(rows.count())]
+        assert any('English' in t for t in row_texts)
+        assert any('French' in t for t in row_texts)
+        # Concepts/senses columns are populated with digits, not blank.
+        assert all(any(c.isdigit() for c in t) for t in row_texts)
+
+
+# ---------------------------------------------------------------------------
 # ARASAAC images in search results
 # ---------------------------------------------------------------------------
 

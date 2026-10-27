@@ -2560,7 +2560,11 @@ class MergeBuilder:
             'senses': count('SELECT COUNT(*) FROM senses'),
             'languages': count('SELECT COUNT(DISTINCT language_rowid) FROM entries'),
             'wordnets': count(
-                "SELECT COUNT(*) FROM resources WHERE code NOT IN ('cili', 'pwn')"
+                # 'mtg' is the synthetic machine-translated-glosses pseudo-resource
+                # 5_translate_defns.py writes (see conversion_scripts/5_translate_defns.py)
+                # -- not a contributed wordnet in its own right, so it's excluded
+                # alongside the 'cili'/'pwn' bookkeeping resources.
+                "SELECT COUNT(*) FROM resources WHERE code NOT IN ('cili', 'pwn', 'mtg')"
             ),
         }
 
