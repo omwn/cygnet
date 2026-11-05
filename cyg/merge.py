@@ -230,6 +230,12 @@ BATCH_SIZE = 50_000
 HYPERNYM_TYPES = frozenset({'hypernym', 'instance_hypernym'})
 HYPONYM_TYPES = frozenset({'hyponym', 'instance_hyponym'})
 
+# A non-English definition identical to an English one for the same concept is
+# an untranslated copy (e.g. FinnWordNet keeps the PWN glosses) and is dropped.
+# One-word definitions are kept: words such as Romanian 'secret' or Spanish
+# 'guppies' are spelled the same in both languages.
+MIN_ENGLISH_COPY_WORDS = 2
+
 # ---------------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------------
@@ -257,6 +263,30 @@ def fold_lemma(form: str) -> str:
     """
     form = _WIDTH_RE.sub(lambda m: unicodedata.normalize('NFKC', m.group()), form)
     return form.lower()
+
+
+def is_english(code: str | None) -> bool:
+    """Return whether a language code is English ('en', 'en-GB', ...).
+
+    Args:
+        code: A BCP 47 language code, or None.
+
+    Returns:
+        True for 'en' and its regional variants.
+    """
+    return code == 'en' or (code or '').startswith('en-')
+
+
+def fold_gloss(text: str) -> str:
+    """Fold a definition for comparison: case-folded, whitespace collapsed.
+
+    Args:
+        text: The definition.
+
+    Returns:
+        The folded text, e.g. 'a pet dog' for '  A pet\\tDog '.
+    """
+    return ' '.join(text.casefold().split())
 
 
 def reading_clusters(signatures: dict[int, frozenset]) -> list[list[int]]:
@@ -454,6 +484,11 @@ class MergeBuilder:
             'reversed_relations': [],
             'cycles': [],
         }
+
+        # Folded English definitions of each synset, and the number of
+        # non-English definitions dropped as copies of them, by resource.
+        self._english_glosses: dict[int, set[str]] = {}
+        self.english_glosses_dropped: dict[str, int] = {}
 
         # Counters for progress reporting
         self.n_synsets = self.n_entries = self.n_forms = self.n_pronunciations = 0
@@ -693,15 +728,21 @@ class MergeBuilder:
         synset_rowid = self.synset_id_to_rowid.get(elem.get('definiendum'))
         if not synset_rowid:
             return
-        lang_rowid = self._lang_rowid(elem.get('language'))
+        language = elem.get('language')
+        text, annotations = parse_annotated_sentence(elem.find('AnnotatedSentence'))
+        if self._is_english_copy(synset_rowid, language, text):
+            prov = elem.find('Provenance')
+            resource = prov.get('resource', '') if prov is not None else ''
+            self.english_glosses_dropped[resource] = (
+                self.english_glosses_dropped.get(resource, 0) + 1)
+            return
+        lang_rowid = self._lang_rowid(language)
         key = (synset_rowid, lang_rowid)
         if key in self._gloss_keys:
             self.n_prov += self._insert_prov(
                 'definitions', self._gloss_keys[key], elem.findall('Provenance')
             )
             return
-        sentence = elem.find('AnnotatedSentence')
-        text, annotations = parse_annotated_sentence(sentence)
         def_rowid = self._next_def_id
         self._next_def_id += 1
         self._gloss_keys[key] = def_rowid
@@ -721,6 +762,31 @@ class MergeBuilder:
                 self._def_ann_buf.append(
                     (def_rowid, ann['start'], ann['end'], sense_rowid)
                 )
+
+    def _is_english_copy(
+        self, synset_rowid: int, language: str | None, text: str,
+    ) -> bool:
+        """Record an English definition, or spot an untranslated copy of one.
+
+        English definitions are remembered (folded) for their synset.  A
+        definition in another language is a copy if, folded, it equals one of
+        them and has at least MIN_ENGLISH_COPY_WORDS words.  CILI and OEWN are
+        merged first, so the English definitions are already known.
+
+        Args:
+            synset_rowid: The defined synset.
+            language: The definition's language code.
+            text: The definition.
+
+        Returns:
+            True if the definition should be dropped.
+        """
+        folded = fold_gloss(text)
+        if is_english(language):
+            self._english_glosses.setdefault(synset_rowid, set()).add(folded)
+            return False
+        return (len(folded.split()) >= MIN_ENGLISH_COPY_WORDS
+                and folded in self._english_glosses.get(synset_rowid, ()))
 
     def _do_example(self, elem) -> None:
         sentence = elem.find('AnnotatedSentence')

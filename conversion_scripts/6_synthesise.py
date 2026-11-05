@@ -143,6 +143,11 @@ def main() -> None:
     print(f'  Languages: {len(builder._lang_cache)}')
     print(f'  Senses: {builder.n_senses:,}')
     print(f'  Definitions: {builder.n_defs:,}')
+    dropped = builder.english_glosses_dropped
+    if dropped:
+        print(f'  Untranslated English definitions dropped: {sum(dropped.values()):,}')
+        for resource, n in sorted(dropped.items(), key=lambda kv: -kv[1]):
+            print(f'    {resource}: {n:,}')
     print(f'  Examples: {builder.n_examples:,}')
     print(f'  Sense relations: {builder.n_sense_rels:,}')
     print(f'  Synset relations: {builder.n_synset_rels:,}')
