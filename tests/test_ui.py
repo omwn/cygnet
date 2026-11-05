@@ -1137,3 +1137,72 @@ class TestWordnetSummaryWithProvenance:
         self._open_summary(page_prov)
         summary = page_prov.locator('[data-testid="wordnet-summary"]')
         expect(summary.locator('div', has_text='ILI %').first).to_be_visible()
+
+
+# ---------------------------------------------------------------------------
+# Provenance: a source is shown once per item
+# ---------------------------------------------------------------------------
+
+# French 'chien' and 'Chien' both have a sense for dog (i3).  Merging case
+# variants folds them into one sense with two provenance rows from wn-fr.
+_FR_CASE_VARIANTS = """\
+<?xml version='1.0' encoding='UTF-8'?>
+<CygnetResource id="wn-fr" label="Test French WordNet" language="fr" version="1.0">
+  <Lexeme id="lex.fr.chien" language="fr" grammatical_category="NOUN">
+    <Wordform form="chien"/>
+    <Provenance resource="wn-fr" version="1.0" original_id="chien-n"/>
+  </Lexeme>
+  <Lexeme id="lex.fr.Chien" language="fr" grammatical_category="NOUN">
+    <Wordform form="Chien"/>
+    <Provenance resource="wn-fr" version="1.0" original_id="Chien-n"/>
+  </Lexeme>
+  <Sense id="sense.chien" signifier="lex.fr.chien" signified="cili.i3">
+    <Provenance resource="wn-fr" version="1.0" original_id="chien-n-dog"/>
+  </Sense>
+  <Sense id="sense.Chien" signifier="lex.fr.Chien" signified="cili.i3">
+    <Provenance resource="wn-fr" version="1.0" original_id="Chien-n-dog"/>
+  </Sense>
+</CygnetResource>
+"""
+
+
+@pytest.fixture(scope='module')
+def variant_server(tmp_path_factory):
+    """Serve a DB merged from wn-en and a French wordnet with case variants."""
+    import json
+    import shutil
+    from pathlib import Path
+
+    from conftest import _DEFAULT_DATABASES, _WORDNETS_DIR, _start_server, build_test_db
+
+    build_dir = tmp_path_factory.mktemp('variant_build')
+    fr_xml = build_dir / 'wn-fr.xml'
+    fr_xml.write_text(_FR_CASE_VARIANTS)
+    db_path, prov_path = build_dir / 'cygnet.db', build_dir / 'provenance.db'
+    build_test_db(db_path, prov_path, [_WORDNETS_DIR / 'wn-en.xml', fr_xml])
+
+    serve_dir = tmp_path_factory.mktemp('variant_serve')
+    web_dir = Path(__file__).parent.parent / 'web'
+    for name in ('index.html', 'relations.json'):
+        shutil.copy(web_dir / name, serve_dir / name)
+    for path in (db_path, prov_path):
+        gz = path.with_suffix('.db.gz')
+        shutil.copy(gz, serve_dir / gz.name)
+    (serve_dir / 'local.json').write_text(json.dumps({'databases': _DEFAULT_DATABASES}))
+    server, url = _start_server(str(serve_dir))
+    yield url
+    server.shutdown()
+
+
+class TestProvenanceDedup:
+    def test_merged_sense_shows_source_once(self, page: Page, variant_server):
+        """The merged 'chien' sense has two wn-fr rows but lists wn-fr once."""
+        page.add_init_script("localStorage.setItem('showProvenance', 'true')")
+        page.goto(variant_server + '#/search?id=oewn-dog-n')
+        page.wait_for_selector(
+            'text=All forms expressing this concept', timeout=_DB_LOAD_TIMEOUT
+        )
+        french = page.locator('div', has_text='chien').filter(
+            has=page.locator('button', has_text='wn-fr:1.0')).last
+        expect(french.locator('button', has_text='wn-fr:1.0')).to_have_count(
+            1, timeout=_DB_LOAD_TIMEOUT)
