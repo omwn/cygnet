@@ -823,9 +823,12 @@
             }
         }
 
+        // Distinct sources of an item.  An item merged from several source
+        // items (e.g. the senses of 'Bank' and 'bank') has one row per
+        // original id, but the source is shown once.
         function queryProvenance(tableName, itemRowid) {
             return cachedExecProv(
-                `SELECT pr.code, p.version, p.original_id
+                `SELECT DISTINCT pr.code, p.version
                  FROM provenance p
                  JOIN prov_tables pt ON p.table_rowid = pt.rowid
                  JOIN prov_resources pr ON p.resource_rowid = pr.rowid

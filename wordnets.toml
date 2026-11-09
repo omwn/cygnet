@@ -240,5 +240,5 @@ grc = ["https://github.com/igamasniak/omw-converters/releases/download/v0.1/Anci
 sga = ["https://goidelc.teanga.io/downloads/sga-wordnet-0.1.xml.gz"]
 
 # Multilingual — OMW Kinship and OMW Pronouns (concept lexicon + per-language lexicons)
-mul = ["https://github.com/omwn/omw-kinship/releases/download/v0.1/omw-kin-0.1.tar.xz",
-       "https://github.com/omwn/omw-pronoun/releases/download/v0.1/omw-pronoun-0.1.tar.xz"]
+mul = ["https://github.com/omwn/omw-kinship/releases/download/v0.2/omw-kin-0.2.tar.xz",
+       "https://github.com/omwn/omw-pronoun/releases/download/v0.2.1/omw-pronoun-0.2.1.tar.xz"]
