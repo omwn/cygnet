@@ -108,36 +108,21 @@
   </xs:element>
 
   <!-- SenseRelationType -->
+  <!-- Relation types are the GWA WN-LMF names (cyg/lmf.py's
+       SENSE_REVERSE_RELATIONS / CONCEPT_REVERSE_RELATIONS) plus any
+       source-specific code a wordnet declares (e.g. plwn:19), so they are
+       not enumerated here.  Only the forward direction of a reversible
+       relation is written; inverses are implied. -->
   <xs:simpleType name="SenseRelationType">
     <xs:restriction base="xs:string">
-      <xs:enumeration value="antonym"/>
-      <xs:enumeration value="derivation"/>
-      <xs:enumeration value="pertainym"/>
-      <xs:enumeration value="participle"/>
+      <xs:minLength value="1"/>
     </xs:restriction>
   </xs:simpleType>
 
   <!-- ConceptRelationType -->
   <xs:simpleType name="ConceptRelationType">
     <xs:restriction base="xs:string">
-      <xs:enumeration value="class_hypernym"/>
-      <xs:enumeration value="instance_hypernym"/>
-      <xs:enumeration value="member_meronym"/>
-      <xs:enumeration value="part_meronym"/>
-      <xs:enumeration value="substance_meronym"/>
-      <xs:enumeration value="opposite"/>
-      <xs:enumeration value="causes"/>
-      <xs:enumeration value="entails"/>
-      <xs:enumeration value="agent_of_action"/>
-      <xs:enumeration value="patient_of_action"/>
-      <xs:enumeration value="result_of_action"/>
-      <xs:enumeration value="instrument_of_agent"/>
-      <xs:enumeration value="instrument_of_action"/>
-      <xs:enumeration value="result_of_agent"/>
-      <xs:enumeration value="patient_of_agent"/>
-      <xs:enumeration value="instrument_of_patient"/>
-      <xs:enumeration value="instrument_of_result"/>
-      <xs:enumeration value="patient_of_result"/>
+      <xs:minLength value="1"/>
     </xs:restriction>
   </xs:simpleType>
 

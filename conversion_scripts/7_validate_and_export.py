@@ -14,21 +14,12 @@ from pathlib import Path
 
 from lxml import etree as ET
 
+from cyg.lmf import CONCEPT_REVERSE_RELATIONS, SENSE_REVERSE_RELATIONS, is_forward_relation
 from cyg.merge import build_annotated_sentence
 
-# Only forward (non-inverse) relation types are written to XML
-FORWARD_SENSE_RELS: set[str] = {'antonym', 'derivation', 'pertainym', 'participle'}
-FORWARD_CONCEPT_RELS: set[str] = {
-    'class_hypernym', 'instance_hypernym',
-    'member_meronym', 'part_meronym', 'substance_meronym',
-    'opposite', 'causes', 'entails',
-    'agent_of_action', 'patient_of_action', 'result_of_action',
-    'instrument_of_agent', 'instrument_of_action', 'result_of_agent',
-    'patient_of_agent', 'instrument_of_patient', 'instrument_of_result',
-    'patient_of_result',
-}
-# Symmetric relations: only write where source_rowid < target_rowid
-SYMMETRIC_RELS: set[str] = {'antonym', 'opposite'}
+# The DB holds both directions of every reversible relation; the XML
+# stores one (see cyg.lmf.is_forward_relation): forward types, symmetric
+# types once, and every type the tables do not know.
 
 
 def load_provenance(
@@ -51,11 +42,17 @@ def load_provenance(
 
 
 def add_provenance(parent, prov: dict, table: str, rowid: int) -> None:
-    """Append Provenance child elements from the pre-loaded prov dict."""
+    """Append Provenance child elements from the pre-loaded prov dict.
+
+    Relations and definitions carry only the resource (no original id,
+    often no version); those attributes are omitted when NULL.
+    """
     for code, version, original_id in prov.get((table, rowid), ()):
-        attrs = {'resource': code, 'original_id': original_id}
+        attrs = {'resource': code}
         if version:
             attrs['version'] = version
+        if original_id:
+            attrs['original_id'] = original_id
         ET.SubElement(parent, 'Provenance', **attrs)
 
 
@@ -205,9 +202,7 @@ def generate_xml(
         JOIN relation_types rt ON sr.type_rowid = rt.rowid
         ORDER BY sr.rowid
     """).fetchall():
-        if rel_type not in FORWARD_SENSE_RELS:
-            continue
-        if rel_type in SYMMETRIC_RELS and source_rowid >= target_rowid:
+        if not is_forward_relation(rel_type, source_rowid, target_rowid, SENSE_REVERSE_RELATIONS):
             continue
         src = sense_id.get(source_rowid)
         tgt = sense_id.get(target_rowid)
@@ -233,9 +228,7 @@ def generate_xml(
         JOIN relation_types rt ON sr.type_rowid = rt.rowid
         ORDER BY sr.rowid
     """).fetchall():
-        if rel_type not in FORWARD_CONCEPT_RELS:
-            continue
-        if rel_type in SYMMETRIC_RELS and source_rowid >= target_rowid:
+        if not is_forward_relation(rel_type, source_rowid, target_rowid, CONCEPT_REVERSE_RELATIONS):
             continue
         src = synset_id.get(source_rowid)
         tgt = synset_id.get(target_rowid)

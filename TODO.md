@@ -9,8 +9,9 @@ senses.  Those cleaned files are then merged.  The public products
 (`cygnet.db.gz`, `provenance.db.gz`, the per-resource provenance splits)
 and the web UI read only SQLite, so neither changes.
 
-Status (2026-11-09): planned, not started.  Supersedes the 2026-10-11
-plan.  Decisions taken on 2026-11-09:
+Status (2026-11-09): step 1 (prep) done on the `lmf-intermediate`
+branch; steps 2–7 not started.  Supersedes the 2026-10-11 plan.
+Decisions taken on 2026-11-09:
 
 - The intermediate is one cleaned LMF file per source lexicon, useful on
   its own (loads in `wn`, validates, can be sent upstream as "your
@@ -271,13 +272,18 @@ file name alone, so during the transition the cleaner writes to
 `bin/lmf_presynth/`; when the old path is deleted the directory takes the
 old name and the log gains `format: "wn-lmf-1.4"`.
 
-1. **Prep, needed regardless.**  Fix the stale relation filter in
-   `conversion_scripts/7_validate_and_export.py:20-30` (`class_hypernym`,
-   `member_meronym`, … while the DB uses `hypernym`, `mero_member`, …).
-   Move the shared tables and helpers (`CONFIDENCE_THRESHOLD`,
-   `below_confidence_threshold()`, `load_direction_swap_config()`, the
-   relation-type dicts, `fix_language`) into a small `cyg/lmf.py` both
-   sides import.
+1. **Prep, needed regardless.**  *Done.*  `cyg/lmf.py` holds the
+   relation-type tables (plus `inverse_only_types()`, `symmetric_types()`
+   and `is_forward_relation()`, the one-direction rule every writer
+   uses), `CONFIDENCE_THRESHOLD` / `below_confidence_threshold()`,
+   `load_direction_swap_config()` and re-exports `fix_language`;
+   `cyg/converters.py` and `cyg/merge.py` import from it.
+   `7_validate_and_export.py` now writes every relation type the DB
+   holds except inverse-only ones (its filter listed `class_hypernym`,
+   `member_meronym`, … and so dropped nearly everything), tolerates
+   provenance rows without an original id, and `cyg/cygnet.xsd` no
+   longer enumerates relation types.  `tests/test_lmf.py`,
+   `tests/test_export.py`.
 2. **Merge reads LMF.**  Add `MergeBuilder.process_lmf_file()` beside
    `process_file()`, dispatching on the root tag.  Iterparse over
    Lexicon → Synset / LexicalEntry / Sense / Definition / Example /

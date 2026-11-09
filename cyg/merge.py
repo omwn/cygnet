@@ -15,7 +15,7 @@ from pathlib import Path
 import langcodes
 from lxml import etree as ET
 
-from cyg.converters import CONCEPT_REVERSE_RELATIONS, SENSE_REVERSE_RELATIONS
+from cyg.lmf import INVERSE_CONCEPT_RELATIONS, INVERSE_SENSE_RELATIONS
 
 logger = logging.getLogger(__name__)
 
@@ -220,10 +220,6 @@ CILI_RESOURCE = {
     ),
 }
 
-INVERSE_SENSE_RELATIONS: dict[str, str] = {
-    rel: inv for rel, inv in SENSE_REVERSE_RELATIONS.items() if inv is not None
-}
-
 # Resources with a documented, systematic hypernym-direction bug in their
 # source data, ordered WORST FIRST, that ISN'T corrected automatically by
 # cyg.converters.load_direction_swap_config() (e.g. a resource whose
@@ -253,10 +249,6 @@ INVERSE_SENSE_RELATIONS: dict[str, str] = {
 # aggregate rate table alone -- and check first whether the automatic
 # swap (above) should fix it at the source instead.
 LOW_TRUST_RESOURCES: tuple[str, ...] = ()
-
-INVERSE_CONCEPT_RELATIONS: dict[str, str] = {
-    rel: inv for rel, inv in CONCEPT_REVERSE_RELATIONS.items() if inv is not None
-}
 
 BATCH_SIZE = 50_000
 
