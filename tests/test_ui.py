@@ -30,6 +30,8 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Page, expect
 
+from cygnet_fixtures import cygnet_to_lmf
+
 _DB_LOAD_TIMEOUT = 60_000   # ms — allow extra time on slower/loaded machines
 _SEARCH_TIMEOUT = 15_000    # ms
 
@@ -1811,7 +1813,7 @@ def variant_server(tmp_path_factory):
 
     build_dir = tmp_path_factory.mktemp('variant_build')
     fr_xml = build_dir / 'wn-fr.xml'
-    fr_xml.write_text(_FR_CASE_VARIANTS)
+    fr_xml.write_text(cygnet_to_lmf(_FR_CASE_VARIANTS))
     db_path, prov_path = build_dir / 'cygnet.db', build_dir / 'provenance.db'
     build_test_db(db_path, prov_path, [_WORDNETS_DIR / 'wn-en.xml', fr_xml])
 

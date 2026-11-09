@@ -20,14 +20,14 @@
 #                      (requires WordNet 3.0 GlossTag corpus in bin/WordNet-3.0/)
 #   --with-translate   Machine-translate non-English glosses to English
 #                      (requires argostranslate; very slow)
-#   --with-xml         Also generate and validate cygnet.xml and cygnet_small.xml
+#   --with-xml         Also export and validate cygnet.xml and cygnet_small.xml (WN-LMF)
 #                      (requires xmlstarlet; slow — 678 MB output)
 #   --download-only    Download data without running the build
 #   --build-only       Run the build without downloading (assumes data exists)
 #   --translate-only   Run only through Step 5 (translate definitions) and
 #                      stop — implies --with-translate. Used by
 #                      scripts/upload_translations.sh to produce
-#                      bin/cygnets_presynth/mtg-1.0.xml for local, manual
+#                      bin/cygnets_presynth/mtg.tsv for local, manual
 #                      publishing (translation takes hours, so it isn't run
 #                      in CI — see .github/workflows/check-wordnets.yml).
 #   --skip-tests       Skip the test suite
@@ -51,7 +51,6 @@ DO_BUILD=true
 DO_TESTS=true
 TRANSLATE_ONLY=false
 ALL_LANGUAGES=false
-LMF=false
 WORK_DIR=""
 
 while [[ $# -gt 0 ]]; do
@@ -73,7 +72,6 @@ while [[ $# -gt 0 ]]; do
         --translate-only) TRANSLATE_ONLY=true; WITH_TRANSLATE=true; shift ;;
         --skip-tests)     DO_TESTS=false;       shift ;;
         --all-languages)  ALL_LANGUAGES=true;   shift ;;
-        --lmf)            LMF=true;             shift ;;
         --help|-h)
             sed -n '3,/^$/{ s/^# \?//; p }' "$0"
             exit 0
@@ -444,8 +442,11 @@ fi
 # ============================================================
 if $DO_BUILD; then
 
-    echo "=== Step 1: Extract CILI ==="
-    run_pipeline 1_extract_cili.py
+    echo "=== Step 1: CILI ==="
+    # The merge reads the CILI release file (downloaded above) directly.
+    mkdir -p "$DATA_DIR/bin/cygnets_presynth"
+    ln -sfn "../cili.tsv" "$DATA_DIR/bin/cygnets_presynth/cili.tsv"
+    echo "  $DATA_DIR/bin/cili.tsv linked into bin/cygnets_presynth/"
     echo
 
     echo "=== Step 1.5: Check relation directions ==="
@@ -467,17 +468,9 @@ if $DO_BUILD; then
         --cache bin/cygnets_presynth/.direction_check_cache.json
     echo
 
-    echo "=== Step 2: Convert wordnets ==="
+    echo "=== Step 2: Clean wordnets into WN-LMF ==="
     STEP2_ARGS=()
     if $ALL_LANGUAGES; then STEP2_ARGS+=(--all-languages); fi
-    PRESYNTH=bin/cygnets_presynth
-    if $LMF; then
-        # The WN-LMF path (TODO.md): cleaned sources in bin/lmf_presynth,
-        # merged with the CILI and MT-gloss files Steps 1 and 5 still write
-        # to bin/cygnets_presynth.
-        PRESYNTH=bin/lmf_presynth
-        STEP2_ARGS+=(--format lmf --output-dir "$PRESYNTH")
-    fi
     run_pipeline 2_batch_convert_lmfs.py ${STEP2_ARGS[@]+"${STEP2_ARGS[@]}"}
     echo
 
@@ -486,41 +479,25 @@ if $DO_BUILD; then
         run_pipeline 3_extract_glosstag.py
         echo
 
-        echo "=== Step 4: Add GlossTag to CILI ==="
+        echo "=== Step 4: GlossTag annotations for the CILI definitions ==="
         run_pipeline 4_add_glosstag_to_cili.py
         echo
     fi
 
-    STEP5_ARGS=()
-    if $LMF; then STEP5_ARGS+=(--presynth-dir "$PRESYNTH" --format lmf); fi
     if $WITH_TRANSLATE; then
         echo "=== Step 5: Translate definitions ==="
-        run_pipeline 5_translate_defns.py ${STEP5_ARGS[@]+"${STEP5_ARGS[@]}"}
+        run_pipeline 5_translate_defns.py
         echo
     fi
 
     if $TRANSLATE_ONLY; then
         echo "=== Translate-only mode: stopping after Step 5 ==="
-        if $LMF; then
-            echo "Output: $DATA_DIR/$PRESYNTH/mtg.tsv"
-        else
-            echo "Output: $DATA_DIR/bin/cygnets_presynth/mtg-1.0.xml"
-        fi
+        echo "Output: $DATA_DIR/bin/cygnets_presynth/mtg.tsv"
         exit 0
     fi
 
     echo "=== Step 6: Synthesise ==="
-    if $LMF; then
-        # The LMF path merges the CILI release file (and its GlossTag
-        # annotations, if Step 4 made them) directly, not Step 1's XML.
-        ln -sfn "../cili.tsv" "$DATA_DIR/$PRESYNTH/cili.tsv"
-        for f in cili_glosstag.json relation_direction_swaps.json; do
-            if [[ -e "$DATA_DIR/bin/cygnets_presynth/$f" ]]; then
-                ln -sfn "../cygnets_presynth/$f" "$DATA_DIR/$PRESYNTH/$f"
-            fi
-        done
-    fi
-    run_pipeline 6_synthesise.py --input-dir "$PRESYNTH"
+    run_pipeline 6_synthesise.py
     echo
 
     echo "=== Step 9: Populate language names ==="

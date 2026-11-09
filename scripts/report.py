@@ -20,7 +20,7 @@ from pathlib import Path
 
 from lxml import etree as ET
 
-from cyg.lmf import parse_note, pos_label
+from cyg.lmf import parse_note, pos_label, relation_type
 from cyg.merge import INVERSE_CONCEPT_RELATIONS, INVERSE_SENSE_RELATIONS, root_tag
 from cyg.multilex import open_xml
 from cyg.presynth import log_path
@@ -243,16 +243,19 @@ def parse_lmf(path: Path) -> WordnetData:
     synset-level Example as unmatched.
     """
     data = WordnetData()
+    language = ""
     for event, elem in ET.iterparse(
             open_xml(path), events=("start", "end"),
             tag=("Lexicon", "LexiconExtension", "LexicalEntry", "Synset"),
             load_dtd=False, no_network=True, resolve_entities=False):
         if event == "start":
-            if elem.tag in ("Lexicon", "LexiconExtension") and not data.resource_id:
-                data.resource_id = elem.get("id", "")
-                data.label = elem.get("label", "") or data.resource_id
-                data.language = elem.get("language", "")
-                data.version = elem.get("version", "")
+            if elem.tag in ("Lexicon", "LexiconExtension"):
+                language = elem.get("language", "")
+                if not data.resource_id:
+                    data.resource_id = elem.get("id", "")
+                    data.label = elem.get("label", "") or data.resource_id
+                    data.language = language
+                    data.version = elem.get("version", "")
             continue
         if elem.getparent() is None or elem.getparent().tag not in ("Lexicon", "LexiconExtension"):
             continue
@@ -261,7 +264,7 @@ def parse_lmf(path: Path) -> WordnetData:
             if eid in data.entries:
                 data.duplicate_entry_ids.append(eid)
             else:
-                data.entries[eid] = data.language
+                data.entries[eid] = language
                 lemma = elem.find("Lemma")
                 if lemma is not None and lemma.get("writtenForm"):
                     data.entries_with_forms.add(eid)
@@ -275,7 +278,7 @@ def parse_lmf(path: Path) -> WordnetData:
                     data.senses[sid] = (eid, synset)
                     data.concept_senses.setdefault(synset, []).append(sid)
                 for rel in sense.iterchildren("SenseRelation"):
-                    data.sense_rels.append((sid, rel.get("relType", ""), rel.get("target", "")))
+                    data.sense_rels.append((sid, relation_type(rel), rel.get("target", "")))
                 for example in sense.iterchildren("Example"):
                     text = (example.text or "").strip()[:80]
                     located = "offsets" in parse_note(example.get("note"))
@@ -289,7 +292,7 @@ def parse_lmf(path: Path) -> WordnetData:
             if elem.find("Definition") is not None:
                 data.glossed.add(sid)
             for rel in elem.iterchildren("SynsetRelation"):
-                data.concept_rels.append((sid, rel.get("relType", ""), rel.get("target", "")))
+                data.concept_rels.append((sid, relation_type(rel), rel.get("target", "")))
             for example in elem.iterchildren("Example"):
                 data.examples.append(((example.text or "").strip()[:80], frozenset()))
         elem.clear()

@@ -1,9 +1,7 @@
 """Unit tests for utility functions in cyg.merge."""
 
-import pytest
-from lxml import etree as ET
 
-from cyg.merge import normalize_form, parse_annotated_sentence, remove_accents
+from cyg.merge import normalize_form, remove_accents
 
 
 class TestRemoveAccents:
@@ -51,41 +49,3 @@ class TestNormalizeForm:
         assert normalize_form(nfc) == normalize_form(nfd)
 
 
-class TestParseAnnotatedSentence:
-    def _elem(self, xml: str) -> ET.Element:
-        return ET.fromstring(xml)
-
-    def test_plain_text_no_annotations(self):
-        elem = self._elem("<AnnotatedSentence>a dog</AnnotatedSentence>")
-        text, annotations = parse_annotated_sentence(elem)
-        assert text == "a dog"
-        assert annotations == []
-
-    def test_empty_element(self):
-        elem = self._elem("<AnnotatedSentence/>")
-        text, annotations = parse_annotated_sentence(elem)
-        assert text == ""
-        assert annotations == []
-
-    def test_annotated_word(self):
-        elem = self._elem(
-            "<AnnotatedSentence>a "
-            "<tok sense='s1'>dog</tok>"
-            " ran</AnnotatedSentence>"
-        )
-        text, annotations = parse_annotated_sentence(elem)
-        assert "dog" in text
-        assert any(a["sense"] == "s1" for a in annotations)
-
-    def test_multiple_annotations(self):
-        elem = self._elem(
-            "<AnnotatedSentence>"
-            "<tok sense='s1'>cat</tok>"
-            " and "
-            "<tok sense='s2'>dog</tok>"
-            "</AnnotatedSentence>"
-        )
-        text, annotations = parse_annotated_sentence(elem)
-        assert len(annotations) == 2
-        sense_ids = {a["sense"] for a in annotations}
-        assert sense_ids == {"s1", "s2"}

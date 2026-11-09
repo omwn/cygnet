@@ -9,11 +9,11 @@ senses.  Those cleaned files are then merged.  The public products
 (`cygnet.db.gz`, `provenance.db.gz`, the per-resource provenance splits)
 and the web UI read only SQLite, so neither changes.
 
-Status (2026-11-09): steps 1–4 done on the `lmf-intermediate` branch
-(`build.sh --lmf` runs the whole new path; the old path still runs by
-default for comparison); steps 5–7 (delete the old path, tests, docs)
-not started.  The full-corpus comparison is in "Behaviour changes" below.
-Supersedes the 2026-10-11 plan.  Decisions taken on 2026-11-09:
+Status (2026-11-09): steps 1–6 done on the `lmf-intermediate` branch;
+`build.sh` runs the WN-LMF path only, the converter and `cygnet.xsd` are
+gone.  Step 7 (docs) remains.  The full-corpus comparison that preceded
+the switch is in "Behaviour changes" below.  Supersedes the 2026-10-11
+plan.  Decisions taken on 2026-11-09:
 
 - The intermediate is one cleaned LMF file per source lexicon, useful on
   its own (loads in `wn`, validates, can be sent upstream as "your
@@ -358,11 +358,22 @@ old name and the log gains `format: "wn-lmf-1.4"`.
    `7_validate_and_export.py` validates both files against the vendored
    `cyg/WN-LMF-1.4.dtd` (a copy with a local DOCTYPE under `xmlstarlet`,
    lxml otherwise); the test suite also `wn.add()`s the export.
-5. **Delete** `cyg/cygnet.xsd`, `WordNetToCygnetConverter`,
-   `process_file()` and the Cygnet-tag `_do_*` handlers,
-   `parse_annotated_sentence()`, `build_annotated_sentence()`; rename
-   the output directory.
-6. **Tests.**  Rewrite fixtures that build Cygnet XML: `conftest.py`,
+5. **Delete.**  *Done.*  `cyg/cygnet.xsd`, `cyg/converters.py`,
+   `1_extract_cili.py`, the Cygnet-tag merge handlers and the annotated
+   sentence helpers are gone; `2_batch_convert_lmfs.py` cleans into
+   `bin/cygnets_presynth/`, `build.sh` links `bin/cili.tsv` there and
+   `5_translate_defns.py` writes `mtg.tsv`; `4_add_glosstag_to_cili.py`
+   writes `cili_glosstag.json`.  The MT-gloss release asset is
+   `translated_glosses.jsonl` as before, only the file the release
+   workflow restores changed name.
+6. **Tests.**  *Done, by translation.*  The inline fixtures keep the
+   compact Cygnet vocabulary and `tests/cygnet_fixtures.py` turns it
+   into WN-LMF (`wn_xml()` in `conftest.py` returns LMF); the three
+   fixture files in `tests/wordnets/` were converted once and committed
+   as LMF.  Converter-only tests went with the converter; what they
+   covered (confidence, repeated ILIs, entity unescaping, definition
+   languages, direction swaps) is tested on the cleaner.  Originally
+   planned as: rewrite fixtures that build Cygnet XML: `conftest.py`,
    `test_pipeline.py`, `test_report.py`, `test_merge_utils.py`,
    `test_conflict_detection.py`, `test_direction_swap_fix.py`,
    `test_multilex.py`, `test_repeated_ili.py`,

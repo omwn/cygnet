@@ -2,7 +2,7 @@
 
 The relation-type tables, the confidence threshold and the
 relation-direction swap config are needed by the per-source cleaning
-step (today ``cyg.converters``) and by the merge (``cyg.merge``) alike, and
+step (``cyg.clean``) and by the merge (``cyg.merge``) alike, and
 by the exporter; they live here so that neither imports the other for
 them.  See TODO.md, "Replace the Cygnet XML schema with GWA WN-LMF".
 """

@@ -41,7 +41,7 @@ jobs:
         run: |
           mkdir -p bin/cygnets_presynth
           gh release download translated-glosses \
-            --pattern mtg-1.0.xml --dir bin/cygnets_presynth/ \
+            --pattern mtg.tsv --dir bin/cygnets_presynth/ \
             || echo "No translated-glosses release found; continuing without translations"
 
       - name: Build databases

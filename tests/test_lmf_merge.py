@@ -54,9 +54,11 @@ def _relations(conn, table, source_rowid):
 
 
 class TestDispatch:
-    def test_root_tag_tells_the_formats_apart(self):
+    def test_root_tag_reads_only_the_root(self, tmp_path):
         assert root_tag(_WORDNETS_DIR / 'lmf-xx.xml') == 'LexicalResource'
-        assert root_tag(_WORDNETS_DIR / 'wn-en.xml') == 'CygnetResource'
+        other = tmp_path / 'other.xml'
+        other.write_text('<Something id="x"><Child/></Something>')
+        assert root_tag(other) == 'Something'
 
 
 class TestResource:

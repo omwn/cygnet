@@ -1150,7 +1150,7 @@ def main() -> int:
     """Clean one file from the command line."""
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     parser.add_argument('source', type=Path)
-    parser.add_argument('--cili', type=Path, default=Path('bin/cygnets_presynth/cili-1.0.xml'))
+    parser.add_argument('--cili', type=Path, default=Path('bin/cili.tsv'))
     parser.add_argument('--out-dir', type=Path, default=Path('bin/lmf_presynth'))
     parser.add_argument('--language', help='language code to write instead of the source\'s')
     parser.add_argument('--validate', action='store_true', help='check the output with wn')

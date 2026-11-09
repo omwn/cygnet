@@ -38,23 +38,6 @@ def test_stem_file_url(url, expected):
 
 
 # ---------------------------------------------------------------------------
-# English-base detection in 2_batch_convert_lmfs.py
-# ---------------------------------------------------------------------------
-
-def test_en_base_ids_includes_omw_en():
-    """omw-en is accepted as a valid English base alongside oewn."""
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "batch_convert",
-        Path(__file__).parent.parent / "conversion_scripts" / "2_batch_convert_lmfs.py",
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    assert "oewn" in mod._EN_BASE_IDS
-    assert "omw-en" in mod._EN_BASE_IDS
-
-
-# ---------------------------------------------------------------------------
 # Actual bash copy logic — run the relevant fragment of build.sh in isolation
 # ---------------------------------------------------------------------------
 

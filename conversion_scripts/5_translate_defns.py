@@ -2,7 +2,6 @@ import argparse
 import json
 import sys
 import time
-import xml.etree.ElementTree as ET
 from collections import defaultdict
 from pathlib import Path
 
@@ -11,10 +10,8 @@ import argostranslate.translate
 
 from cyg.mtg import MTG_TSV_NAME, glosses_to_translate, write_mtg_tsv
 
-# Where Step 2 wrote the pre-synth files, and what Step 5 writes back there:
-# mtg-1.0.xml (Cygnet XML) or mtg.tsv (for the WN-LMF path).  Set by main().
+# Where Step 2 wrote the pre-synth files; mtg.tsv is written back there.
 PRESYNTH_DIR = Path('bin/cygnets_presynth')
-OUTPUT_FORMAT = 'cygnet'
 
 N_ITER = 100
 RETRY_ATTEMPTS = 3
@@ -185,59 +182,6 @@ def translate_language_batch(language_code, glosses, output_file):
     print(f"✓ Completed {language_code}: {len(glosses)} glosses translated")
 
 
-def create_xml_from_translations():
-    """Convert translated glosses from JSONL to XML format."""
-    print("\n" + "=" * 60)
-    print("Creating XML output from translations...")
-    print("=" * 60)
-
-    # Read all translations from JSONL
-    translations = []
-    jsonl_file = Path('bin/translated_glosses.jsonl')
-
-    with open(jsonl_file, 'r', encoding='utf-8') as f:
-        for line in f:
-            if line.strip():
-                translations.append(json.loads(line))
-
-    print(f"Loaded {len(translations)} translated glosses")
-
-    # Create XML structure
-    root = ET.Element('CygnetResource')
-    root.set('id', 'mtg')
-    root.set('label', 'Machine Translated Glosses')
-    root.set('version', '1.0')
-
-    # Create GlossLayer
-    gloss_layer = ET.SubElement(root, 'GlossLayer')
-
-    # Add each translation as a Gloss element
-    for trans in translations:
-        gloss = ET.SubElement(gloss_layer, 'Gloss')
-        gloss.set('definiendum', trans['definiendum_id'])
-        gloss.set('language', 'en')  # All translations are to English
-        gloss.set('translated_from', trans['source_language'])
-
-        # Create AnnotatedSentence with translated text
-        annotated_sentence = ET.SubElement(gloss, 'AnnotatedSentence')
-        annotated_sentence.text = trans['translated_definition']
-
-        prov = ET.SubElement(gloss, 'Provenance')
-        prov.set('resource', 'mtg')
-        prov.set('version', '1.0')
-
-    # Write to XML file with proper formatting
-    tree = ET.ElementTree(root)
-    ET.indent(tree, space='  ')  # Pretty print with 2-space indentation
-
-    output_xml = Path('bin/cygnets_presynth/mtg-1.0.xml')
-    tree.write(output_xml, encoding='utf-8', xml_declaration=True)
-
-    print(f"✓ XML output written to: {output_xml}")
-    print(f"  Total glosses: {len(translations)}")
-    print("=" * 60)
-
-
 def main():
     sys.stdout.reconfigure(line_buffering=True)
 
@@ -284,10 +228,7 @@ def main():
         print(f"Output written to: {output_file}")
         print("=" * 60)
 
-    if OUTPUT_FORMAT == 'lmf':
-        create_tsv_from_translations()
-    else:
-        create_xml_from_translations()
+    create_tsv_from_translations()
 
 
 def create_tsv_from_translations():
@@ -307,9 +248,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Translate non-English definitions to English.')
     parser.add_argument('--presynth-dir', type=Path, default=PRESYNTH_DIR,
                         help='pre-synth directory to read definitions from and write into')
-    parser.add_argument('--format', choices=('cygnet', 'lmf'), default=OUTPUT_FORMAT,
-                        help='write mtg-1.0.xml (cygnet) or mtg.tsv (lmf)')
     args = parser.parse_args()
     PRESYNTH_DIR = args.presynth_dir
-    OUTPUT_FORMAT = args.format
     main()

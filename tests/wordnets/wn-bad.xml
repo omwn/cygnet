@@ -1,4 +1,5 @@
-<?xml version='1.0' encoding='UTF-8'?>
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE LexicalResource SYSTEM "https://globalwordnet.github.io/schemas/WN-LMF-1.4.dtd">
 <!--
   Intentionally erroneous wordnet used by conflict-detection tests.
 
@@ -8,11 +9,11 @@
      dog→animal.  The merger must detect and skip this with a warning.
   2. Reversed derivation sense relation (if included with wn-en's run→running).
 -->
-<CygnetResource id="wn-bad" label="Bad Test WordNet" language="en" version="1.0">
-
-  <!-- Reversed synset relation: conflicts with wn-en's dog→animal hypernym -->
-  <ConceptRelation relation_type="hypernym" source="cili.i2" target="cili.i3">
-    <Provenance resource="wn-bad" version="1.0"/>
-  </ConceptRelation>
-
-</CygnetResource>
+<LexicalResource xmlns:dc="https://globalwordnet.github.io/schemas/dc/">
+  <Lexicon id="wn-bad" label="Bad Test WordNet" language="en" email="test@example.org" license="https://creativecommons.org/licenses/by/4.0/" version="1.0" url="https://example.org/">
+    <Synset id="cili.i2" ili="i2" partOfSpeech="u">
+      <SynsetRelation target="cili.i3" relType="hypernym"/>
+    </Synset>
+    <Synset id="cili.i3" ili="i3" partOfSpeech="u"/>
+  </Lexicon>
+</LexicalResource>

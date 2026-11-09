@@ -9,10 +9,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
-from lxml import etree
-
 from cyg.lmf import pos_label
-from cyg.multilex import open_xml
 
 
 @dataclass(frozen=True)
@@ -68,40 +65,23 @@ def read_cili_tsv(path: Path) -> Iterator[CiliRow]:
 
 
 class CiliIndex:
-    """ILI id ('i123') -> part-of-speech label ('NOUN'), or None when unknown.
-
-    Read from the Cygnet XML CILI file (``cili-1.0.xml``, a ConceptLayer of
-    ``cili.<ili>`` concepts) or from a two-column TSV (ili, pos).
-    """
+    """ILI id ('i123') -> part-of-speech label ('NOUN'), or None when unknown,
+    read from the cili.tsv release file."""
 
     def __init__(self, pos_by_ili: dict[str, str | None]) -> None:
         self._pos = pos_by_ili
 
     @classmethod
     def from_file(cls, path: Path) -> CiliIndex:
-        """Load the index from whichever format *path* is in.
+        """Load the index from the cili.tsv release file.
 
         Args:
-            path: ``cili-1.0.xml`` (Cygnet XML) or ``cili.tsv``.
+            path: bin/cili.tsv.
 
         Returns:
             The index.
         """
-        if path.suffix == '.tsv':
-            return cls.from_tsv(path)
-        return cls.from_cygnet_xml(path)
-
-    @classmethod
-    def from_cygnet_xml(cls, path: Path) -> CiliIndex:
-        """Load the index from the Cygnet XML CILI file."""
-        pos_by_ili: dict[str, str | None] = {}
-        with open_xml(path) as f:
-            for _event, elem in etree.iterparse(f, events=('end',), tag='Concept'):
-                cid = elem.get('id') or ''
-                if cid.startswith('cili.'):
-                    pos_by_ili[cid[5:]] = elem.get('ontological_category')
-                elem.clear()
-        return cls(pos_by_ili)
+        return cls.from_tsv(path)
 
     @classmethod
     def from_tsv(cls, path: Path) -> CiliIndex:

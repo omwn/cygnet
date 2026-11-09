@@ -15,7 +15,7 @@ from pathlib import Path
 
 from lxml import etree
 
-from cyg.converters import DIRECTION_SWAP_CONFIG_FILENAME
+from cyg.lmf import DIRECTION_SWAP_CONFIG_FILENAME
 from cyg.merge import LOW_TRUST_RESOURCES, MergeBuilder
 from cyg.presynth import MANIFEST_NAME, read_manifest, stem_resource
 
@@ -101,7 +101,7 @@ def merge_order(all_files: list[Path]) -> list[Path]:
         if 'oewn' in f.stem:
             return (1, 0)
         # Machine-translated glosses (mtg) reference definiendum concepts from
-        # every other resource — _do_gloss() silently drops a Gloss if its
+        # every other resource — _add_gloss() silently drops a Gloss if its
         # concept isn't registered yet, so mtg must be processed last.
         if 'mtg' in f.stem:
             return (5, 0)

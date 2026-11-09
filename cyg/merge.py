@@ -238,7 +238,7 @@ CILI_RESOURCE = {
 
 # Resources with a documented, systematic hypernym-direction bug in their
 # source data, ordered WORST FIRST, that ISN'T corrected automatically by
-# cyg.converters.load_direction_swap_config() (e.g. a resource whose
+# cyg.lmf.load_direction_swap_config() (e.g. a resource whose
 # reversal rate falls short of that mechanism's threshold, or some other
 # low-trust reason unrelated to a clean directional swap). Per-file cycle
 # removal already catches most direction bugs when the reversed edge
@@ -366,65 +366,6 @@ def reading_clusters(signatures: dict[int, frozenset]) -> list[list[int]]:
     return sorted(clusters.values())
 
 
-def build_annotated_sentence(parent, text: str, annotations: list[tuple]) -> None:
-    """Add an AnnotatedSentence child to *parent* with inline AnnotatedToken elements.
-
-    Args:
-        parent: lxml element to append to.
-        text: plain text of the sentence.
-        annotations: list of (start_offset, end_offset, sense_id_str) tuples,
-                     sorted by start_offset.
-    """
-    el = ET.SubElement(parent, 'AnnotatedSentence')
-    pos = 0
-    prev = None
-    for start, end, sense_id in annotations:
-        preceding = text[pos:start]
-        if prev is None:
-            el.text = preceding
-        else:
-            prev.tail = preceding
-        tok = ET.SubElement(el, 'AnnotatedToken', sense=sense_id)
-        tok.text = text[start:end]
-        prev = tok
-        pos = end
-    trailing = text[pos:]
-    if prev is None:
-        el.text = trailing
-    else:
-        prev.tail = trailing
-
-
-def parse_annotated_sentence(elem) -> tuple[str, list[dict]]:
-    """Return (plain_text, annotations) from an AnnotatedSentence element."""
-    if not len(elem):
-        return (elem.text or ''), []
-
-    parts: list[str] = []
-    annotations: list[dict] = []
-    offset = 0
-
-    if elem.text:
-        parts.append(elem.text)
-        offset += len(elem.text)
-
-    for child in elem:
-        token = child.text or ''
-        sense_id = child.get('sense')
-        if sense_id:
-            end = offset + len(token)
-            annotations.append({'sense': sense_id, 'start': offset, 'end': end})
-            offset = end
-        else:
-            offset += len(token)
-        parts.append(token)
-        if child.tail:
-            parts.append(child.tail)
-            offset += len(child.tail)
-
-    return ''.join(parts), annotations
-
-
 def root_tag(xml_file: Path) -> str | None:
     """The local name of an XML file's root element, read without parsing
     the rest.
@@ -545,8 +486,8 @@ class _LmfFileState:
 
 class MergeBuilder:
     """
-    Accumulates multiple pre-synth Cygnet XML files into a single SQLite DB.
-    Each file is parsed, inserted, and freed before the next is loaded.
+    Accumulates the pre-synth WN-LMF files and TSV sidecars into a single
+    SQLite DB.  Each file is streamed, inserted, and freed before the next.
     """
 
     def __init__(self, db_path: Path, prov_db_path: Path) -> None:
@@ -753,22 +694,7 @@ class MergeBuilder:
             self._flush_prov()
         return len(prov)
 
-    @staticmethod
-    def _prov_rows(elem) -> list[tuple[str, str | None, str | None]]:
-        """(resource, version, original_id) of a Cygnet element's Provenance children."""
-        return [
-            (p.get('resource'), p.get('version'), p.get('original_id'))
-            for p in elem.findall('Provenance') if p.get('resource')
-        ]
-
-    # --- Element processors ---
-    # Each _do_* reads one pre-synth Cygnet element and hands plain values
-    # to the _add_* method that does the work; process_lmf_file() calls the
-    # _add_* methods directly.
-
-    def _do_concept(self, elem) -> None:
-        self._add_concept(elem.get('id'), elem.get('ontological_category'),
-                          self._prov_rows(elem))
+    # --- Element workers (called by process_lmf_file and the sidecar readers) ---
 
     def _add_concept(self, cid: str, pos: str | None, prov: list[tuple]) -> None:
         """Create a concept.
@@ -791,19 +717,6 @@ class MergeBuilder:
         self._synset_rowid_to_ili[rowid] = cid
         self.n_prov += self._insert_prov('synsets', rowid, prov)
         self.n_synsets += 1
-
-    def _do_lexeme(self, elem) -> None:
-        forms = []
-        for wf in elem.findall('Wordform'):
-            form = wf.get('form')
-            if not form:
-                continue
-            forms.append((form, [
-                (p.get('variety'), p.text or '', p.get('audio'))
-                for p in wf.findall('Pronunciation') if p.text or p.get('audio')
-            ]))
-        self._add_lexeme(elem.get('id'), elem.get('language'),
-                         elem.get('grammatical_category'), forms, self._prov_rows(elem))
 
     def _add_lexeme(
         self, lid: str, language: str, pos: str | None,
@@ -917,10 +830,6 @@ class MergeBuilder:
             self._pronunciations_buf.append((pid, fid, variety, text, audio))
         self.n_pronunciations += len(pron_rows)
 
-    def _do_sense(self, elem) -> None:
-        self._add_sense(elem.get('id'), elem.get('signifier'), elem.get('signified'),
-                        self._prov_rows(elem))
-
     def _add_sense(self, sid: str, lexeme: str, concept: str, prov: list[tuple]) -> None:
         """Create a sense, unless its entry or concept is unknown or the pair
         already has one.
@@ -948,11 +857,6 @@ class MergeBuilder:
         self.n_senses += 1
         if len(self._senses_buf) >= BATCH_SIZE:
             self._flush_senses()
-
-    def _do_gloss(self, elem) -> None:
-        text, annotations = parse_annotated_sentence(elem.find('AnnotatedSentence'))
-        self._add_gloss(elem.get('definiendum'), elem.get('language'), text, annotations,
-                        elem.get('translated_from'), self._prov_rows(elem))
 
     def _add_gloss(
         self, concept: str, language: str | None, text: str, annotations: list[dict],
@@ -1025,10 +929,6 @@ class MergeBuilder:
         return (len(folded.split()) >= MIN_ENGLISH_COPY_WORDS
                 and folded in self._english_glosses.get(synset_rowid, ()))
 
-    def _do_example(self, elem) -> None:
-        text, annotations = parse_annotated_sentence(elem.find('AnnotatedSentence'))
-        self._add_example(text, annotations, set(), self._prov_rows(elem))
-
     def _add_example(
         self, text: str, annotations: list[dict], owners: set[str], prov: list[tuple],
     ) -> None:
@@ -1065,11 +965,6 @@ class MergeBuilder:
                 self._ex_ann_buf.append(
                     (ex_rowid, ann['start'], ann['end'], sense_rowid)
                 )
-
-    def _do_sense_relation(self, elem) -> None:
-        self._add_sense_relation(
-            elem.get('relation_type'), elem.get('source'), elem.get('target'),
-            elem.get('subtype'), elem.get('subtype_label'), self._prov_rows(elem))
 
     def _add_sense_relation(
         self, rel_type: str, source_id: str, target_id: str,
@@ -1151,11 +1046,6 @@ class MergeBuilder:
                 self._sense_rels_buf.append(
                     (inv_rowid, target, source, inv_type, None, None))
                 self.n_sense_rels += 1
-
-    def _do_concept_relation(self, elem) -> None:
-        self._add_concept_relation(
-            elem.get('relation_type'), elem.get('source'), elem.get('target'),
-            elem.get('subtype'), elem.get('subtype_label'), self._prov_rows(elem))
 
     def _add_concept_relation(
         self, rel_type: str, source_id: str, target_id: str,
@@ -1376,11 +1266,14 @@ class MergeBuilder:
     # --- File processing ---
 
     def process_file(self, xml_file: Path) -> None:
-        """Stream one pre-synth file into the DB: a WN-LMF file
-        (LexicalResource root) or a Cygnet XML file (CygnetResource root).
+        """Stream one pre-synth file into the DB: a WN-LMF file, or one of
+        the TSV sidecars (cili.tsv, mtg.tsv).
 
         Args:
             xml_file: The file to merge.
+
+        Raises:
+            ValueError: If the file is neither.
         """
         if xml_file.suffix == '.tsv':
             if xml_file.stem.startswith('cili'):
@@ -1390,33 +1283,9 @@ class MergeBuilder:
             else:
                 raise ValueError(f'unknown sidecar {xml_file.name}')
             return
-        if root_tag(xml_file) == 'LexicalResource':
-            self.process_lmf_file(xml_file)
-            return
-        tag_to_handler = {
-            'Concept':         self._do_concept,
-            'Lexeme':          self._do_lexeme,
-            'Sense':           self._do_sense,
-            'Gloss':           self._do_gloss,
-            'Example':         self._do_example,
-            'SenseRelation':   self._do_sense_relation,
-            'ConceptRelation': self._do_concept_relation,
-        }
-        root_seen = False
-        for event, elem in ET.iterparse(str(xml_file), events=('start', 'end')):
-            if event == 'start' and not root_seen:
-                root_seen = True
-                res_id = elem.get('id')
-                if res_id and res_id not in self._resources:
-                    self._resources[res_id] = dict(elem.attrib)
-            elif event == 'end':
-                handler = tag_to_handler.get(elem.tag)
-                if handler is not None:
-                    handler(elem)
-                    elem.clear()
-                    while elem.getprevious() is not None:
-                        del elem.getparent()[0]
-        self._flush_all()
+        if root_tag(xml_file) != 'LexicalResource':
+            raise ValueError(f'{xml_file.name}: not a WN-LMF file')
+        self.process_lmf_file(xml_file)
 
     # --- Sidecars ---
 
@@ -1644,7 +1513,8 @@ class MergeBuilder:
             if not text.strip():
                 continue
             language = definition.get('language') or state.language
-            self._add_gloss(cid, language, text, [], None, prov)
+            translated_from = parse_note(definition.get('note')).get('translated_from')
+            self._add_gloss(cid, language, text, [], translated_from, prov)
         for rel in elem.iterchildren('SynsetRelation'):
             target = state.index.get(rel.get('target'))
             if target is None:
@@ -2317,7 +2187,7 @@ class MergeBuilder:
             out_dir: Directory to write ``<resource_code>.json`` files into.
             direction_swaps_path: Optional path to the swap config written
                 by scripts/check_all_relation_directions.py
-                --write-swap-config (see cyg.converters.
+                --write-swap-config (see cyg.lmf.
                 load_direction_swap_config). When given, each resource's
                 summary gets a ``directionSwaps`` list disclosing which
                 relation types were auto-corrected before merging, and

@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+from cygnet_fixtures import cygnet_to_lmf
+
 from cyg.merge import MergeBuilder
 
 _WORDNETS_DIR = Path(__file__).parent / 'wordnets'
@@ -27,9 +29,11 @@ _DEFAULT_DATABASES = {
 # ---------------------------------------------------------------------------
 
 def wn_xml(wn_id: str, body: str, language: str = 'en', version: str = '1.0') -> str:
-    """Wrap *body* XML in a CygnetResource root element."""
+    """A WN-LMF document for a fixture written in the Cygnet XML vocabulary
+    (see cygnet_fixtures.cygnet_to_lmf): *body* is wrapped in a
+    CygnetResource root and converted."""
     inner = textwrap.indent(textwrap.dedent(body).strip(), '  ')
-    return (
+    return cygnet_to_lmf(
         f"<?xml version='1.0' encoding='UTF-8'?>\n"
         f'<CygnetResource id="{wn_id}" label="Test {wn_id}"'
         f' language="{language}" version="{version}">\n'

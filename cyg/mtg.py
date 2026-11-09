@@ -27,7 +27,7 @@ def glosses_to_translate(presynth_dir: Path) -> list[dict]:
     directory, as {'definition', 'definiendum_id', 'language'} records.
 
     Args:
-        presynth_dir: bin/lmf_presynth or bin/cygnets_presynth.
+        presynth_dir: bin/cygnets_presynth.
 
     Returns:
         The records, in file order.

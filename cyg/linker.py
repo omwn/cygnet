@@ -124,6 +124,7 @@ class ExampleLinker:
         """
         import shutil
         import subprocess
+
         from spacy.cli.download import get_compatibility, get_version
 
         installed = set(spacy.util.get_installed_models())

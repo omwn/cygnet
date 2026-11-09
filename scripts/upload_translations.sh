@@ -30,7 +30,7 @@ echo "=== Running translation pipeline (this takes a while) ==="
 rm -f bin/extra_glosses.json
 ./build.sh --translate-only
 
-MTG_FILE="bin/cygnets_presynth/mtg-1.0.xml"
+MTG_FILE="bin/cygnets_presynth/mtg.tsv"
 if [[ ! -f "$MTG_FILE" ]]; then
     echo "Error: $MTG_FILE not found after build.sh --translate-only" >&2
     exit 1

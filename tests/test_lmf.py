@@ -6,7 +6,7 @@ import json
 import pytest
 from lxml import etree
 
-from cyg import converters, lmf, merge
+from cyg import lmf, merge
 from cyg.lmf import (
     CONCEPT_INVERSE_ONLY_TYPES,
     CONCEPT_REVERSE_RELATIONS,
@@ -22,9 +22,7 @@ from cyg.lmf import (
 
 
 class TestRelationTables:
-    def test_converters_and_merge_share_the_tables(self):
-        assert converters.CONCEPT_REVERSE_RELATIONS is lmf.CONCEPT_REVERSE_RELATIONS
-        assert converters.SENSE_REVERSE_RELATIONS is lmf.SENSE_REVERSE_RELATIONS
+    def test_merge_shares_the_tables(self):
         assert merge.INVERSE_CONCEPT_RELATIONS is lmf.INVERSE_CONCEPT_RELATIONS
         assert merge.INVERSE_SENSE_RELATIONS is lmf.INVERSE_SENSE_RELATIONS
 

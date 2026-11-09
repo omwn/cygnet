@@ -69,9 +69,7 @@ class TestFixtureEndToEnd:
     @pytest.fixture(scope='class')
     def cleaned(self, tmp_path_factory):
         out = tmp_path_factory.mktemp('clean_fixture')
-        cili = CiliIndex.from_file(_WORDNETS.parent.parent / 'bin' / 'cygnets_presynth' / 'cili-1.0.xml') \
-            if (_WORDNETS.parent.parent / 'bin' / 'cygnets_presynth' / 'cili-1.0.xml').exists() else _CILI
-        result = LmfCleaner(_WORDNETS / 'lmf-xx.xml', cili).clean(out)
+        result = LmfCleaner(_WORDNETS / 'lmf-xx.xml', _CILI).clean(out)
         return result, etree.parse(str(result.output)), json.loads(result.log.read_text())
 
     def test_header_version_and_note(self, cleaned):
@@ -274,6 +272,21 @@ class TestRelations:
         assert log['statistics']['direction_swaps'] == {'holo_part': None,
                                                         'mero_part': {'reversed': 9, 'comparable': 9}}
 
+    def test_swapped_pair_declared_both_ways_yields_one_relation(self, tmp_path):
+        """A source that declares both mero_part and holo_part the wrong way
+        round ends up with one correct mero_part, not a reversed pair."""
+        text = _lexicon(
+            _entry('e1', 'a', _sense('s1', 'y1')) + _entry('e2', 'b', _sense('s2', 'y2'))
+            + _synset('y1', 'i1', '    <Definition language="tt">d</Definition>\n'
+                                  '    <SynsetRelation relType="mero_part" target="y2"/>\n')
+            + _synset('y2', 'i2', '    <Definition language="tt">d</Definition>\n'
+                                  '    <SynsetRelation relType="holo_part" target="y1"/>\n'))
+        options = CleanOptions(direction_swaps=frozenset({'mero_part', 'holo_part'}))
+        _r, tree, _log = _clean(tmp_path, text, options=options)
+        rels = [(s.get('id'), r.get('relType'), r.get('target'))
+                for s in tree.iter('Synset') for r in s.iter('SynsetRelation')]
+        assert rels == [('y2', 'mero_part', 'y1')]
+
     def test_self_loop_removed_unknown_type_kept(self, tmp_path):
         text = _lexicon(
             _entry('e1', 'a', _sense('s1', 'y1')) + _entry('e2', 'b', _sense('s2', 'y2'))
@@ -327,11 +340,3 @@ class TestCiliIndex:
         assert 'i1' in index and 'i2' in index and 'i3' not in index
         assert index.pos('i1') == 'ADJ' and index.pos('i2') == 'NOUN'
         assert len(index) == 2
-
-    def test_from_cygnet_xml(self, tmp_path):
-        xml = tmp_path / 'cili-1.0.xml'
-        xml.write_text('<CygnetResource id="cili"><ConceptLayer>'
-                       '<Concept id="cili.i5" ontological_category="VERB"/>'
-                       '</ConceptLayer></CygnetResource>', encoding='utf-8')
-        index = CiliIndex.from_file(xml)
-        assert index.pos('i5') == 'VERB' and len(index) == 1

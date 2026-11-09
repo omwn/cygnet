@@ -1,13 +1,12 @@
 """Tests for scripts/report.py — wordnet data-quality checker."""
 
+# Import the module under test via its file path so we don't need to install it.
+import importlib.util
+import sys
 from pathlib import Path
 
 import pytest
-
 from conftest import wn_xml
-
-# Import the module under test via its file path so we don't need to install it.
-import importlib.util, sys
 
 _REPORT_PATH = Path(__file__).parent.parent / "scripts" / "report.py"
 _spec = importlib.util.spec_from_file_location("report", _REPORT_PATH)
@@ -53,6 +52,19 @@ def _write_xml(tmp_path: Path, body: str, wn_id: str = "wn-test") -> Path:
 
 def _parse(tmp_path: Path, body: str, wn_id: str = "wn-test"):
     return parse_xml(_write_xml(tmp_path, body, wn_id))
+
+
+def _parse_lmf(tmp_path: Path, inner: str, wn_id: str = "wn-test", language: str = "en"):
+    """Parse a WN-LMF Lexicon written out directly, for shapes the Cygnet
+    vocabulary cannot express (duplicate ids, a self-loop, dc:type)."""
+    p = tmp_path / f"{wn_id}.xml"
+    p.write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<!DOCTYPE LexicalResource SYSTEM "https://globalwordnet.github.io/schemas/WN-LMF-1.4.dtd">\n'
+        '<LexicalResource xmlns:dc="https://globalwordnet.github.io/schemas/dc/">\n'
+        f'<Lexicon id="{wn_id}" label="Test" language="{language}" email="e" license="l" '
+        f'version="1.0" url="u">\n{inner}</Lexicon>\n</LexicalResource>\n')
+    return parse_xml(p)
 
 
 # Minimal well-formed body: one concept + gloss + entry + sense
@@ -138,15 +150,10 @@ class TestParseXml:
         assert "sense.foo" in sense_ids
 
     def test_duplicate_concept_tracked(self, tmp_path):
-        body = """\
-<Concept id="cili.i1" ontological_category="NOUN" status="1">
-  <Provenance resource="wn-test" version="1.0"/>
-</Concept>
-<Concept id="cili.i1" ontological_category="NOUN" status="1">
-  <Provenance resource="wn-test" version="1.0"/>
-</Concept>
-"""
-        data = _parse(tmp_path, body)
+        data = _parse_lmf(tmp_path, """\
+<Synset id="cili.i1" ili="i1" partOfSpeech="n"/>
+<Synset id="cili.i1" ili="i1" partOfSpeech="n"/>
+""")
         assert "cili.i1" in data.duplicate_concept_ids
 
 
@@ -307,12 +314,12 @@ class TestCheckSelfLoops:
         assert "cili.i1" in issue.items
 
     def test_detects_sense_self_loop(self, tmp_path):
-        body = """\
-<SenseRelation relation_type="antonym" source="sense.x" target="sense.x">
-  <Provenance resource="wn-test" version="1.0"/>
-</SenseRelation>
-"""
-        data = _parse(tmp_path, body)
+        data = _parse_lmf(tmp_path, """\
+<LexicalEntry id="e"><Lemma writtenForm="x" partOfSpeech="n"/>
+  <Sense id="sense.x" synset="y1"><SenseRelation relType="antonym" target="sense.x"/></Sense>
+</LexicalEntry>
+<Synset id="y1" ili="i1" partOfSpeech="n"/>
+""")
         issue = check_self_loops(data)
         assert issue is not None
         assert "sense.x" in issue.items
@@ -427,18 +434,6 @@ class TestCheckDanglingSenses:
         data = _parse(tmp_path, _GOOD)
         assert check_dangling_senses(data) is None
 
-    def test_flags_unknown_signifier(self, tmp_path):
-        body = """\
-<Sense id="sense.ghost" signifier="en.NOUN.ghost" signified="cili.i1">
-  <Provenance resource="wn-test" version="1.0"/>
-</Sense>
-"""
-        data = _parse(tmp_path, body)
-        issue = check_dangling_senses(data)
-        assert issue is not None
-        assert issue.severity == "WARNING"
-        assert any("en.NOUN.ghost" in item for item in issue.items)
-
     def test_cross_file_concept_ok(self, tmp_path):
         """signified references to cili. IDs that aren't in this file are expected — no issue."""
         data = _parse(tmp_path, _GOOD)
@@ -461,30 +456,19 @@ class TestCheckUnmatchedExamples:
         data = _parse(tmp_path, body)
         assert check_unmatched_examples(data) is None
 
-    def test_flags_unannotated_example(self, tmp_path):
-        body = """\
-<Example>
-  <AnnotatedSentence>No annotations here at all.</AnnotatedSentence>
-  <Provenance resource="wn-test" version="1.0"/>
-</Example>
-"""
-        data = _parse(tmp_path, body)
+    def test_flags_unlocated_example(self, tmp_path):
+        """An Example under a Sense without offsets (the word was not found),
+        or left on a Synset, counts as unannotated."""
+        data = _parse_lmf(tmp_path, """\
+<LexicalEntry id="e"><Lemma writtenForm="x" partOfSpeech="n"/>
+  <Sense id="sense.x" synset="y1"><Example>No annotations here at all.</Example></Sense>
+</LexicalEntry>
+<Synset id="y1" ili="i1" partOfSpeech="n"><Example>Left on the synset.</Example></Synset>
+""")
         issue = check_unmatched_examples(data)
         assert issue is not None
         assert issue.severity == "WARNING"
-        assert "no annotations" in issue.items[0]
-
-    def test_flags_example_with_unknown_sense(self, tmp_path):
-        body = """\
-<Example>
-  <AnnotatedSentence><AnnotatedToken sense="sense.nonexistent">word</AnnotatedToken></AnnotatedSentence>
-  <Provenance resource="wn-test" version="1.0"/>
-</Example>
-"""
-        data = _parse(tmp_path, body)
-        issue = check_unmatched_examples(data)
-        assert issue is not None
-        assert "sense.nonexistent" in issue.items[0]
+        assert issue.total == 2
 
 
 # ---------------------------------------------------------------------------
@@ -505,6 +489,8 @@ class TestCheckNonStandardRelations:
         assert check_non_standard_relations(data) is None
 
     def test_flags_unknown_concept_relation(self, tmp_path):
+        """A source's own type travels as relType="other" + dc:type in LMF
+        (the Cygnet vocabulary's relation_type), and is read back as that type."""
         body = """\
 <ConceptRelation relation_type="made_of_cheese" source="cili.i1" target="cili.i2">
   <Provenance resource="wn-test" version="1.0"/>
@@ -517,12 +503,13 @@ class TestCheckNonStandardRelations:
         assert any("made_of_cheese" in item for item in issue.items)
 
     def test_flags_unknown_sense_relation(self, tmp_path):
-        body = """\
-<SenseRelation relation_type="rhymes_with" source="sense.a" target="sense.b">
-  <Provenance resource="wn-test" version="1.0"/>
-</SenseRelation>
-"""
-        data = _parse(tmp_path, body)
+        data = _parse_lmf(tmp_path, """\
+<LexicalEntry id="e"><Lemma writtenForm="x" partOfSpeech="n"/>
+  <Sense id="sense.a" synset="y1"><SenseRelation relType="other" dc:type="rhymes_with" target="sense.b"/></Sense>
+  <Sense id="sense.b" synset="y2"/>
+</LexicalEntry>
+<Synset id="y1" ili="i1" partOfSpeech="n"/><Synset id="y2" ili="i2" partOfSpeech="n"/>
+""")
         issue = check_non_standard_relations(data)
         assert issue is not None
         assert any("rhymes_with" in item for item in issue.items)
@@ -553,28 +540,20 @@ class TestCheckDuplicateIds:
         assert check_duplicate_ids(data) == []
 
     def test_flags_duplicate_concept(self, tmp_path):
-        body = """\
-<Concept id="cili.i1" ontological_category="NOUN" status="1">
-  <Provenance resource="wn-test" version="1.0"/>
-</Concept>
-<Concept id="cili.i1" ontological_category="NOUN" status="1">
-  <Provenance resource="wn-test" version="1.0"/>
-</Concept>
-"""
-        data = _parse(tmp_path, body)
+        data = _parse_lmf(tmp_path, """\
+<Synset id="cili.i1" ili="i1" partOfSpeech="n"/>
+<Synset id="cili.i1" ili="i1" partOfSpeech="n"/>
+""")
         issues = check_duplicate_ids(data)
         assert any(i.title.startswith("Duplicate concept") for i in issues)
 
     def test_flags_duplicate_sense(self, tmp_path):
-        body = """\
-<Sense id="sense.dup" signifier="en.NOUN.x" signified="cili.i1">
-  <Provenance resource="wn-test" version="1.0"/>
-</Sense>
-<Sense id="sense.dup" signifier="en.NOUN.x" signified="cili.i1">
-  <Provenance resource="wn-test" version="1.0"/>
-</Sense>
-"""
-        data = _parse(tmp_path, body)
+        data = _parse_lmf(tmp_path, """\
+<LexicalEntry id="e"><Lemma writtenForm="x" partOfSpeech="n"/>
+  <Sense id="sense.dup" synset="y1"/><Sense id="sense.dup" synset="y1"/>
+</LexicalEntry>
+<Synset id="y1" ili="i1" partOfSpeech="n"/>
+""")
         issues = check_duplicate_ids(data)
         assert any(i.title.startswith("Duplicate sense") for i in issues)
 
