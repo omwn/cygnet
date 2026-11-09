@@ -10,8 +10,10 @@ senses.  Those cleaned files are then merged.  The public products
 and the web UI read only SQLite, so neither changes.
 
 Status (2026-11-09): steps 1 (prep) and 2 (merge reads LMF) done on the
-`lmf-intermediate` branch; steps 3–7 not started.  Supersedes the
-2026-10-11 plan.  Decisions taken on 2026-11-09:
+`lmf-intermediate` branch; step 3 (the cleaner, `cyg/clean.py`) written
+and run on the corpus, its sidecar changes and the old/new comparison
+still to do; steps 4–7 not started.  Supersedes the 2026-10-11 plan.
+Decisions taken on 2026-11-09:
 
 - The intermediate is one cleaned LMF file per source lexicon, useful on
   its own (loads in `wn`, validates, can be sent upstream as "your
@@ -310,11 +312,23 @@ old name and the log gains `format: "wn-lmf-1.4"`.
    (450K relations), with its 80 repeated ILIs cleared as the cleaner
    will do in step 3, differs only by the 280 relations the converter
    dropped as already in OEWN, which are now kept by decision.
-3. **Cleaner.**  `cyg/clean.py` with the seven passes above, lifting the
-   converter's existing logic pass by pass; `2_batch_convert_lmfs.py`
-   calls it, writing to `bin/lmf_presynth/`; the `mul` planning shrinks
-   to "clean the concepts lexicon first".  `scripts/report.py` and
-   `scripts/log_summary.py` move with it.  Freeze the baseline, then:
+3. **Cleaner.**  *In progress.*  `cyg/clean.py` (`LmfCleaner`) does the
+   seven passes in two streaming passes plus the linking stage; the
+   matcher moved to `cyg/linker.py` (`ExampleLinker`), shared with the
+   converter until step 5.  `2_batch_convert_lmfs.py --format lmf` runs
+   it into `bin/lmf_presynth/` (`build.sh --lmf`), with the mul
+   planning supplying `CleanOptions(shared, language, requires)`; a
+   member lexicon gets `<Requires ref="<concepts lexicon>"/>` and merge
+   keys the concepts of such a release by `dc:identifier`
+   (`<concepts lexicon>.<identifier>`).  Extra passes found necessary:
+   an entry left without senses is dropped (wn W201), an
+   `ILIDefinition` on a synset with an ILI is dropped (W304), and an
+   existing `offsets` note is kept (so cleaning the output again is a
+   no-op).  First corpus run: omw-sk passes through byte for byte;
+   estwn 12 s, norwegian-nb 21 s, oewn 25 s (49,391 of 49,724 synset
+   examples moved to senses), plwn 282 s at 1.8 GB peak, all loading in
+   `wn` with no E-codes.  Still to do here: `scripts/report.py` and
+   `scripts/log_summary.py` on the new logs; freeze the baseline, then:
    merge reads `cili.tsv`, delete `1_extract_cili.py`;
    `4_add_glosstag_to_cili.py` writes `cili_glosstag.json`;
    `5_translate_defns.py` writes `mtg.tsv`; update `release.yml`,

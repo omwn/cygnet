@@ -29,7 +29,7 @@ from cyg.lmf import (
     relation_subtype,
     relation_type,
 )
-from cyg.multilex import open_xml
+from cyg.multilex import dc_identifier, encode_for_xml_id, open_xml
 
 logger = logging.getLogger(__name__)
 
@@ -1341,7 +1341,10 @@ class MergeBuilder:
         created from that index; a second pass streams entries and synsets.
         Sense relations may point at a sense declared later, so they are
         added after the second pass.  A Synset's ILI names its concept; a
-        synset without one is a local concept '<lexicon id>.<synset id>'.
+        synset without one is a local concept '<lexicon id>.<synset id>',
+        except in a multi-lexicon release: there the concepts lexicon
+        (language "mul") and the member lexicons that Require it share a
+        concept per dc:identifier, '<concepts lexicon id>.<identifier>'.
         Examples under a Sense belong to it, with the sense's word at the
         spans in note="offsets=..."; Examples left under a Synset have no
         sense and are not merged.  A sense marked lexicalized="false" (a
@@ -1393,21 +1396,35 @@ class MergeBuilder:
         """
         index: dict[str, tuple[str, str]] = {}
         lexicon = version = None
+        concepts_owner: str | None = None   # whose dc:identifiers name the concepts
         for event, elem in ET.iterparse(
                 open_xml(xml_file), events=('start', 'end'),
-                tag=('Lexicon', 'LexiconExtension', 'Synset'),
+                tag=('Lexicon', 'LexiconExtension', 'Requires', 'Synset'),
                 load_dtd=False, no_network=True, resolve_entities=False):
             if event == 'start':
-                if elem.tag != 'Synset':
+                if elem.tag in ('Lexicon', 'LexiconExtension'):
                     lexicon, version = elem.get('id'), elem.get('version')
                     if lexicon and lexicon not in self._resources:
                         self._resources[lexicon] = dict(elem.attrib)
+                    concepts_owner = lexicon if elem.get('language') == 'mul' else None
+                continue
+            if elem.tag == 'Requires':
+                ref = elem.get('ref')
+                if (concepts_owner is None and ref
+                        and self._resources.get(ref, {}).get('language') == 'mul'):
+                    concepts_owner = ref
                 continue
             if elem.tag != 'Synset':
                 continue
             sid = elem.get('id')
             ili = elem.get('ili')
-            cid = f'cili.{ili}' if ili and ili != 'in' else f'{lexicon}.{sid}'
+            identifier = dc_identifier(elem) if concepts_owner else None
+            if ili and ili != 'in':
+                cid = f'cili.{ili}'
+            elif identifier:
+                cid = f'{concepts_owner}.{encode_for_xml_id(identifier)}'
+            else:
+                cid = f'{lexicon}.{sid}'
             pos = pos_label(elem.get('partOfSpeech'))
             index[sid] = (cid, pos)
             if cid not in self.synset_id_to_rowid:

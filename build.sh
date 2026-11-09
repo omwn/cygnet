@@ -51,6 +51,7 @@ DO_BUILD=true
 DO_TESTS=true
 TRANSLATE_ONLY=false
 ALL_LANGUAGES=false
+LMF=false
 WORK_DIR=""
 
 while [[ $# -gt 0 ]]; do
@@ -72,6 +73,7 @@ while [[ $# -gt 0 ]]; do
         --translate-only) TRANSLATE_ONLY=true; WITH_TRANSLATE=true; shift ;;
         --skip-tests)     DO_TESTS=false;       shift ;;
         --all-languages)  ALL_LANGUAGES=true;   shift ;;
+        --lmf)            LMF=true;             shift ;;
         --help|-h)
             sed -n '3,/^$/{ s/^# \?//; p }' "$0"
             exit 0
@@ -470,6 +472,14 @@ if $DO_BUILD; then
     echo "=== Step 2: Convert wordnets ==="
     STEP2_ARGS=()
     if $ALL_LANGUAGES; then STEP2_ARGS+=(--all-languages); fi
+    PRESYNTH=bin/cygnets_presynth
+    if $LMF; then
+        # The WN-LMF path (TODO.md): cleaned sources in bin/lmf_presynth,
+        # merged with the CILI and MT-gloss files Steps 1 and 5 still write
+        # to bin/cygnets_presynth.
+        PRESYNTH=bin/lmf_presynth
+        STEP2_ARGS+=(--format lmf --output-dir "$PRESYNTH")
+    fi
     run_pipeline 2_batch_convert_lmfs.py ${STEP2_ARGS[@]+"${STEP2_ARGS[@]}"}
     echo
 
@@ -496,7 +506,14 @@ if $DO_BUILD; then
     fi
 
     echo "=== Step 6: Synthesise ==="
-    run_pipeline 6_synthesise.py
+    if $LMF; then
+        for f in cili-1.0.xml mtg-1.0.xml relation_direction_swaps.json; do
+            if [[ -e "$DATA_DIR/bin/cygnets_presynth/$f" ]]; then
+                ln -sfn "../cygnets_presynth/$f" "$DATA_DIR/$PRESYNTH/$f"
+            fi
+        done
+    fi
+    run_pipeline 6_synthesise.py --input-dir "$PRESYNTH"
     echo
 
     echo "=== Step 9: Populate language names ==="

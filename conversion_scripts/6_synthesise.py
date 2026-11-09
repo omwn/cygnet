@@ -7,6 +7,7 @@ the next is loaded — so peak memory is one file at a time plus the
 ID-mapping dictionaries (~300 MB), not the entire merged dataset.
 """
 
+import argparse
 import logging
 import sys
 from datetime import datetime, timezone
@@ -114,6 +115,12 @@ def merge_order(all_files: list[Path]) -> list[Path]:
 
 def main() -> None:
     sys.stdout.reconfigure(line_buffering=True)
+    parser = argparse.ArgumentParser(description='Merge the pre-synth files into the databases.')
+    parser.add_argument('--input-dir', type=Path, default=Path('bin/cygnets_presynth'),
+                        help='pre-synth directory: Cygnet XML and/or WN-LMF files')
+    parser.add_argument('--web-dir', type=Path, default=Path('web'),
+                        help='where cygnet.db, provenance.db, summaries/ and data/ go')
+    args = parser.parse_args()
 
     conflicts_path = Path('bin/relation_conflicts.json')
     logging.basicConfig(
@@ -122,9 +129,9 @@ def main() -> None:
         handlers=[logging.StreamHandler()],
     )
 
-    input_dir = Path('bin/cygnets_presynth')
-    db_path = Path('web/cygnet.db')
-    prov_db_path = Path('web/provenance.db')
+    input_dir = args.input_dir
+    db_path = args.web_dir / 'cygnet.db'
+    prov_db_path = args.web_dir / 'provenance.db'
 
     db_path.parent.mkdir(exist_ok=True)
 

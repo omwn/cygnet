@@ -204,3 +204,66 @@ class TestRelations:
         assert ('antonym', koira, None, None) in _relations(dbs, 'sense_relations', kissa)
         assert ('derivation', koira, None, None) in _relations(dbs, 'sense_relations', kissa)
         assert ('derivation', kissa, None, None) in _relations(dbs, 'sense_relations', koira)
+
+
+_MUL_HEADER = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+               '<!DOCTYPE LexicalResource SYSTEM "https://globalwordnet.github.io/schemas/WN-LMF-1.4.dtd">\n'
+               '<LexicalResource xmlns:dc="https://globalwordnet.github.io/schemas/dc/">\n')
+
+_MUL_CONCEPTS = _MUL_HEADER + """<Lexicon id="kin" label="Kin concepts" language="mul" email="e" license="l" version="0.2" url="u">
+  <LexicalEntry id="kin-dummy"><Lemma writtenForm="x" partOfSpeech="n"/><Sense id="kin-dummy-s" synset="kin-Fa" lexicalized="false"/></LexicalEntry>
+  <Synset id="kin-Fa" ili="in" partOfSpeech="n" lexicalized="false" dc:identifier="k:Fa">
+    <Definition language="en">father</Definition>
+  </Synset>
+  <Synset id="kin-Mo" ili="in" partOfSpeech="n" lexicalized="false" dc:identifier="k:Mo">
+    <Definition language="en">mother</Definition>
+    <SynsetRelation relType="antonym" target="kin-Fa"/>
+  </Synset>
+</Lexicon>
+</LexicalResource>
+"""
+
+_MUL_MEMBER = _MUL_HEADER + """<Lexicon id="kin-fi" label="Kin Finnish" language="fi" email="e" license="l" version="0.2" url="u">
+  <Requires ref="kin" version="0.2"/>
+  <LexicalEntry id="kin-fi-isa"><Lemma writtenForm="isä" partOfSpeech="n"/><Sense id="kin-fi-isa-1" synset="kin-fi-Fa"/></LexicalEntry>
+  <LexicalEntry id="kin-fi-aiti"><Lemma writtenForm="äiti" partOfSpeech="n"/><Sense id="kin-fi-aiti-1" synset="kin-fi-Mo"/></LexicalEntry>
+  <Synset id="kin-fi-Fa" ili="" partOfSpeech="n" dc:identifier="k:Fa"/>
+  <Synset id="kin-fi-Mo" ili="" partOfSpeech="n" dc:identifier="k:Mo"/>
+</Lexicon>
+</LexicalResource>
+"""
+
+
+class TestMulRelease:
+    """A concepts lexicon (language mul) and a member that Requires it share
+    concepts by dc:identifier, so the member's senses land on the concepts'
+    synsets, which carry the definitions."""
+
+    @pytest.fixture(scope='class')
+    def mul_db(self, tmp_path_factory):
+        d = tmp_path_factory.mktemp('mul')
+        (d / 'kin-0.2.xml').write_text(_MUL_CONCEPTS, encoding='utf-8')
+        (d / 'kin-fi-0.2.xml').write_text(_MUL_MEMBER, encoding='utf-8')
+        build_test_db(d / 'c.db', d / 'p.db', [d / 'kin-0.2.xml', d / 'kin-fi-0.2.xml'])
+        conn = sqlite3.connect(str(d / 'c.db'))
+        conn.execute(f"ATTACH '{d / 'p.db'}' AS p")
+        return conn
+
+    def test_member_senses_share_the_concepts_synsets(self, mul_db):
+        rows = mul_db.execute('''
+            SELECT f.form, d.definition FROM senses s
+            JOIN entries e ON e.rowid = s.entry_rowid
+            JOIN forms f ON f.entry_rowid = e.rowid AND f.rank = 0
+            JOIN definitions d ON d.synset_rowid = s.synset_rowid
+            ORDER BY f.form''').fetchall()
+        assert rows == [('isä', 'father'), ('äiti', 'mother')]
+        assert mul_db.execute("SELECT COUNT(*) FROM synsets").fetchone()[0] == 2
+
+    def test_unlexicalized_concept_sense_is_skipped(self, mul_db):
+        assert mul_db.execute(
+            "SELECT COUNT(*) FROM forms WHERE form = 'x'").fetchone()[0] == 0
+
+    def test_concept_provenance_names_the_concepts_lexicon(self, mul_db):
+        rows = _prov(mul_db, 'synsets', mul_db.execute(
+            "SELECT synset_rowid FROM definitions WHERE definition = 'father'").fetchone()[0])
+        assert rows == [('kin', '0.2', 'kin-Fa')]
