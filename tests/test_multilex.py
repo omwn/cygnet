@@ -130,8 +130,8 @@ def test_fix_language():
 
 def test_build_concept_map(tmp_path):
     concepts = build_concept_map(_write(tmp_path / "kin.xml", _CONCEPTS))
-    assert concepts["K:Pa"] == ("i100", "kin.Pa")
-    assert concepts["K:Fa"] == (None, "kin.Fa")
+    assert concepts["K:Pa"] == "i100"
+    assert concepts["K:Fa"] is None
 
 
 def test_read_lexicon_header(tmp_path):
@@ -248,7 +248,7 @@ class _FakeCleaner:
         out.write_text("<LexicalResource/>")
         log = out.with_name(out.stem + "_log.json")
         log.write_text('{"changes": {}}')
-        return CleanResult(out, log, False, h.id, h.version)
+        return CleanResult(out, log, False)
 
 
 def _run_batch(tmp_path, monkeypatch, presynth_files: dict[str, str]) -> Path:

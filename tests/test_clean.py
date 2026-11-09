@@ -156,7 +156,8 @@ class TestFixtureEndToEnd:
         again = LmfCleaner(result.output, _CILI).clean(tmp_path)
         assert not again.changed
         assert again.output.read_bytes() == result.output.read_bytes()
-        assert again.version == '1.0' + CHANGED_SUFFIX           # not appended twice
+        again_tree = etree.parse(str(again.output))
+        assert again_tree.getroot()[0].get('version') == '1.0' + CHANGED_SUFFIX  # not appended twice
 
 
 class TestPassThrough:
@@ -167,7 +168,6 @@ class TestPassThrough:
         assert not result.changed
         assert log['unchanged'] is True and log['changes'] == {}
         assert result.output.read_text(encoding='utf-8') == text
-        assert result.version == '1.0'
 
     def test_header_alone_forces_a_rewrite(self, tmp_path):
         text = _lexicon(_entry('e1', 'word', _sense('s1', 'y1'))
@@ -302,7 +302,7 @@ class TestRelations:
 
 class TestMulRelease:
     def test_member_gets_requires_and_ili_from_the_concepts(self, tmp_path):
-        shared = SharedConcepts({'k:Fa': ('i7', 'kin.Fa'), 'k:Mo': (None, 'kin.Mo')}, 'member')
+        shared = SharedConcepts({'k:Fa': 'i7', 'k:Mo': None}, 'member')
         text = _lexicon(
             _entry('e1', 'isä', _sense('s1', 'y1')) + _entry('e2', 'äiti', _sense('s2', 'y2'))
             + _synset('y1', '', '', attrs=' dc:identifier="k:Fa"')
@@ -319,7 +319,7 @@ class TestMulRelease:
     def test_member_that_needs_only_requires_is_still_rewritten(self, tmp_path):
         """A member whose only edit is the Requires element must not pass
         through unchanged, or the merge cannot tell whose concepts it uses."""
-        shared = SharedConcepts({'k:Mo': (None, 'kin.Mo')}, 'member')
+        shared = SharedConcepts({'k:Mo': None}, 'member')
         text = _lexicon(_entry('e1', 'äiti', _sense('s1', 'y1'))
                         + _synset('y1', '', '    <Definition language="fi">d</Definition>\n',
                                   attrs=' dc:identifier="k:Mo"'),
@@ -336,7 +336,7 @@ class TestCiliIndex:
         tsv.write_text('ili_id\tstatus\tsuperseded_by\torigin\tdefinition\n'
                        'i1\t1\t\tpwn-3.0:00001740-a\tgloss one\n'
                        'i2\t1\t\tpwn-3.0:00002098-n\tgloss  two\n', encoding='utf-8')
-        index = CiliIndex.from_file(tsv)
+        index = CiliIndex.from_tsv(tsv)
         assert 'i1' in index and 'i2' in index and 'i3' not in index
         assert index.pos('i1') == 'ADJ' and index.pos('i2') == 'NOUN'
         assert len(index) == 2

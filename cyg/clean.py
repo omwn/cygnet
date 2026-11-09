@@ -50,14 +50,25 @@ from cyg.linker import EXAMPLE_BATCH_SIZE, ExampleLinker
 from cyg.lmf import (
     CONCEPT_FORWARD_OF_INVERSE,
     CONCEPT_REVERSE_RELATIONS,
+    DC_NS,
+    DOCTYPE,
+    LEXICON_TAGS,
     SENSE_FORWARD_OF_INVERSE,
     SENSE_REVERSE_RELATIONS,
+    XML_DECL,
     below_confidence_threshold,
+    collapse_whitespace,
     entry_written_forms,
+    format_offsets,
     is_forward_relation,
+    iter_lmf,
     parse_note,
     pos_label,
+    relation_element,
+    serialize,
+    set_note_key,
     shorten_uri,
+    start_tag,
 )
 from cyg.multilex import (
     DC_NAMESPACES,
@@ -71,16 +82,11 @@ from cyg.presynth import log_path
 
 logger = logging.getLogger(__name__)
 
-XML_DECL = '<?xml version="1.0" encoding="UTF-8"?>'
-DTD_URL = 'https://globalwordnet.github.io/schemas/WN-LMF-1.4.dtd'
-DOCTYPE = f'<!DOCTYPE LexicalResource SYSTEM "{DTD_URL}">'
-DC_NS = DC_NAMESPACES[0]
 # Appended to Lexicon@version when the cleaner changed the file.
 CHANGED_SUFFIX = '.🦢'
 LEXICON_NOTE = ('cleaned by Cygnet; inverse relations omitted; '
                 'changes listed in {stem}_log.json')
 FORMAT = 'wn-lmf-1.4'
-LEXICON_TAGS = ('Lexicon', 'LexiconExtension')
 # Known errors in source headers, by lexicon id.  Remove an entry once the
 # source is fixed upstream.
 METADATA_FIXES: dict[str, dict[str, str]] = {
@@ -103,9 +109,7 @@ def normalise_text(text: str | None) -> str:
     """
     if not text:
         return ''
-    text = unicodedata.normalize('NFC', text)
-    text = html.unescape(text)
-    return ' '.join(text.split())
+    return collapse_whitespace(html.unescape(unicodedata.normalize('NFC', text)))
 
 
 @dataclass
@@ -131,29 +135,27 @@ class CleanOptions:
     swap_stats: dict[str, dict] = field(default_factory=dict)
 
 
-@dataclass
+@dataclass(slots=True)
 class _Synset:
     id: str
-    ili: str
-    pos: str
+    ili: str                # as it will be written (decided in pass 4)
+    pos: str                # partOfSpeech code as it will be written
     kept: bool
-    lexicalized: bool
     identifier: str | None
-    new_ili: str = ''
-    new_pos: str = ''
+    language: str           # the lexicon's language, for definitions without one
     senses: list[str] = field(default_factory=list)   # surviving sense ids
 
 
-@dataclass
+@dataclass(slots=True)
 class _Entry:
     id: str
     forms: list[str]        # normalised; lemma first, the rest sorted
     pos: str                # POS code as written in the cleaned file
-    survivor: str           # this id, or the entry it merges into
+    survivor: str | None    # this id, the entry it merges into, or None if dropped
     senses: list[str] = field(default_factory=list)
 
 
-@dataclass
+@dataclass(slots=True)
 class _Sense:
     id: str
     entry: str
@@ -161,24 +163,22 @@ class _Sense:
     survivor: str | None    # this id, the sense it collapses into, or None
 
 
-@dataclass
+@dataclass(slots=True)
 class _Relation:
     rel_type: str           # relType as written
     dc_type: str | None
     target: str
-    attrs: dict[str, str]   # every attribute but relType and target
+    attrs: dict[str, str] | None   # attributes beyond relType and target, if any
     kept: bool              # above the confidence threshold
 
 
-@dataclass
+@dataclass(slots=True)
 class CleanResult:
     """What cleaning one source produced."""
 
     output: Path
     log: Path
     changed: bool
-    lexicon_id: str
-    version: str
 
 
 class LmfCleaner:
@@ -250,12 +250,11 @@ class LmfCleaner:
                                              'concept_relations': {'count': 0}},
                 'direction_swapped': {'sense_relations': {'count': 0},
                                       'concept_relations': {'count': 0}},
-                'ontological_category_mismatches': {'count': 0},
             },
             'missing_cili_concepts': {'count': 0},
             'repeated_ili': {'count': 0, 'synsets': {}},
             'missing_lemmas': {'count': 0},
-            'unlexicalized_skipped': {'synsets': 0, 'senses': 0},
+            'entries_without_senses': 0,
             'low_confidence_skipped': {'synsets': 0, 'senses': 0, 'definitions': 0,
                                        'relations': 0},
             'shared_concept_not_found': {'count': 0},
@@ -276,10 +275,7 @@ class LmfCleaner:
                 'examples': {'total_found': 0, 'processed': 0, 'skipped': 0,
                              'success_rate_pct': 0.0, 'failed_matches': [],
                              'moved_to_sense': 0, 'left_on_synset': 0},
-                'html_entity_fixes': {
-                    'count': 0,
-                    'note': 'Source XML contains double-encoded HTML entities '
-                            '(e.g. &amp;#39;); consider reporting to upstream.'},
+                'html_entity_fixes': {'count': 0},
                 'direction_swaps': {},
             },
         }
@@ -309,7 +305,6 @@ class LmfCleaner:
         stem = f"{lexicon['id']}-{version}"
         output = out_dir / f'{stem}.xml'
         changed = bool(self.changes) or not self.header_ok
-        already = (lexicon['version'] or '').endswith(CHANGED_SUFFIX)
         if changed:
             self._write(output, stem)
         else:
@@ -321,15 +316,9 @@ class LmfCleaner:
         log_file = log_path(output)
         log_file.write_text(json.dumps(self.log, indent=2, ensure_ascii=False),
                             encoding='utf-8')
-        return CleanResult(output, log_file, changed, lexicon['id'],
-                           version + (CHANGED_SUFFIX if changed or already else ''))
+        return CleanResult(output, log_file, changed)
 
     # --------------------------------------------------------------- pass A
-
-    def _iterparse(self, tags: tuple[str, ...]):
-        return etree.iterparse(
-            open_xml(self.source), events=('start', 'end'), tag=tags,
-            load_dtd=False, no_network=True, resolve_entities=False)
 
     def _check_header(self) -> None:
         """Note whether the source already has the header wn requires."""
@@ -347,7 +336,7 @@ class LmfCleaner:
         self._check_header()
         current: dict | None = None
         requires_seen = False
-        for event, elem in self._iterparse((*LEXICON_TAGS, 'Requires', 'LexicalEntry', 'Synset')):
+        for event, elem in iter_lmf(self.source, (*LEXICON_TAGS, 'Requires', 'LexicalEntry', 'Synset')):
             if event == 'start':
                 if elem.tag in LEXICON_TAGS:
                     current = self._index_lexicon(elem)
@@ -357,16 +346,10 @@ class LmfCleaner:
             if elem.tag == 'Requires':
                 if self.options.requires and elem.get('ref') == self.options.requires[0]:
                     requires_seen = True
-                continue
-            if elem.tag == 'LexicalEntry':
+            elif elem.tag == 'LexicalEntry':
                 self._index_entry(elem, current)
             elif elem.tag == 'Synset':
                 self._index_synset(elem, current)
-            else:
-                continue
-            elem.clear(keep_tail=True)
-            while elem.getprevious() is not None:
-                del elem.getparent()[0]
         if not self.lexicons:
             raise ValueError(f'{self.source}: no Lexicon found')
         if self.options.requires and not requires_seen:
@@ -407,9 +390,8 @@ class LmfCleaner:
         if not kept:
             self.log['low_confidence_skipped']['synsets'] += 1
             self._changed('synsets.low_confidence')
-        pos = elem.get('partOfSpeech') or ''
-        info = _Synset(sid, elem.get('ili') or '', pos, kept,
-                       elem.get('lexicalized') != 'false', dc_identifier(elem))
+        info = _Synset(sid, elem.get('ili') or '', elem.get('partOfSpeech') or '', kept,
+                       dc_identifier(elem), lexicon['language'])
         self.synsets[sid] = info
         if not kept:
             return
@@ -449,7 +431,7 @@ class LmfCleaner:
         kept = not below_confidence_threshold(rel)
         attrs = {k: v for k, v in rel.attrib.items() if k not in _REL_KEEP}
         return _Relation(rel.get('relType') or '', dc_attr(rel, 'type'),
-                         rel.get('target') or '', attrs, kept)
+                         rel.get('target') or '', attrs or None, kept)
 
     def _note_normalised(self, text: str, norm: str, what: str) -> None:
         if text == norm:
@@ -497,7 +479,7 @@ class LmfCleaner:
         entry = _Entry(eid, forms, pos, survivor)
         self.entries[eid] = entry
         for sense in elem.iterchildren('Sense'):
-            self._index_sense(sense, entry, elem)
+            self._index_sense(sense, entry)
 
     def _stash_forms(self, elem: etree._Element, survivor: str) -> None:
         """Keep an absorbed entry's pronunciations, tags and scripts for the
@@ -509,7 +491,7 @@ class LmfCleaner:
             if form.get('script'):
                 self.extra_scripts.setdefault((survivor, written), form.get('script'))
 
-    def _index_sense(self, sense: etree._Element, entry: _Entry, entry_elem) -> None:
+    def _index_sense(self, sense: etree._Element, entry: _Entry) -> None:
         sid = sense.get('id')
         synset = sense.get('synset') or ''
         info = _Sense(sid, entry.id, synset, None)
@@ -574,11 +556,10 @@ class LmfCleaner:
                 continue
             ili = info.ili
             if shared is not None and info.identifier:
-                entry = shared.concepts.get(info.identifier)
-                if entry is None:
+                if info.identifier not in shared.concepts:
                     self.log['shared_concept_not_found']['count'] += 1
-                elif entry[0] and entry[0] in self.cili:
-                    ili = entry[0]
+                elif shared.concepts[info.identifier] in self.cili:
+                    ili = shared.concepts[info.identifier]
             if ili not in ('', 'in'):
                 if shared is None and ili in repeated:
                     ili = ''
@@ -587,26 +568,21 @@ class LmfCleaner:
                     self.log['missing_cili_concepts']['count'] += 1
                     ili = ''
                     self._changed('synsets.ili_unknown')
-            if ili != info.ili:
-                if ili:
-                    self._changed('synsets.ili_filled')
-                info.new_ili = ili
-            else:
-                info.new_ili = info.ili
-            pos = info.pos
-            if pos_label(pos) == 'UNK' and pos != 'u':
-                self.log['invalid_pos_values'][pos] = self.log['invalid_pos_values'].get(pos, 0) + 1
+            if ili and ili != info.ili:
+                self._changed('synsets.ili_filled')
+            info.ili = ili
+            if pos_label(info.pos) == 'UNK' and info.pos != 'u':
+                self.log['invalid_pos_values'][info.pos] = self.log['invalid_pos_values'].get(info.pos, 0) + 1
                 self._changed('pos.invalid')
-                pos = 'u'
-            info.new_pos = pos
+                info.pos = 'u'
             stats = self.log['statistics']['concepts']
-            if ili and ili not in ('', 'in'):
+            if ili and ili != 'in':
                 stats['from_cili'] += 1
                 cili_pos = self.cili.pos(ili) or ''
-                if pos_label(pos) != cili_pos:
+                if pos_label(info.pos) != cili_pos:
                     mm = self.log['synset_concept_pos_mismatches']
                     mm['total_count'] += 1
-                    pair = f'synset_{pos_label(pos)}-cili_{cili_pos}'
+                    pair = f'synset_{pos_label(info.pos)}-cili_{cili_pos}'
                     mm['by_pos_pair'][pair] = mm['by_pos_pair'].get(pair, 0) + 1
             else:
                 stats['newly_created'] += 1
@@ -629,10 +605,10 @@ class LmfCleaner:
                 synset.senses.append(sense.id)
                 self.log['statistics']['senses']['created'] += 1
                 entry = self.entries[sense.entry]
-                if pos_label(entry.pos) != pos_label(synset.new_pos):
+                if pos_label(entry.pos) != pos_label(synset.pos):
                     mm = self.log['lexeme_concept_pos_mismatches']
                     mm['total_count'] += 1
-                    pair = f'lexeme_{pos_label(entry.pos)}-concept_{pos_label(synset.new_pos)}'
+                    pair = f'lexeme_{pos_label(entry.pos)}-concept_{pos_label(synset.pos)}'
                     mm['by_pos_pair'][pair] = mm['by_pos_pair'].get(pair, 0) + 1
         for sense in self.senses.values():
             if sense.survivor is not None and sense.survivor != sense.id:
@@ -649,8 +625,8 @@ class LmfCleaner:
             entry.senses = [s for s in entry.senses if self.senses[s].survivor == s]
         for entry in self.entries.values():
             if entry.survivor == entry.id and not entry.senses:
-                entry.survivor = ''
-                self.log['entries_without_senses'] = self.log.get('entries_without_senses', 0) + 1
+                entry.survivor = None
+                self.log['entries_without_senses'] += 1
                 self._changed('entries.no_senses')
 
     def _sense_target(self, sid: str) -> str | None:
@@ -669,6 +645,8 @@ class LmfCleaner:
         self.final_sense_rels = self._clean_relations(
             self.sense_rels, self._sense_target, SENSE_REVERSE_RELATIONS,
             SENSE_FORWARD_OF_INVERSE, 'sense_relations')
+        self.synset_rels.clear()
+        self.sense_rels.clear()
         stats = self.log['statistics']['relations']
         stats['concept_relations_created'] = sum(len(r) for r in self.final_synset_rels.values())
         stats['sense_relations_created'] = sum(len(r) for r in self.final_sense_rels.values())
@@ -702,7 +680,7 @@ class LmfCleaner:
                 if resolved not in reverse and resolved not in forward_of:
                     rp['unknown_relation_types'][key]['count'] += 1
                 src, tgt = source, target
-                attrs = dict(rel.attrs)
+                attrs = rel.attrs
                 rel_type = rel.rel_type
                 if resolved in self.options.direction_swaps:
                     src, tgt = tgt, src
@@ -712,9 +690,9 @@ class LmfCleaner:
                     resolved = forward_of[resolved]
                     src, tgt = tgt, src
                     rel_type = resolved
-                    for k in list(attrs):
-                        if k.endswith('}type') and attrs[k] == rel.dc_type:
-                            del attrs[k]
+                    if attrs:
+                        attrs = {k: v for k, v in attrs.items()
+                                 if not (k.endswith('}type') and v == rel.dc_type)} or None
                     rp['inverse_direction_turned'][key]['count'] += 1
                     self._changed('relations.inverse_turned')
                 if src == tgt:
@@ -806,22 +784,22 @@ class LmfCleaner:
     # --------------------------------------------------------------- pass B
 
     def _write(self, output: Path, stem: str) -> None:
-        """Pass B: re-stream the source, writing each element edited or not."""
+        """Pass B: re-stream the source, writing each element edited or not.
+
+        Elements are re-indented by lxml as they are written, so the
+        formatting of what the cleaner touched is uniform.
+        """
         tmp = output.with_suffix('.xml.part')
         lexicon_index = -1
+        requires_due = False
         with open(tmp, 'w', encoding='utf-8', newline='') as out:
-            out.write(XML_DECL + '\n' + DOCTYPE + '\n')
-            out.write(f'<LexicalResource xmlns:dc="{self.dc_ns}">\n')
-            current: dict | None = None
-            requires_due = False
-            for event, elem in self._iterparse(
-                    (*LEXICON_TAGS, 'Requires', 'LexicalEntry', 'Synset',
-                     'SyntacticBehaviour')):
+            out.write(f'{XML_DECL}\n{DOCTYPE}\n<LexicalResource xmlns:dc="{self.dc_ns}">\n')
+            for event, elem in iter_lmf(self.source, (*LEXICON_TAGS, 'Requires', 'LexicalEntry',
+                                                      'Synset', 'SyntacticBehaviour')):
                 if event == 'start':
                     if elem.tag in LEXICON_TAGS:
                         lexicon_index += 1
-                        current = self.lexicons[lexicon_index]
-                        out.write(self._lexicon_start(current, stem))
+                        out.write(self._lexicon_start(self.lexicons[lexicon_index], stem))
                         requires_due = self.options.requires is not None
                     continue
                 if elem.tag in LEXICON_TAGS:
@@ -834,14 +812,11 @@ class LmfCleaner:
                     if elem.tag == 'Requires' and elem.get('ref') == ref:
                         requires_due = False
                     elif elem.tag != 'Requires':
-                        out.write(f'    <Requires ref="{ref}" version="{version}"/>\n')
+                        out.write(serialize(etree.Element('Requires', ref=ref, version=version)))
                         requires_due = False
-                piece = self._rewrite(elem, current)
+                piece = self._rewrite(elem)
                 if piece is not None:
                     out.write(piece)
-                elem.clear(keep_tail=True)
-                while elem.getprevious() is not None:
-                    del elem.getparent()[0]
             out.write('</LexicalResource>\n')
         tmp.replace(output)
 
@@ -858,39 +833,30 @@ class LmfCleaner:
         elem = etree.Element(lexicon['tag'], nsmap={'dc': self.dc_ns})
         for key, value in attrs.items():
             elem.set(key, value)
-        tag = etree.tostring(elem, encoding='unicode')
-        tag = tag.replace(f' xmlns:dc="{self.dc_ns}"', '')
-        return '  ' + tag[:-2] + '>\n'   # '<Lexicon .../>' -> start tag
+        return start_tag(elem)
 
-    def _serialize(self, elem: etree._Element, indent: str = '    ') -> str:
-        text = etree.tostring(elem, encoding='unicode')
-        text = text.replace(f' xmlns:dc="{self.dc_ns}"', '', 1)
-        return indent + text.strip() + '\n'
+    def _serialize(self, elem: etree._Element) -> str:
+        etree.indent(elem, space='  ', level=2)
+        return serialize(elem)
 
-    def _rewrite(self, elem: etree._Element, lexicon: dict) -> str | None:
-        if elem.tag == 'Requires':
-            return self._serialize(elem)
-        if elem.tag == 'SyntacticBehaviour':
-            senses = elem.get('senses')
-            if senses:
-                kept = [self._sense_target(s) for s in senses.split()]
-                kept = [s for s in kept if s]
-                if kept != senses.split():
-                    elem.set('senses', ' '.join(dict.fromkeys(kept)))
-            return self._serialize(elem)
+    def _rewrite(self, elem: etree._Element) -> str | None:
+        """The text to write for one top-level child of a Lexicon, or None
+        to drop it."""
         if elem.tag == 'LexicalEntry':
-            return self._rewrite_entry(elem, lexicon)
+            return self._rewrite_entry(elem)
         if elem.tag == 'Synset':
-            return self._rewrite_synset(elem, lexicon)
+            return self._rewrite_synset(elem)
+        if elem.tag == 'SyntacticBehaviour' and elem.get('senses'):
+            kept = dict.fromkeys(s for s in map(self._sense_target, elem.get('senses').split()) if s)
+            elem.set('senses', ' '.join(kept))
         return self._serialize(elem)
 
-    def _rewrite_entry(self, elem: etree._Element, lexicon: dict) -> str | None:
+    def _rewrite_entry(self, elem: etree._Element) -> str | None:
         eid = elem.get('id')
         entry = self.entries.get(eid)
         if entry is None or entry.survivor != eid:
             return None
-        lemma = elem.find('Lemma')
-        lemma.set('partOfSpeech', entry.pos)
+        elem.find('Lemma').set('partOfSpeech', entry.pos)
         for form in elem.iterchildren('Lemma', 'Form'):
             written = normalise_text(form.get('writtenForm'))
             form.set('writtenForm', written)
@@ -900,18 +866,13 @@ class LmfCleaner:
             self._merge_form_extras(form, (eid, written))
         merged = self.absorbed_entries.get(eid)
         if merged:
-            self._append_note(elem, 'merged', ' '.join(merged))
-        inner, last = self._tails(list(elem))
+            set_note_key(elem, 'merged', ' '.join(merged))
         for sense in list(elem.iterchildren('Sense')):
             if not self._rewrite_sense(sense):
                 elem.remove(sense)
         for extra in self.extra_senses.get(eid, ()):
             if self._rewrite_sense(extra):
                 self._insert_sense(elem, extra)
-        if len(elem):
-            for child in elem[:-1]:
-                child.tail = inner
-            elem[-1].tail = last
         return self._serialize(elem)
 
     def _merge_form_extras(self, form: etree._Element, key: tuple[str, str]) -> None:
@@ -932,46 +893,11 @@ class LmfCleaner:
                     without[0].set('audio', child.get('audio'))
                     continue
             existing.add(sig)
-            # DTD order: Pronunciation*, Tag*
-            if child.tag == 'Pronunciation':
-                tags = [c for c in form if c.tag == 'Tag']
-                if tags:
-                    tags[0].addprevious(child)
-                    continue
-            form.append(child)
-
-    @staticmethod
-    def _place(parent: etree._Element, pieces: list[etree._Element],
-               anchor: etree._Element | None, inner: str | None, last: str | None) -> None:
-        """Insert *pieces* before *anchor* (or at the end), indented like
-        the children the source had: *inner* is the whitespace that followed
-        a child, *last* the one that followed the last child."""
-        if not pieces:
-            if len(parent) == 0:
-                parent.text = None
-            return
-        for piece in pieces:
-            piece.tail = inner
-            if anchor is not None:
-                anchor.addprevious(piece)
+            tags = [c for c in form if c.tag == 'Tag']
+            if child.tag == 'Pronunciation' and tags:
+                tags[0].addprevious(child)      # DTD order: Pronunciation*, Tag*
             else:
-                parent.append(piece)
-        if anchor is None and last is not None:
-            pieces[-1].tail = last
-        if parent.text is None and inner:
-            parent.text = inner
-
-    @staticmethod
-    def _tails(children: list[etree._Element]) -> tuple[str | None, str | None]:
-        """(whitespace after a child, whitespace after the last child) of a
-        parent's original children, for re-indenting what replaces them."""
-        if not children:
-            return None, None
-        last = children[-1].tail
-        inner = next((c.tail for c in children[:-1] if c.tail), last)
-        if inner and inner.strip() == '' and last and last.strip() == '' and len(children) == 1:
-            inner = last.rstrip(' ') + ' ' * (len(last) - len(last.rstrip(' ')) + 2)
-        return inner, last
+                form.append(child)
 
     @staticmethod
     def _insert_sense(entry: etree._Element, sense: etree._Element) -> None:
@@ -982,41 +908,26 @@ class LmfCleaner:
         else:
             entry.append(sense)
 
-    @staticmethod
-    def _append_note(elem: etree._Element, key: str, value: str) -> None:
-        """Set key=value in the note attribute, after the source's own notes
-        and replacing an earlier value Cygnet wrote."""
-        parts = [p for p in (elem.get('note') or '').split(';')
-                 if p.strip() and not p.strip().startswith(f'{key}=')]
-        parts.append(f'{key}={value}')
-        elem.set('note', ';'.join(p.strip() for p in parts))
-
     def _rewrite_sense(self, sense: etree._Element) -> bool:
         """Edit a Sense in place; False if it is dropped.
 
-        Relations are written from the cleaned set (pass 5), examples are
-        the sense's own and those of senses collapsed into it, normalised
-        and with offsets where the word was found, then the synset examples
-        moved here (pass 6); Counts stay last, as the DTD wants.
+        Relations are written from the cleaned set (pass 5), then the
+        examples: the sense's own and those of senses collapsed into it,
+        normalised and with offsets where the word was found, then the
+        synset examples moved here (pass 6); Counts stay last, as the DTD
+        wants.
         """
         sid = sense.get('id')
         info = self.senses.get(sid)
         if info is None or info.survivor != sid:
             return False
-        children = list(sense)
-        inner, last = self._tails(children)
-        own_examples = [c for c in children if c.tag == 'Example']
-        for child in children:
+        own_examples = [c for c in sense if c.tag == 'Example']
+        for child in list(sense):
             if child.tag in ('SenseRelation', 'Example'):
                 sense.remove(child)
         extras = self.extra_sense_children.get(sid, ())
-        for _dup, child in extras:
-            if child.tag not in ('SenseRelation', 'Example'):
-                child.tail = inner
-                sense.append(child)
-        counts = [c for c in sense if c.tag == 'Count']
-        anchor = counts[0] if counts else None
-        pieces = [self._relation_element('SenseRelation', rel_type, tgt, attrs)
+        sense.extend(child for _dup, child in extras if child.tag not in ('SenseRelation', 'Example'))
+        pieces = [relation_element('SenseRelation', rel_type, tgt, attrs=attrs)
                   for (_resolved, tgt), (rel_type, attrs)
                   in self.final_sense_rels.get(sid, {}).items()]
         pieces += self._sense_examples(sid, own_examples)
@@ -1024,88 +935,70 @@ class LmfCleaner:
             pieces += self._sense_examples(
                 dup, [child for d, child in extras if d == dup and child.tag == 'Example'])
         for text, a, b in self.moved_examples.get(sid, ()):
-            ex = etree.Element('Example')
-            ex.text = text
-            self._append_note(ex, 'offsets', f'{a},{b}')
-            pieces.append(ex)
-        if len(sense) and anchor is None:
-            sense[-1].tail = inner
-        self._place(sense, pieces, anchor, inner, last)
+            example = etree.Element('Example')
+            example.text = text
+            set_note_key(example, 'offsets', format_offsets([(a, b)]))
+            pieces.append(example)
+        counts = [c for c in sense if c.tag == 'Count']
+        for piece in pieces:
+            if counts:
+                counts[0].addprevious(piece)
+            else:
+                sense.append(piece)
         return True
 
     def _sense_examples(self, owner: str, examples: list[etree._Element]
                         ) -> list[etree._Element]:
         """A sense's own Example elements, normalised, blank ones gone, with
         offsets where pass 6 found the word (keyed as pass A numbered them)."""
-        out = []
-        kept = [ex for ex in examples if normalise_text(ex.text)]
-        for n, ex in enumerate(kept):
-            ex.text = normalise_text(ex.text)
+        kept = [(ex, normalise_text(ex.text)) for ex in examples]
+        kept = [(ex, text) for ex, text in kept if text]
+        for n, (example, text) in enumerate(kept):
+            example.text = text
             span = self.sense_offsets.get((owner, n))
             if span:
-                self._append_note(ex, 'offsets', f'{span[0]},{span[1]}')
-            out.append(ex)
-        return out
+                set_note_key(example, 'offsets', format_offsets([span]))
+        return [example for example, _text in kept]
 
-    def _relation_element(self, tag: str, rel_type: str, target: str,
-                          attrs: dict[str, str]) -> etree._Element:
-        rel = etree.Element(tag, nsmap={'dc': self.dc_ns})
-        rel.set('relType', rel_type)
-        rel.set('target', target)
-        for key, value in attrs.items():
-            rel.set(key, value)
-        return rel
-
-    def _rewrite_synset(self, elem: etree._Element, lexicon: dict) -> str | None:
+    def _rewrite_synset(self, elem: etree._Element) -> str | None:
         sid = elem.get('id')
         info = self.synsets.get(sid)
         if info is None or not info.kept:
             return None
-        elem.set('ili', info.new_ili)
-        if info.pos or info.new_pos:
-            elem.set('partOfSpeech', info.new_pos)
+        elem.set('ili', info.ili)
+        elem.set('partOfSpeech', info.pos)
         for definition in list(elem.iterchildren('Definition')):
             text = normalise_text(definition.text)
             if below_confidence_threshold(definition) or not text:
                 elem.remove(definition)
                 continue
             definition.text = text
-            definition.set('language', fix_language(definition.get('language')) or lexicon['language'])
+            definition.set('language', fix_language(definition.get('language')) or info.language)
         for ili_def in list(elem.iterchildren('ILIDefinition')):
             # an ILIDefinition proposes a definition for a *new* ILI; one on a
             # synset that has an ILI is spurious (wn's W304)
-            if info.new_ili not in ('', 'in'):
+            if info.ili not in ('', 'in'):
                 elem.remove(ili_def)
             elif ili_def.text:
                 ili_def.text = normalise_text(ili_def.text)
-        members = elem.get('members')
-        if members:
-            kept = [self._sense_target(m) for m in members.split()]
-            elem.set('members', ' '.join(dict.fromkeys(m for m in kept if m)))
-        inner, last = self._tails(list(elem))
-        examples = list(elem.iterchildren('Example'))
+        if elem.get('members'):
+            kept = dict.fromkeys(m for m in map(self._sense_target, elem.get('members').split()) if m)
+            elem.set('members', ' '.join(kept))
         for rel in list(elem.iterchildren('SynsetRelation')):
             elem.remove(rel)
-        n = 0
-        for ex in examples:
-            text = normalise_text(ex.text)
+        for n, example in enumerate(list(elem.iterchildren('Example'))):
+            text = normalise_text(example.text)
             if not text or (sid, n) in self.moved_from_synset:
-                elem.remove(ex)
+                elem.remove(example)
             else:
-                ex.text = text
-            n += 1
+                example.text = text
         remaining = [c for c in elem if c.tag == 'Example']
-        anchor = remaining[0] if remaining else None
-        pieces = [self._relation_element('SynsetRelation', rel_type, tgt, attrs)
-                  for (_resolved, tgt), (rel_type, attrs)
-                  in self.final_synset_rels.get(sid, {}).items()]
-        if len(elem):
-            for child in elem[:-1]:
-                child.tail = inner
-            elem[-1].tail = last
-        if anchor is None and len(elem):
-            elem[-1].tail = inner
-        self._place(elem, pieces, anchor, inner, last)
+        for (_resolved, tgt), (rel_type, attrs) in self.final_synset_rels.get(sid, {}).items():
+            rel = relation_element('SynsetRelation', rel_type, tgt, attrs=attrs)
+            if remaining:
+                remaining[0].addprevious(rel)
+            else:
+                elem.append(rel)
         return self._serialize(elem)
 
 
@@ -1151,12 +1044,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     parser.add_argument('source', type=Path)
     parser.add_argument('--cili', type=Path, default=Path('bin/cili.tsv'))
-    parser.add_argument('--out-dir', type=Path, default=Path('bin/lmf_presynth'))
+    parser.add_argument('--out-dir', type=Path, default=Path('bin/cygnets_presynth'))
     parser.add_argument('--language', help='language code to write instead of the source\'s')
     parser.add_argument('--validate', action='store_true', help='check the output with wn')
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format='%(message)s', stream=sys.stdout)
-    cleaner = LmfCleaner(args.source, CiliIndex.from_file(args.cili),
+    cleaner = LmfCleaner(args.source, CiliIndex.from_tsv(args.cili),
                          CleanOptions(language=args.language))
     result = cleaner.clean(args.out_dir)
     print(f'{result.output} ({"changed" if result.changed else "unchanged"}), log {result.log}')

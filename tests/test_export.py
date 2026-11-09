@@ -9,11 +9,12 @@ import pytest
 from conftest import build_test_db
 from lxml import etree
 
-from cyg.export import DC_NS, LmfExporter, load_provenance, source_tokens, validate_dtd
+from cyg.export import DTD_PATH, LmfExporter, source_tokens, validate_dtd
+from cyg.lmf import DC_NS
 
 _ROOT = Path(__file__).parent.parent
 _WORDNETS_DIR = Path(__file__).parent / 'wordnets'
-_DTD = _ROOT / 'cyg' / 'WN-LMF-1.4.dtd'
+_DTD = DTD_PATH
 DC = f'{{{DC_NS}}}'
 
 
@@ -33,13 +34,9 @@ def exported(tmp_path_factory):
     db_path, prov_path = build_dir / 'cygnet.db', build_dir / 'provenance.db'
     build_test_db(db_path, prov_path, [_WORDNETS_DIR / 'wn-en.xml', _WORDNETS_DIR / 'wn-fr.xml',
                                        _WORDNETS_DIR / 'lmf-xx.xml'])
-    prov_conn = sqlite3.connect(str(prov_path))
-    prov = load_provenance(prov_conn)
-    prov_conn.close()
     conn = sqlite3.connect(str(db_path))
     full, small = build_dir / 'cygnet.xml', build_dir / 'cygnet_small.xml'
-    LmfExporter(conn, prov).write(full)
-    LmfExporter(conn, None).write(small)
+    LmfExporter(conn, prov_path).write(full, small)
     return full, small, conn
 
 

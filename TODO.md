@@ -11,7 +11,9 @@ and the web UI read only SQLite, so neither changes.
 
 Status (2026-11-09): steps 1–6 done on the `lmf-intermediate` branch;
 `build.sh` runs the WN-LMF path only, the converter and `cygnet.xsd` are
-gone.  Step 7 (docs) remains.  The full-corpus comparison that preceded
+gone; a /simplify round followed (shared LMF helpers in `cyg/lmf.py`,
+one-pass export of both variants, dead Cygnet-format readers removed).
+Step 7 (docs) remains.  The full-corpus comparison that preceded
 the switch is in "Behaviour changes" below.  Supersedes the 2026-10-11
 plan.  Decisions taken on 2026-11-09:
 

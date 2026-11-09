@@ -29,12 +29,19 @@ from collections import defaultdict
 
 from lxml import etree
 
-from cyg.lmf import DTD_SENSE_RELATION_TYPES, DTD_SYNSET_RELATION_TYPES, pos_code
+from cyg.lmf import (
+    DC_NS,
+    DOCTYPE,
+    DTD_SENSE_RELATION_TYPES,
+    DTD_SYNSET_RELATION_TYPES,
+    XML_DECL,
+    format_offsets,
+    pos_code,
+    relation_element,
+    set_note_key,
+)
 
-DC_NS = 'https://globalwordnet.github.io/schemas/dc/'
-DC = f'{{{DC_NS}}}'
-HEADER = ('<?xml version="1.0" encoding="UTF-8"?>\n'
-          '<!DOCTYPE LexicalResource SYSTEM "https://globalwordnet.github.io/schemas/WN-LMF-1.4.dtd">\n')
+HEADER = f'{XML_DECL}\n{DOCTYPE}\n'
 
 
 def _original_id(elem: etree._Element, fallback: str) -> str:
@@ -43,18 +50,8 @@ def _original_id(elem: etree._Element, fallback: str) -> str:
 
 
 def _relation(tag: str, elem: etree._Element, target: str, allowed: frozenset) -> etree._Element:
-    rel_type = elem.get('relation_type', '')
-    rel = etree.Element(tag, target=target)
-    if rel_type in allowed:
-        rel.set('relType', rel_type)
-        if elem.get('subtype'):
-            rel.set(f'{DC}type', elem.get('subtype'))
-    else:
-        rel.set('relType', 'other')
-        rel.set(f'{DC}type', elem.get('subtype') or rel_type)
-    if elem.get('subtype_label'):
-        rel.set(f'{DC}description', elem.get('subtype_label'))
-    return rel
+    return relation_element(tag, elem.get('relation_type', ''), target, elem.get('subtype'),
+                            elem.get('subtype_label'), allowed)
 
 
 def cygnet_to_lmf(text: str) -> str:
@@ -99,7 +96,7 @@ def cygnet_to_lmf(text: str) -> str:
         definition = etree.SubElement(synset, 'Definition', language=gloss.get('language', language))
         definition.text = ''.join(sentence.itertext()) if sentence is not None else ''
         if gloss.get('translated_from'):
-            definition.set('note', f"translated_from={gloss.get('translated_from')}")
+            set_note_key(definition, 'translated_from', gloss.get('translated_from'))
     for rel in root.iter('ConceptRelation'):
         source, target = synsets.get(rel.get('source')), synset_ids.get(rel.get('target'))
         if source is not None and target:
@@ -159,7 +156,7 @@ def cygnet_to_lmf(text: str) -> str:
         owner, start, end = spans[0]
         ex = etree.SubElement(senses[owner], 'Example')
         ex.text = ''.join(text_parts)
-        ex.set('note', f'offsets={start},{end}')
+        set_note_key(ex, 'offsets', format_offsets([(start, end)]))
 
     # Lexicons: the resource's language first, other languages after it.
     by_language: dict[str, list[etree._Element]] = defaultdict(list)

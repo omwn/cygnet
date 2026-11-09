@@ -1,10 +1,10 @@
-"""What both sides of the pipeline know about WN-LMF.
+"""What every side of the pipeline knows about WN-LMF.
 
-The relation-type tables, the confidence threshold and the
-relation-direction swap config are needed by the per-source cleaning
-step (``cyg.clean``) and by the merge (``cyg.merge``) alike, and
-by the exporter; they live here so that neither imports the other for
-them.  See TODO.md, "Replace the Cygnet XML schema with GWA WN-LMF".
+The header a file needs, how to stream one, the relation-type tables,
+the confidence threshold, the relation-direction swap config and the
+``note`` conventions are shared by the cleaner (``cyg.clean``), the merge
+(``cyg.merge``), the exporter (``cyg.export``) and the scripts; they live
+here so that none of those imports another for them.
 """
 
 from __future__ import annotations
@@ -15,71 +15,122 @@ from pathlib import Path
 
 from lxml import etree
 
-from cyg.multilex import dc_attr, encode_for_xml_id, fix_language
+from cyg.multilex import DC_NAMESPACES, dc_attr, encode_for_xml_id, open_xml
 
-__all__ = [
-    'CONCEPT_FORWARD_OF_INVERSE',
-    'CONCEPT_INVERSE_ONLY_TYPES',
-    'CONCEPT_REVERSE_RELATIONS',
-    'CONCEPT_SYMMETRIC_TYPES',
-    'CONFIDENCE_THRESHOLD',
-    'DIRECTION_SWAP_CONFIG_FILENAME',
-    'DTD_SENSE_RELATION_TYPES',
-    'DTD_SYNSET_RELATION_TYPES',
-    'INVERSE_CONCEPT_RELATIONS',
-    'INVERSE_SENSE_RELATIONS',
-    'POS_CODES',
-    'POS_LABELS',
-    'SENSE_FORWARD_OF_INVERSE',
-    'SENSE_INVERSE_ONLY_TYPES',
-    'SENSE_REVERSE_RELATIONS',
-    'SENSE_SYMMETRIC_TYPES',
-    'below_confidence_threshold',
-    'canonical_relation',
-    'entry_written_forms',
-    'fix_language',
-    'forward_of_inverse',
-    'inverse_only_types',
-    'is_forward_relation',
-    'lexeme_id',
-    'load_direction_swap_config',
-    'note_offsets',
-    'parse_note',
-    'pos_code',
-    'pos_label',
-    'relation_subtype',
-    'relation_type',
-    'shorten_uri',
-    'symmetric_types',
-]
+# ----------------------------------------------------------------- files
+
+XML_DECL = '<?xml version="1.0" encoding="UTF-8"?>'
+DTD_URL = 'https://globalwordnet.github.io/schemas/WN-LMF-1.4.dtd'
+DOCTYPE = f'<!DOCTYPE LexicalResource SYSTEM "{DTD_URL}">'
+DC_NS = DC_NAMESPACES[0]
+DC = f'{{{DC_NS}}}'
+LEXICON_TAGS = ('Lexicon', 'LexiconExtension')
+# lxml options for reading a source we do not trust and must not fetch for.
+PARSER_OPTIONS = {'load_dtd': False, 'no_network': True, 'resolve_entities': False}
+
+
+def collapse_whitespace(text: str | None) -> str:
+    """*text* with runs of whitespace collapsed to one space and the ends
+    stripped ('' for None)."""
+    return ' '.join((text or '').split())
+
+
+def iter_lmf(path: Path | str, tags: tuple[str, ...], events: tuple[str, ...] = ('start', 'end')):
+    """Stream the elements of a WN-LMF file with the memory of one at a time.
+
+    Yields lxml's (event, element) pairs for *tags*.  After an 'end' event
+    for a top-level child of a Lexicon (or the Lexicon itself), the element
+    is cleared and its earlier siblings dropped, so a file of any size costs
+    one element's worth of memory; nested matches (a SyntacticBehaviour
+    inside a LexicalEntry, say) are left for their parent.
+
+    Args:
+        path: The file (.xml, .xml.gz or .xml.xz).
+        tags: Element names to report.
+        events: 'start', 'end' or both.
+
+    Yields:
+        (event, element).
+    """
+    for event, elem in etree.iterparse(open_xml(path), events=events, tag=tags, **PARSER_OPTIONS):
+        yield event, elem
+        if event != 'end':
+            continue
+        parent = elem.getparent()
+        if parent is None or parent.tag in LEXICON_TAGS or parent.getparent() is None:
+            elem.clear(keep_tail=True)
+            while elem.getprevious() is not None:
+                del parent[0]
+
+
+def serialize(elem: etree._Element, indent: str = '    ') -> str:
+    """One element as a line of a file whose root already declares the dc
+    namespace: the declaration lxml adds to a detached element is removed.
+
+    Args:
+        elem: The element.
+        indent: Put before the element.
+
+    Returns:
+        The XML text, ending in a newline.
+    """
+    text = etree.tostring(elem, encoding='unicode').replace(f' xmlns:dc="{DC_NS}"', '', 1)
+    return indent + text.strip() + '\n'
+
+
+def start_tag(elem: etree._Element, indent: str = '  ') -> str:
+    """The start tag of an element with no children, from its attributes.
+
+    Args:
+        elem: A childless element (a Lexicon header).
+        indent: Put before the tag.
+
+    Returns:
+        '<Lexicon ...>' and a newline.
+    """
+    text = serialize(elem, indent).rstrip('\n')
+    return text[:-2] + '>\n'
+
+
+def relation_element(tag: str, rel_type: str, target: str, subtype: str | None = None,
+                     label: str | None = None, allowed: frozenset[str] | None = None,
+                     attrs: dict[str, str] | None = None) -> etree._Element:
+    """A SynsetRelation or SenseRelation element.
+
+    Args:
+        tag: 'SynsetRelation' or 'SenseRelation'.
+        rel_type: The relation type.
+        target: The target id.
+        subtype: A finer sub-relation code, written as dc:type.
+        label: Its label, written as dc:description.
+        allowed: The DTD's relType values; a type outside them is written
+            as relType="other" with the type in dc:type.  None writes
+            *rel_type* as given.
+        attrs: Further attributes, as written.
+
+    Returns:
+        The element.
+    """
+    rel = etree.Element(tag, nsmap={'dc': DC_NS})
+    if allowed is not None and rel_type not in allowed:
+        rel.set('relType', 'other')
+        rel.set(f'{DC}type', subtype or rel_type)
+    else:
+        rel.set('relType', rel_type)
+        if subtype:
+            rel.set(f'{DC}type', subtype)
+    rel.set('target', target)
+    if label:
+        rel.set(f'{DC}description', label)
+    for key, value in (attrs or {}).items():
+        rel.set(key, value)
+    return rel
+
 
 # The relType values the WN-LMF 1.4 DTD allows; any other type is written
 # as relType="other" with the type in dc:type (see relation_type()).
-DTD_SYNSET_RELATION_TYPES = frozenset("""
-agent also attribute be_in_state causes classified_by classifies co_agent_instrument
-co_agent_patient co_agent_result co_instrument_agent co_instrument_patient
-co_instrument_result co_patient_agent co_patient_instrument co_result_agent
-co_result_instrument co_role direction domain_region domain_topic exemplifies entails
-eq_synonym has_domain_region has_domain_topic is_exemplified_by holo_location holo_member
-holo_part holo_portion holo_substance holonym hypernym hyponym in_manner instance_hypernym
-instance_hyponym instrument involved involved_agent involved_direction involved_instrument
-involved_location involved_patient involved_result involved_source_direction
-involved_target_direction is_caused_by is_entailed_by location manner_of mero_location
-mero_member mero_part mero_portion mero_substance meronym similar other patient
-restricted_by restricts result role source_direction state_of target_direction subevent
-is_subevent_of antonym feminine has_feminine masculine has_masculine young has_young
-diminutive has_diminutive augmentative has_augmentative anto_gradable anto_simple
-anto_converse ir_synonym
-""".split())
-DTD_SENSE_RELATION_TYPES = frozenset("""
-antonym also participle pertainym derivation domain_topic has_domain_topic domain_region
-has_domain_region exemplifies is_exemplified_by similar other simple_aspect_ip
-secondary_aspect_ip simple_aspect_pi secondary_aspect_pi feminine has_feminine masculine
-has_masculine young has_young diminutive has_diminutive augmentative has_augmentative
-anto_gradable anto_simple anto_converse metaphor has_metaphor metonym has_metonym agent
-material event instrument location by_means_of undergoer property result state uses
-destination body_part vehicle
-""".split())
+DTD_SYNSET_RELATION_TYPES = frozenset(["agent", "also", "attribute", "be_in_state", "causes", "classified_by", "classifies", "co_agent_instrument", "co_agent_patient", "co_agent_result", "co_instrument_agent", "co_instrument_patient", "co_instrument_result", "co_patient_agent", "co_patient_instrument", "co_result_agent", "co_result_instrument", "co_role", "direction", "domain_region", "domain_topic", "exemplifies", "entails", "eq_synonym", "has_domain_region", "has_domain_topic", "is_exemplified_by", "holo_location", "holo_member", "holo_part", "holo_portion", "holo_substance", "holonym", "hypernym", "hyponym", "in_manner", "instance_hypernym", "instance_hyponym", "instrument", "involved", "involved_agent", "involved_direction", "involved_instrument", "involved_location", "involved_patient", "involved_result", "involved_source_direction", "involved_target_direction", "is_caused_by", "is_entailed_by", "location", "manner_of", "mero_location", "mero_member", "mero_part", "mero_portion", "mero_substance", "meronym", "similar", "other", "patient", "restricted_by", "restricts", "result", "role", "source_direction", "state_of", "target_direction", "subevent", "is_subevent_of", "antonym", "feminine", "has_feminine", "masculine", "has_masculine", "young", "has_young", "diminutive", "has_diminutive", "augmentative", "has_augmentative", "anto_gradable", "anto_simple", "anto_converse", "ir_synonym"])
+DTD_SENSE_RELATION_TYPES = frozenset(["antonym", "also", "participle", "pertainym", "derivation", "domain_topic", "has_domain_topic", "domain_region", "has_domain_region", "exemplifies", "is_exemplified_by", "similar", "other", "simple_aspect_ip", "secondary_aspect_ip", "simple_aspect_pi", "secondary_aspect_pi", "feminine", "has_feminine", "masculine", "has_masculine", "young", "has_young", "diminutive", "has_diminutive", "augmentative", "has_augmentative", "anto_gradable", "anto_simple", "anto_converse", "metaphor", "has_metaphor", "metonym", "has_metonym", "agent", "material", "event", "instrument", "location", "by_means_of", "undergoer", "property", "result", "state", "uses", "destination", "body_part", "vehicle"])
 
 # WN-LMF partOfSpeech code -> the label the database stores.  's' (adjective
 # satellite) is an adjective; anything else unknown is 'u'.
@@ -246,6 +297,26 @@ def parse_note(note: str | None) -> dict[str, str]:
         if sep and key and key not in pairs:
             pairs[key] = value.strip()
     return pairs
+
+
+def set_note_key(elem: etree._Element, key: str, value: str) -> None:
+    """Set key=value in an element's note, after the source's own notes and
+    replacing an earlier value of the same key (see parse_note()).
+
+    Args:
+        elem: The element.
+        key: The key ('offsets', 'merged', 'translated_from').
+        value: Its value, without ';'.
+    """
+    parts = [p.strip() for p in (elem.get('note') or '').split(';')
+             if p.strip() and not p.strip().startswith(f'{key}=')]
+    parts.append(f'{key}={value}')
+    elem.set('note', ';'.join(parts))
+
+
+def format_offsets(spans) -> str:
+    """The value of an 'offsets' note: 'start,end' pairs separated by spaces."""
+    return ' '.join(f'{start},{end}' for start, end in spans)
 
 
 def note_offsets(note: str | None, text: str) -> list[tuple[int, int]]:
@@ -438,6 +509,10 @@ def symmetric_types(reverse: dict[str, str | None]) -> frozenset[str]:
 
 SENSE_INVERSE_ONLY_TYPES = inverse_only_types(SENSE_REVERSE_RELATIONS)
 CONCEPT_INVERSE_ONLY_TYPES = inverse_only_types(CONCEPT_REVERSE_RELATIONS)
+SENSE_SYMMETRIC_TYPES = symmetric_types(SENSE_REVERSE_RELATIONS)
+CONCEPT_SYMMETRIC_TYPES = symmetric_types(CONCEPT_REVERSE_RELATIONS)
+_INVERSE_ONLY = {id(SENSE_REVERSE_RELATIONS): SENSE_INVERSE_ONLY_TYPES,
+                 id(CONCEPT_REVERSE_RELATIONS): CONCEPT_INVERSE_ONLY_TYPES}
 
 
 def forward_of_inverse(reverse: dict[str, str | None]) -> dict[str, str]:
@@ -476,10 +551,6 @@ def canonical_relation(
     if forward is None:
         return rel_type, source, target
     return forward, target, source
-SENSE_SYMMETRIC_TYPES = symmetric_types(SENSE_REVERSE_RELATIONS)
-CONCEPT_SYMMETRIC_TYPES = symmetric_types(CONCEPT_REVERSE_RELATIONS)
-
-
 def is_forward_relation(
     rel_type: str, source, target, reverse: dict[str, str | None],
 ) -> bool:
@@ -504,15 +575,16 @@ def is_forward_relation(
     """
     inv = reverse.get(rel_type)
     if inv is None:
-        return rel_type not in inverse_only_types(reverse)
+        only = _INVERSE_ONLY.get(id(reverse))
+        return rel_type not in (only if only is not None else inverse_only_types(reverse))
     if inv == rel_type:
         return source < target
     return True
 
 
-# Default location of the direction-swap config written by
-# scripts/check_all_relation_directions.py --write-swap-config, read by
-# WordNetToCygnetConverter when its caller doesn't pass an explicit config.
+# Default name of the direction-swap config written by
+# scripts/check_all_relation_directions.py --write-swap-config, read by the
+# cleaner from beside the CILI file.
 DIRECTION_SWAP_CONFIG_FILENAME = 'relation_direction_swaps.json'
 
 
@@ -567,14 +639,10 @@ def load_direction_swap_config(
     return swap_sets, stats
 
 
-# A source's own confidenceScore on a Synset/Sense/Relation (0-1, defaults to
-# 1.0 when unset -- most sources never set it) below this is dropped. A
-# simple hard cutoff, not configurable per resource/UI yet: some sources
-# (e.g. Estonian wordnet) put it on nearly every synset with real variance
-# (0.5 vs 1.0), others barely use it or only ever report 1.0. Revisit once/if
-# cygnet moves to an LMF-based intermediate format that can carry per-row
-# confidence through to the DB for a client-side filter instead (see
-# TODO.md's "Replace the Cygnet XML schema with GWA WN-LMF").
+# A source's own confidenceScore on a Synset, Sense, Definition or relation
+# (0-1, 1.0 when unset -- most sources never set it) below this is dropped
+# by the cleaner.  A plain cutoff: Estonian puts it on nearly every synset
+# with real variance (0.5 vs 1.0), most others only ever report 1.0.
 CONFIDENCE_THRESHOLD = 0.6
 
 

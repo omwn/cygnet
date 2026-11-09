@@ -112,7 +112,7 @@ class TestLmfReadingHelpers:
         assert lmf.entry_written_forms(entry) == ['zebra', 'Zebra', 'zebras']
         assert lmf.entry_written_forms(etree.fromstring('<LexicalEntry id="e"/>')) == []
 
-    def test_lexeme_id_matches_the_converter_scheme(self):
+    def test_lexeme_id_scheme(self):
         assert lmf.lexeme_id('en', 'NOUN', ['dog', 'dogs']) == 'en.NOUN.dog-dogs'
 
     def test_relation_type_and_subtype(self):

@@ -3,6 +3,8 @@
 import csv
 from pathlib import Path
 
+from cygnet_fixtures import cygnet_to_lmf
+
 from cyg.mtg import MTG_TSV_COLUMNS, glosses_to_translate, write_mtg_tsv
 
 _WORDNETS = Path(__file__).parent / 'wordnets'
@@ -17,17 +19,16 @@ class TestGlossesToTranslate:
         assert glosses == [{'definition': 'paikallinen käsite', 'definiendum_id': 'lmf-xx.xx-ghost',
                             'language': 'xx'}]
 
-    def test_cygnet_xml_still_read(self, tmp_path):
-        (tmp_path / 'wn-zz-1.0.xml').write_text(
+    def test_definition_language_defaults_to_the_lexicon(self, tmp_path):
+        (tmp_path / 'wn-zz-1.0.xml').write_text(cygnet_to_lmf(
             '<CygnetResource id="wn-zz" language="zz" version="1.0">'
-            '<ConceptLayer><Concept id="wn-zz.i1" ontological_category="NOUN"/></ConceptLayer>'
-            '<GlossLayer>'
+            '<Concept id="wn-zz.i1" ontological_category="NOUN"/>'
             '<Gloss definiendum="wn-zz.i1" language="zz"><AnnotatedSentence>un  chien</AnnotatedSentence></Gloss>'
             '<Gloss definiendum="wn-zz.i1" language="en"><AnnotatedSentence>a dog</AnnotatedSentence></Gloss>'
             '<Gloss definiendum="cili.i3" language="zz"><AnnotatedSentence>chien</AnnotatedSentence></Gloss>'
-            '</GlossLayer></CygnetResource>', encoding='utf-8')
+            '</CygnetResource>'), encoding='utf-8')
         assert glosses_to_translate(tmp_path) == [
-            {'definition': 'un  chien', 'definiendum_id': 'wn-zz.i1', 'language': 'zz'}]
+            {'definition': 'un chien', 'definiendum_id': 'wn-zz.wn-zz.i1', 'language': 'zz'}]
 
 
 class TestWriteMtgTsv:

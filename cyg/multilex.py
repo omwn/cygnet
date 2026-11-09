@@ -42,11 +42,11 @@ class SharedConcepts:
     """Concept identity shared across the lexicons of one release.
 
     Attributes:
-        concepts: dc:identifier -> (ILI or None, local concept id)
+        concepts: dc:identifier -> ILI, or None when the concept has none
         role: 'concepts' for the mul lexicon, 'member' for a language lexicon
     """
 
-    concepts: dict[str, tuple[str | None, str]]
+    concepts: dict[str, str | None]
     role: str
 
 
@@ -143,8 +143,7 @@ def url_stem(url: str) -> str:
         if name.endswith(ext):
             name = name[: -len(ext)]
             break
-    if name.endswith(".xml"):
-        name = name[:-4]
+    name = name.removesuffix(".xml")
     return re.sub(r"[-_]\d[\d.]*$", "", name)
 
 
@@ -217,37 +216,29 @@ def encode_for_xml_id(text: str) -> str:
     Returns:
         The encoded string
     """
+    if text.isascii() and text.isalnum():
+        return text
     return "".join(
         c if c.isascii() and c.isalnum() else f"x{ord(c):04X}" for c in text
     )
 
 
-def build_concept_map(path: Path) -> dict[str, tuple[str | None, str]]:
-    """Map each concept's dc:identifier to its ILI and a stable local id.
-
-    The local id is '<lexicon id>.<synset id without the lexicon prefix>',
-    encoded, e.g. synset kindiv-Fa-Br-So -> 'kindiv.Fax002DBrx002DSo'.
+def build_concept_map(path: Path) -> dict[str, str | None]:
+    """Map each concept's dc:identifier to its ILI.
 
     Args:
         path: The concepts (language="mul") lexicon file
 
     Returns:
-        dc:identifier -> (ILI, or None for '' and 'in'; local concept id)
+        dc:identifier -> ILI, or None for '' and 'in'
     """
     with open_xml(path) as f:
         root = etree.parse(f).getroot()
     lexicon = next(e for e in root.iter() if etree.QName(e).localname == "Lexicon")
-    lex_id = lexicon.get("id")
-    concepts: dict[str, tuple[str | None, str]] = {}
+    concepts: dict[str, str | None] = {}
     for synset in lexicon.iter("Synset"):
         ident = dc_identifier(synset)
-        if ident is None:
-            continue
-        ili = synset.get("ili", "")
-        synset_id = synset.get("id")
-        local = synset_id.removeprefix(f"{lex_id}-")
-        concepts[ident] = (
-            ili if ili not in ("", "in") else None,
-            f"{lex_id}.{encode_for_xml_id(local)}",
-        )
+        if ident is not None:
+            ili = synset.get("ili", "")
+            concepts[ident] = ili if ili not in ("", "in") else None
     return concepts

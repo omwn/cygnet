@@ -15,28 +15,28 @@ import subprocess
 import sys
 from pathlib import Path
 
-from cyg.export import LmfExporter, load_provenance, validate_dtd
-
-DTD_PATH = Path(__file__).resolve().parent.parent / 'cyg' / 'WN-LMF-1.4.dtd'
+from cyg.export import DTD_PATH, LmfExporter, validate_dtd
 
 
-def _lexicon_chunks(xml_path: Path):
-    """Yield (lexicon id, lines) for each Lexicon of an exported file, which
-    cyg.export writes one top-level element per line group, Lexicon start
-    and end tags at two spaces' indentation."""
-    chunk: list[str] = []
-    lid = None
+def _write_lexicon_parts(xml_path: Path, header: str):
+    """Yield (lexicon id, part file) for each Lexicon of an exported file,
+    each part a document of its own, streamed line by line.  cyg.export
+    writes Lexicon start and end tags at two spaces' indentation, one
+    element per line group."""
+    part = lid = None
     with open(xml_path, encoding='utf-8') as f:
         for line in f:
             if line.startswith('  <Lexicon '):
-                chunk = [line]
                 lid = line.split('id="', 1)[1].split('"', 1)[0]
-            elif line.startswith('  </Lexicon>'):
-                chunk.append(line)
-                yield lid, chunk
-                chunk = []
-            elif chunk:
-                chunk.append(line)
+                part = open(xml_path.with_name(f'{xml_path.stem}.{lid}.part.xml'), 'w', encoding='utf-8')
+                part.write(header)
+            if part is not None:
+                part.write(line)
+            if line.startswith('  </Lexicon>') and part is not None:
+                part.write('</LexicalResource>\n')
+                part.close()
+                yield lid, Path(part.name)
+                part = None
 
 
 def validate(xml_path: Path, dtd_path: Path = DTD_PATH) -> bool:
@@ -61,13 +61,8 @@ def validate(xml_path: Path, dtd_path: Path = DTD_PATH) -> bool:
               f'<LexicalResource xmlns:dc="https://globalwordnet.github.io/schemas/dc/">\n')
     ok = True
     n = 0
-    for lid, lines in _lexicon_chunks(xml_path):
+    for lid, part in _write_lexicon_parts(xml_path, header):
         n += 1
-        part = xml_path.with_name(f'{xml_path.stem}.{lid}.part.xml')
-        with open(part, 'w', encoding='utf-8') as out:
-            out.write(header)
-            out.writelines(lines)
-            out.write('</LexicalResource>\n')
         try:
             if shutil.which('xmlstarlet'):
                 result = subprocess.run(
@@ -84,6 +79,9 @@ def validate(xml_path: Path, dtd_path: Path = DTD_PATH) -> bool:
             print(f'  INVALID lexicon {lid}:')
             for line in problems:
                 print(f'    {line}')
+    if n == 0:
+        ok = False
+        print(f'  INVALID: {xml_path.name} has no Lexicon the validator could cut out')
     print(f'  {"valid" if ok else "INVALID"}: {xml_path.name} ({n} lexicons checked)')
     return ok
 
@@ -102,22 +100,14 @@ def main() -> None:
         print(f'Error: {db_path} not found', file=sys.stderr)
         sys.exit(1)
 
-    print('Loading provenance...')
-    prov_conn = sqlite3.connect(str(prov_db_path))
-    prov = load_provenance(prov_conn)
-    prov_conn.close()
-    print(f'  {sum(len(v) for v in prov.values()):,} provenance rows')
-
     conn = sqlite3.connect(str(db_path))
-    outputs = []
-    for name, with_prov in (('cygnet.xml', True), ('cygnet_small.xml', False)):
-        path = args.out_dir / name
-        print(f'\nWriting {path}...')
-        counts = LmfExporter(conn, prov if with_prov else None).write(path)
-        print('  ' + ', '.join(f'{v:,} {k}' for k, v in counts.items())
-              + f' ({path.stat().st_size / 1e6:.1f} MB)')
-        outputs.append(path)
+    full, small = args.out_dir / 'cygnet.xml', args.out_dir / 'cygnet_small.xml'
+    print(f'Writing {full} and {small}...')
+    counts = LmfExporter(conn, prov_db_path if prov_db_path.exists() else None).write(full, small)
     conn.close()
+    print('  ' + ', '.join(f'{v:,} {k}' for k, v in counts.items())
+          + f' ({full.stat().st_size / 1e6:.1f} MB and {small.stat().st_size / 1e6:.1f} MB)')
+    outputs = [full, small]
 
     print('\nValidating against the WN-LMF 1.4 DTD...')
     results = [validate(path) for path in outputs]   # validate both, then judge

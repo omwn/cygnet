@@ -21,9 +21,12 @@ from cyg.lmf import (
     CONCEPT_FORWARD_OF_INVERSE,
     INVERSE_CONCEPT_RELATIONS,
     INVERSE_SENSE_RELATIONS,
+    LEXICON_TAGS,
+    PARSER_OPTIONS,
     SENSE_FORWARD_OF_INVERSE,
     canonical_relation,
     entry_written_forms,
+    iter_lmf,
     lexeme_id,
     note_offsets,
     parse_note,
@@ -377,82 +380,72 @@ def root_tag(xml_file: Path) -> str | None:
         The tag, or None for an empty file.
     """
     with open_xml(xml_file) as f:
-        for _event, elem in ET.iterparse(f, events=('start',), load_dtd=False,
-                                         no_network=True, resolve_entities=False):
+        for _event, elem in ET.iterparse(f, events=('start',), **PARSER_OPTIONS):
             return ET.QName(elem).localname
     return None
 
 
-# Lexicons whose original sense ids other sidecars refer to (the GlossTag
-# annotations of CILI definitions name OEWN senses).
-ENGLISH_BASE_IDS = frozenset({'oewn', 'omw-en'})
+def synset_concept_id(elem: ET._Element, lexicon: str, concepts_owner: str | None) -> str:
+    """The concept a Synset names.
+
+    Its ILI names it ('cili.<ili>'); without one it is a local concept
+    '<lexicon id>.<synset id>', except in a multi-lexicon release, where
+    the concepts lexicon (language "mul") and the members that Require it
+    share a concept per dc:identifier: '<concepts lexicon>.<identifier>'.
+
+    Args:
+        elem: The Synset.
+        lexicon: Its lexicon's id.
+        concepts_owner: The lexicon whose dc:identifiers key the release's
+            concepts (itself for a "mul" lexicon, the required lexicon for a
+            member), or None.
+
+    Returns:
+        The concept id.
+    """
+    ili = elem.get('ili')
+    if ili and ili != 'in':
+        return f'cili.{ili}'
+    identifier = dc_identifier(elem) if concepts_owner else None
+    if identifier:
+        return f'{concepts_owner}.{encode_for_xml_id(identifier)}'
+    return f'{lexicon}.{elem.get("id")}'
 
 
-def lmf_concept_index(
-    xml_file: Path, mul_lexicons: set[str] | None = None,
-) -> tuple[list[dict], dict[str, tuple[str, str]]]:
+def lmf_concept_index(xml_file: Path) -> tuple[list[dict], dict[str, tuple[str, str, int]]]:
     """The lexicon headers of a WN-LMF file and the concept each of its
-    synsets names.
-
-    A synset's ILI names its concept ('cili.<ili>'); a synset without one
-    is a local concept '<lexicon id>.<synset id>', except in a
-    multi-lexicon release: the concepts lexicon (language "mul") and the
-    member lexicons that Require it share a concept per dc:identifier,
-    '<concepts lexicon id>.<identifier>'.  The merge and the MT-gloss step
+    synsets names (synset_concept_id()); the merge and the MT-gloss step
     both use this, so their concept ids agree.
+
+    A "mul" lexicon keys its concepts by dc:identifier; a lexicon that
+    Requires another does the same with the required lexicon's id, which
+    only matters for a synset without an ILI that carries a dc:identifier,
+    i.e. a member of a multi-lexicon release.
 
     Args:
         xml_file: The LMF file.
-        mul_lexicons: Ids of concepts lexicons seen so far (a member's
-            Requires must name one of them).
 
     Returns:
-        ([{'id', 'version', 'language', 'attrib', 'concepts_owner'} per
-          lexicon; concepts_owner names the lexicon whose dc:identifiers key
-          the concepts, None outside a mul release],
-         {synset id: (concept id, POS label)}).
+        ([{'id', 'version', 'language', 'attrib'} per lexicon],
+         {synset id: (concept id, POS label, index into the lexicon list)}).
     """
-    mul_lexicons = set(mul_lexicons or ())
     lexicons: list[dict] = []
-    index: dict[str, tuple[str, str]] = {}
-    lexicon = None
+    index: dict[str, tuple[str, str, int]] = {}
     concepts_owner: str | None = None
-    for event, elem in ET.iterparse(
-            open_xml(xml_file), events=('start', 'end'),
-            tag=('Lexicon', 'LexiconExtension', 'Requires', 'Synset'),
-            load_dtd=False, no_network=True, resolve_entities=False):
+    for event, elem in iter_lmf(xml_file, (*LEXICON_TAGS, 'Requires', 'Synset')):
         if event == 'start':
-            if elem.tag in ('Lexicon', 'LexiconExtension'):
-                lexicon = elem.get('id')
-                lexicons.append({'id': lexicon, 'version': elem.get('version'),
-                                 'language': elem.get('language'), 'attrib': dict(elem.attrib),
-                                 'concepts_owner': None})
-                concepts_owner = lexicon if elem.get('language') == 'mul' else None
-                if concepts_owner:
-                    mul_lexicons.add(lexicon)
-                lexicons[-1]['concepts_owner'] = concepts_owner
+            if elem.tag in LEXICON_TAGS:
+                lexicons.append({'id': elem.get('id'), 'version': elem.get('version'),
+                                 'language': elem.get('language'), 'attrib': dict(elem.attrib)})
+                concepts_owner = elem.get('id') if elem.get('language') == 'mul' else None
             continue
         if elem.tag == 'Requires':
-            ref = elem.get('ref')
-            if concepts_owner is None and ref in mul_lexicons:
-                concepts_owner = ref
-                lexicons[-1]['concepts_owner'] = ref
-            continue
-        if elem.tag != 'Synset':
-            continue
-        sid = elem.get('id')
-        ili = elem.get('ili')
-        identifier = dc_identifier(elem) if concepts_owner else None
-        if ili and ili != 'in':
-            cid = f'cili.{ili}'
-        elif identifier:
-            cid = f'{concepts_owner}.{encode_for_xml_id(identifier)}'
-        else:
-            cid = f'{lexicon}.{sid}'
-        index[sid] = (cid, pos_label(elem.get('partOfSpeech')))
-        elem.clear()
-        while elem.getprevious() is not None:
-            del elem.getparent()[0]
+            if concepts_owner is None:
+                concepts_owner = elem.get('ref')
+        elif elem.tag == 'Synset':
+            lexicon = lexicons[-1]['id']
+            index[elem.get('id')] = (synset_concept_id(elem, lexicon, concepts_owner),
+                                     pos_label(elem.get('partOfSpeech')), len(lexicons) - 1)
     return lexicons, index
 
 
@@ -465,8 +458,8 @@ class _LmfFileState:
         self.sense_ids: dict[str, str] = {}      # source sense id -> merged sense id
         self.sense_relations: list[tuple] = []   # deferred until every sense exists
         self.skipped: dict[str, int] = {
+            'entries of a concepts lexicon': 0,
             'entries without a lemma': 0,
-            'unlexicalized senses': 0,
             'senses of an unknown synset': 0,
             'sense relations to an unknown sense': 0,
             'synset relations to an unknown synset': 0,
@@ -592,13 +585,8 @@ class MergeBuilder:
             'cycles': [],
         }
 
-        # Definition annotations waiting for their senses, and the original
-        # sense ids of the English base they refer to (see process_cili_tsv)
+        # Definition annotations waiting for their senses (see process_cili_tsv)
         self._pending_def_annotations: list[tuple[int, int, int, str]] = []
-        self._original_sense_rowids: dict[str, int] = {}
-        # Lexicons of a mul release (its concepts lexicon and members), whose
-        # lexicalized="false" senses mark lexical gaps and are skipped
-        self._mul_release_lexicons: set[str] = set()
 
         # Folded English definitions of each synset, and the number of
         # non-English definitions dropped as copies of them, by resource.
@@ -1293,10 +1281,10 @@ class MergeBuilder:
         """Merge the CILI release file: one concept per ILI, with its English
         definition, both attributed to PWN 3.0 as the CILI XML was.
 
-        A ``cili_glosstag.json`` beside it ({ili: [[start, end, OEWN sense
-        id], ...]}) annotates the definitions; those senses only exist once
-        OEWN is merged, so the annotations wait for
-        resolve_pending_annotations().
+        A ``cili_glosstag.json`` beside it ({ili: [[start, end, sense id],
+        ...]}, sense ids as the annotating wordnet writes them) annotates
+        the definitions; those senses only exist once that wordnet is
+        merged, so the annotations wait for resolve_pending_annotations().
 
         Args:
             tsv_file: bin/cili.tsv.
@@ -1338,15 +1326,27 @@ class MergeBuilder:
 
     def resolve_pending_annotations(self) -> int:
         """Write the definition annotations whose senses were not merged yet
-        when their definitions were (CILI's GlossTag annotations name OEWN
-        senses by original id).
+        when their definitions were: the senses are looked up by their
+        original ids in the provenance written since.
 
         Returns:
             The number of annotations written.
         """
+        if not self._pending_def_annotations:
+            return 0
+        self._flush_prov()
+        wanted = {sense_id for _d, _s, _e, sense_id in self._pending_def_annotations}
+        self.prov_cur.execute('CREATE TEMP TABLE wanted_senses (original_id TEXT PRIMARY KEY)')
+        self.prov_cur.executemany('INSERT OR IGNORE INTO wanted_senses VALUES (?)',
+                                  [(w,) for w in wanted])
+        rowids = dict(self.prov_cur.execute(
+            'SELECT p.original_id, p.item_rowid FROM provenance p '
+            'JOIN wanted_senses w ON w.original_id = p.original_id '
+            'WHERE p.table_rowid = ?', (self._prov_table_rowid('senses'),)))
+        self.prov_cur.execute('DROP TABLE wanted_senses')
         n = 0
         for def_rowid, start, end, sense_id in self._pending_def_annotations:
-            rowid = self._original_sense_rowids.get(sense_id)
+            rowid = rowids.get(sense_id)
             if def_rowid and rowid:
                 self._def_ann_buf.append((def_rowid, start, end, rowid))
                 n += 1
@@ -1374,33 +1374,24 @@ class MergeBuilder:
         concept per dc:identifier, '<concepts lexicon id>.<identifier>'.
         Examples under a Sense belong to it, with the sense's word at the
         spans in note="offsets=..."; Examples left under a Synset have no
-        sense and are not merged.  In a mul release a sense marked
-        lexicalized="false" is a lexical-gap marker and is skipped; other
-        sources use the flag for ordinary senses (COW marks 19K adjective
-        senses so), which are kept, as the converter kept them.
+        sense and are not merged.  A "mul" lexicon contributes concepts,
+        not entries: its LexicalEntries (placeholders the DTD demands) are
+        skipped.  lexicalized="false" is not acted on: COW flags 19K
+        ordinary adjective senses with it.
 
         Args:
             xml_file: The LMF file (.xml, .xml.gz or .xml.xz).
         """
         index = self._index_lmf_synsets(xml_file)
         state = _LmfFileState(index)
-        for event, elem in ET.iterparse(
-                open_xml(xml_file), events=('start', 'end'),
-                tag=('Lexicon', 'LexiconExtension', 'LexicalEntry', 'Synset'),
-                load_dtd=False, no_network=True, resolve_entities=False):
+        for event, elem in iter_lmf(xml_file, (*LEXICON_TAGS, 'LexicalEntry', 'Synset')):
             if event == 'start':
-                if elem.tag in ('Lexicon', 'LexiconExtension'):
+                if elem.tag in LEXICON_TAGS:
                     state.enter_lexicon(elem)
-                continue
-            if elem.tag == 'LexicalEntry':
+            elif elem.tag == 'LexicalEntry':
                 self._lmf_entry(elem, state)
             elif elem.tag == 'Synset':
                 self._lmf_synset(elem, state)
-            else:
-                continue
-            elem.clear()
-            while elem.getprevious() is not None:
-                del elem.getparent()[0]
         for old_source, target, rel_type, subtype, label, prov in state.sense_relations:
             source_id = state.sense_ids.get(old_source)
             target_id = state.sense_ids.get(target)
@@ -1413,7 +1404,7 @@ class MergeBuilder:
             if n:
                 logger.info('  %s: %d %s', xml_file.name, n, what)
 
-    def _index_lmf_synsets(self, xml_file: Path) -> dict[str, tuple[str, str]]:
+    def _index_lmf_synsets(self, xml_file: Path) -> dict[str, tuple[str, str, int]]:
         """First pass over an LMF file: record each lexicon's header and
         create its concepts (see lmf_concept_index()).
 
@@ -1421,38 +1412,23 @@ class MergeBuilder:
             xml_file: The LMF file.
 
         Returns:
-            {synset id: (concept id, POS label)} for every Synset in the file.
+            {synset id: (concept id, POS label, lexicon index)} for every Synset.
         """
-        mul = {code for code, attrib in self._resources.items() if attrib.get('language') == 'mul'}
-        lexicons, index = lmf_concept_index(xml_file, mul)
+        lexicons, index = lmf_concept_index(xml_file)
         for lexicon in lexicons:
             if lexicon['id'] and lexicon['id'] not in self._resources:
                 self._resources[lexicon['id']] = lexicon['attrib']
-            self._mul_release_lexicons.discard(lexicon['id'])
-            if lexicon['concepts_owner']:
-                self._mul_release_lexicons.add(lexicon['id'])
-        current = (None, None)   # the lexicon a synset belongs to, for its provenance
-        for event, elem in ET.iterparse(
-                open_xml(xml_file), events=('start', 'end'),
-                tag=('Lexicon', 'LexiconExtension', 'Synset'),
-                load_dtd=False, no_network=True, resolve_entities=False):
-            if event == 'start':
-                if elem.tag != 'Synset':
-                    current = (elem.get('id'), elem.get('version'))
-                continue
-            if elem.tag == 'Synset':
-                sid = elem.get('id')
-                cid, pos = index[sid]
-                if cid not in self.synset_id_to_rowid:
-                    self._add_concept(cid, pos, [(current[0], current[1], sid)])
-                elem.clear()
-                while elem.getprevious() is not None:
-                    del elem.getparent()[0]
+        for sid, (cid, pos, i) in index.items():
+            if cid not in self.synset_id_to_rowid:
+                self._add_concept(cid, pos, [(lexicons[i]['id'], lexicons[i]['version'], sid)])
         return index
 
     def _lmf_entry(self, elem, state: '_LmfFileState') -> None:
         """Merge one LexicalEntry: its entry, senses and sense examples;
         its sense relations are deferred to the end of the file."""
+        if state.language == 'mul':
+            state.skipped['entries of a concepts lexicon'] += 1
+            return
         forms = entry_written_forms(elem)
         if not forms:
             state.skipped['entries without a lemma'] += 1
@@ -1473,11 +1449,7 @@ class MergeBuilder:
                     for merged in parse_note(elem.get('note')).get('merged', '').split())
         self._add_lexeme(lid, state.language, pos, [(f, prons.get(f, [])) for f in forms], prov)
 
-        gap_marker = state.lexicon in self._mul_release_lexicons
         for sense in elem.iterchildren('Sense', 'ExternalSense'):
-            if gap_marker and sense.get('lexicalized') == 'false':
-                state.skipped['unlexicalized senses'] += 1
-                continue
             old_sid = sense.get('id')
             concept = state.index.get(sense.get('synset'))
             if concept is None:
@@ -1487,8 +1459,6 @@ class MergeBuilder:
             sid = f'{lid}.{cid}'
             state.sense_ids[old_sid] = sid
             self._add_sense(sid, lid, cid, [(state.lexicon, state.version, old_sid)])
-            if state.lexicon in ENGLISH_BASE_IDS and sid in self.sense_id_to_rowid:
-                self._original_sense_rowids[old_sid] = self.sense_id_to_rowid[sid]
             rel_prov = [(state.lexicon, state.version, None)]
             for example in sense.iterchildren('Example'):
                 text = example.text or ''
@@ -1506,7 +1476,7 @@ class MergeBuilder:
     def _lmf_synset(self, elem, state: '_LmfFileState') -> None:
         """Merge one Synset's definitions and relations (its concept was
         created in the first pass)."""
-        cid, _pos = state.index[elem.get('id')]
+        cid, _pos, _lexicon = state.index[elem.get('id')]
         prov = [(state.lexicon, state.version, None)]
         for definition in elem.iterchildren('Definition'):
             text = definition.text or ''

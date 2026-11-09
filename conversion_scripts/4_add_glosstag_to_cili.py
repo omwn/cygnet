@@ -25,6 +25,7 @@ from pathlib import Path
 from nltk.corpus import wordnet as wn
 
 from cyg.cili import read_cili_tsv
+from cyg.lmf import collapse_whitespace
 
 SIDECAR_NAME = 'cili_glosstag.json'
 
@@ -92,7 +93,7 @@ def build_sidecar(definitions: dict, cili_tsv: Path) -> tuple[dict[str, list], d
         if row is None:
             stats['not in cili'] += 1
             continue
-        if ' '.join(data['string'].split()) != row.definition:
+        if collapse_whitespace(data['string']) != row.definition:
             stats['gloss differs'] += 1
         annotations = data.get('annotations', [])
         if overlapping(annotations):

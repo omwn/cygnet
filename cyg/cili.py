@@ -9,7 +9,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
-from cyg.lmf import pos_label
+from cyg.lmf import collapse_whitespace, pos_label
 
 
 @dataclass(frozen=True)
@@ -61,7 +61,7 @@ def read_cili_tsv(path: Path) -> Iterator[CiliRow]:
             resource, version, original_id, pos = parse_origin(row['origin'])
             yield CiliRow(row['ili_id'], row.get('status', ''), row.get('superseded_by', ''),
                           resource, version, original_id, pos,
-                          ' '.join((row.get('definition') or '').split()))
+                          collapse_whitespace(row.get('definition')))
 
 
 class CiliIndex:
@@ -72,7 +72,7 @@ class CiliIndex:
         self._pos = pos_by_ili
 
     @classmethod
-    def from_file(cls, path: Path) -> CiliIndex:
+    def from_tsv(cls, path: Path) -> CiliIndex:
         """Load the index from the cili.tsv release file.
 
         Args:
@@ -81,11 +81,6 @@ class CiliIndex:
         Returns:
             The index.
         """
-        return cls.from_tsv(path)
-
-    @classmethod
-    def from_tsv(cls, path: Path) -> CiliIndex:
-        """Load the index from the cili.tsv release file."""
         return cls({row.ili: row.pos for row in read_cili_tsv(path)})
 
     def __contains__(self, ili: str) -> bool:

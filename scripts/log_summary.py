@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections import defaultdict
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -38,13 +37,10 @@ METRICS: list[tuple[str, str, str]] = [
     ("Statistics",     "examples found",                    "statistics.examples.total_found"),
     ("Statistics",     "examples processed",                "statistics.examples.processed"),
     ("Statistics",     "examples skipped",                  "statistics.examples.skipped"),
-    ("Relations",      "missing inverses added (concept)",  "relation_processing.missing_inverses_added.concept_relations.count"),
-    ("Relations",      "missing inverses added (sense)",    "relation_processing.missing_inverses_added.sense_relations.count"),
     ("Relations",      "duplicates removed (concept)",      "relation_processing.duplicates_removed.concept_relations.count"),
     ("Relations",      "duplicates removed (sense)",        "relation_processing.duplicates_removed.sense_relations.count"),
     ("Relations",      "unknown types (concept)",           "relation_processing.unknown_relation_types.concept_relations.count"),
     ("Relations",      "unknown types (sense)",             "relation_processing.unknown_relation_types.sense_relations.count"),
-    ("Relations",      "skipped existing (concept)",        "relation_processing.skipped_existing_relations.concept_relations.count"),
     ("Relations",      "category mismatches",               "relation_processing.ontological_category_mismatches.count"),
     ("Data quality",   "lexeme merges",                     "lexeme_merging.total_merges"),
     ("Data quality",   "POS mismatches synset↔CILI",        "synset_concept_pos_mismatches.total_count"),

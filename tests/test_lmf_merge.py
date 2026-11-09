@@ -295,15 +295,8 @@ class TestSidecars:
         (d / 'cili_glosstag.json').write_text(
             json.dumps({'i3': [[12, 20, 'xx-koira-n-1']]}), encoding='utf-8')
         (d / 'mtg.tsv').write_text(_MTG_TSV, encoding='utf-8')
-        # the fixture's koira sense stands in for an English-base sense
-        import cyg.merge as merge_module
-        saved = merge_module.ENGLISH_BASE_IDS
-        merge_module.ENGLISH_BASE_IDS = frozenset({'lmf-xx'})
-        try:
-            build_test_db(d / 'c.db', d / 'p.db',
-                          [d / 'cili.tsv', _WORDNETS_DIR / 'lmf-xx.xml', d / 'mtg.tsv'])
-        finally:
-            merge_module.ENGLISH_BASE_IDS = saved
+        build_test_db(d / 'c.db', d / 'p.db',
+                      [d / 'cili.tsv', _WORDNETS_DIR / 'lmf-xx.xml', d / 'mtg.tsv'])
         conn = sqlite3.connect(str(d / 'c.db'))
         conn.execute(f"ATTACH '{d / 'p.db'}' AS p")
         return conn
@@ -329,7 +322,7 @@ class TestSidecars:
             (_synset(db, 'i3'),)).fetchall()
         assert [c for (c,) in rows] == ['pwn', 'lmf-xx', 'mtg']
 
-    def test_glosstag_annotation_resolves_after_the_base_is_merged(self, db):
+    def test_glosstag_annotation_resolves_once_its_wordnet_is_merged(self, db):
         (_s, koira), = _senses_of(db, 'koira')
         rows = db.execute('''SELECT a.start_offset, a.end_offset, a.sense_rowid
             FROM definition_annotations a JOIN definitions d ON d.rowid = a.definition_rowid
@@ -356,5 +349,5 @@ class TestConceptIndex:
     def test_shared_helper_agrees_with_the_merge(self):
         lexicons, index = lmf_concept_index(_WORDNETS_DIR / 'lmf-xx.xml')
         assert [lx['id'] for lx in lexicons] == ['lmf-xx']
-        assert index['xx-dog'] == ('cili.i3', 'NOUN')
-        assert index['xx-ghost'] == ('lmf-xx.xx-ghost', 'NOUN')
+        assert index['xx-dog'] == ('cili.i3', 'NOUN', 0)
+        assert index['xx-ghost'] == ('lmf-xx.xx-ghost', 'NOUN', 0)

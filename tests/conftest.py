@@ -11,7 +11,6 @@ from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 
 import pytest
-
 from cygnet_fixtures import cygnet_to_lmf
 
 from cyg.merge import MergeBuilder

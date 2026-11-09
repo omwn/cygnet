@@ -18,11 +18,8 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from lxml import etree as ET
-
-from cyg.lmf import parse_note, pos_label, relation_type
-from cyg.merge import INVERSE_CONCEPT_RELATIONS, INVERSE_SENSE_RELATIONS, root_tag
-from cyg.multilex import open_xml
+from cyg.lmf import LEXICON_TAGS, iter_lmf, parse_note, pos_label, relation_type
+from cyg.merge import INVERSE_CONCEPT_RELATIONS, INVERSE_SENSE_RELATIONS
 from cyg.presynth import log_path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -100,7 +97,7 @@ MAX_EXAMPLES = 10
 
 @dataclass
 class WordnetData:
-    """Parsed contents of one pre-synth Cygnet XML file."""
+    """Parsed contents of one pre-synth WN-LMF file."""
 
     resource_id: str = ""
     label: str = ""
@@ -153,88 +150,6 @@ class Issue:
 # Parsing
 # ---------------------------------------------------------------------------
 
-def parse_xml(path: Path) -> WordnetData:
-    """Stream-parse a pre-synth file, WN-LMF or Cygnet XML, into a WordnetData."""
-    if root_tag(path) == "LexicalResource":
-        return parse_lmf(path)
-    data = WordnetData()
-    root_seen = False
-
-    for event, elem in ET.iterparse(str(path), events=("start", "end")):
-        tag = elem.tag
-        if event == "start":
-            if not root_seen and tag == "CygnetResource":
-                root_seen = True
-                data.resource_id = elem.get("id", "")
-                data.label = elem.get("label", "") or elem.get("id", "")
-                data.language = elem.get("language", "")
-                data.version = elem.get("version", "")
-            continue
-
-        if tag == "Concept":
-            cid = elem.get("id", "")
-            if cid in data.concepts:
-                data.duplicate_concept_ids.append(cid)
-            else:
-                data.concepts[cid] = elem.get("ontological_category", "")
-            elem.clear()
-
-        elif tag == "Gloss":
-            data.glossed.add(elem.get("definiendum", ""))
-            elem.clear()
-
-        elif tag == "Lexeme":
-            eid = elem.get("id", "")
-            if eid in data.entries:
-                data.duplicate_entry_ids.append(eid)
-            else:
-                data.entries[eid] = elem.get("language", "")
-                wf = elem.find("Wordform")
-                if wf is not None:
-                    data.entries_with_forms.add(eid)
-                    data.entry_forms[eid] = wf.get("form", "")
-            elem.clear()
-
-        elif tag == "Sense":
-            sid = elem.get("id", "")
-            if sid in data.senses:
-                data.duplicate_sense_ids.append(sid)
-            else:
-                signifier = elem.get("signifier", "")
-                signified = elem.get("signified", "")
-                data.senses[sid] = (signifier, signified)
-                data.concept_senses.setdefault(signified, []).append(sid)
-            elem.clear()
-
-        elif tag == "ConceptRelation":
-            data.concept_rels.append((
-                elem.get("source", ""),
-                elem.get("relation_type", ""),
-                elem.get("target", ""),
-            ))
-            elem.clear()
-
-        elif tag == "SenseRelation":
-            data.sense_rels.append((
-                elem.get("source", ""),
-                elem.get("relation_type", ""),
-                elem.get("target", ""),
-            ))
-            elem.clear()
-
-        elif tag == "Example":
-            ann = elem.find("AnnotatedSentence")
-            if ann is not None:
-                text = "".join(ann.itertext()).strip()[:80]
-                sense_ids = frozenset(
-                    child.get("sense") for child in ann if child.get("sense")
-                )
-                data.examples.append((text, sense_ids))
-            elem.clear()
-
-    return data
-
-
 def parse_lmf(path: Path) -> WordnetData:
     """Stream-parse a cleaned WN-LMF file into a WordnetData.
 
@@ -244,12 +159,9 @@ def parse_lmf(path: Path) -> WordnetData:
     """
     data = WordnetData()
     language = ""
-    for event, elem in ET.iterparse(
-            open_xml(path), events=("start", "end"),
-            tag=("Lexicon", "LexiconExtension", "LexicalEntry", "Synset"),
-            load_dtd=False, no_network=True, resolve_entities=False):
+    for event, elem in iter_lmf(path, (*LEXICON_TAGS, "LexicalEntry", "Synset")):
         if event == "start":
-            if elem.tag in ("Lexicon", "LexiconExtension"):
+            if elem.tag in LEXICON_TAGS:
                 language = elem.get("language", "")
                 if not data.resource_id:
                     data.resource_id = elem.get("id", "")
@@ -257,7 +169,7 @@ def parse_lmf(path: Path) -> WordnetData:
                     data.language = language
                     data.version = elem.get("version", "")
             continue
-        if elem.getparent() is None or elem.getparent().tag not in ("Lexicon", "LexiconExtension"):
+        if elem.getparent() is None or elem.getparent().tag not in LEXICON_TAGS:
             continue
         if elem.tag == "LexicalEntry":
             eid = elem.get("id", "")
@@ -295,10 +207,10 @@ def parse_lmf(path: Path) -> WordnetData:
                 data.concept_rels.append((sid, relation_type(rel), rel.get("target", "")))
             for example in elem.iterchildren("Example"):
                 data.examples.append(((example.text or "").strip()[:80], frozenset()))
-        elem.clear()
-        while elem.getprevious() is not None:
-            del elem.getparent()[0]
     return data
+
+
+parse_xml = parse_lmf
 
 
 # ---------------------------------------------------------------------------

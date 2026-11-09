@@ -1,10 +1,9 @@
 """The machine-translated glosses sidecar (Step 5): which definitions need
 translating, and the ``mtg.tsv`` the merge reads.
 
-Definitions are read from the pre-synth files of either format.  For a
-WN-LMF file the concept a definition belongs to is named the way the merge
-names it (:func:`cyg.merge.lmf_concept_index`), so the translations land on
-the same concepts.
+The concept a definition belongs to is named the way the merge names it
+(:func:`cyg.merge.synset_concept_id`), so the translations land on the
+same concepts.
 """
 
 from __future__ import annotations
@@ -13,17 +12,15 @@ import csv
 from collections.abc import Iterable
 from pathlib import Path
 
-from lxml import etree
-
-from cyg.merge import lmf_concept_index, root_tag
-from cyg.multilex import open_xml
+from cyg.lmf import LEXICON_TAGS, collapse_whitespace, iter_lmf
+from cyg.merge import synset_concept_id
 
 MTG_TSV_COLUMNS = ('concept', 'language', 'translated_from', 'definition')
 MTG_TSV_NAME = 'mtg.tsv'
 
 
 def glosses_to_translate(presynth_dir: Path) -> list[dict]:
-    """The non-English definitions of non-CILI concepts in a pre-synth
+    """The non-English definitions of non-CILI concepts in the pre-synth
     directory, as {'definition', 'definiendum_id', 'language'} records.
 
     Args:
@@ -33,49 +30,33 @@ def glosses_to_translate(presynth_dir: Path) -> list[dict]:
         The records, in file order.
     """
     glosses: list[dict] = []
-    mul: set[str] = set()
     for path in sorted(presynth_dir.glob('*.xml')):
-        if root_tag(path) == 'LexicalResource':
-            glosses.extend(_lmf_glosses(path, mul))
-        else:
-            glosses.extend(_cygnet_glosses(path))
+        glosses.extend(_lmf_glosses(path))
     return glosses
 
 
-def _lmf_glosses(path: Path, mul: set[str]) -> list[dict]:
-    lexicons, index = lmf_concept_index(path, mul)
-    mul.update(lx['id'] for lx in lexicons if lx['language'] == 'mul')
-    language = lexicons[0]['language'] if lexicons else None
+def _lmf_glosses(path: Path) -> list[dict]:
     out = []
-    for _event, elem in etree.iterparse(open_xml(path), events=('end',), tag='Synset',
-                                        load_dtd=False, no_network=True,
-                                        resolve_entities=False):
-        cid, _pos = index[elem.get('id')]
-        if not cid.startswith('cili.'):
-            for definition in elem.iterchildren('Definition'):
-                lang = definition.get('language') or language
-                text = ' '.join((definition.text or '').split())
-                if lang != 'en' and text:
-                    out.append({'definition': text, 'definiendum_id': cid, 'language': lang})
-        elem.clear()
-        while elem.getprevious() is not None:
-            del elem.getparent()[0]
-    return out
-
-
-def _cygnet_glosses(path: Path) -> list[dict]:
-    out = []
-    for _event, elem in etree.iterparse(str(path), events=('end',), tag='Gloss'):
-        language = elem.get('language')
-        cid = elem.get('definiendum') or ''
-        if language != 'en' and not cid.startswith('cili'):
-            sentence = elem.find('AnnotatedSentence')
-            text = ''.join(sentence.itertext()).strip() if sentence is not None else ''
-            if text:
-                out.append({'definition': text, 'definiendum_id': cid, 'language': language})
-        elem.clear()
-        while elem.getprevious() is not None:
-            del elem.getparent()[0]
+    lexicon = language = concepts_owner = None
+    for event, elem in iter_lmf(path, (*LEXICON_TAGS, 'Requires', 'Synset')):
+        if event == 'start':
+            if elem.tag in LEXICON_TAGS:
+                lexicon, language = elem.get('id'), elem.get('language')
+                concepts_owner = lexicon if language == 'mul' else None
+            continue
+        if elem.tag == 'Requires':
+            concepts_owner = concepts_owner or elem.get('ref')
+            continue
+        if elem.tag != 'Synset':
+            continue
+        cid = synset_concept_id(elem, lexicon, concepts_owner)
+        if cid.startswith('cili.'):
+            continue
+        for definition in elem.iterchildren('Definition'):
+            lang = definition.get('language') or language
+            text = collapse_whitespace(definition.text)
+            if lang != 'en' and text:
+                out.append({'definition': text, 'definiendum_id': cid, 'language': lang})
     return out
 
 
@@ -95,7 +76,7 @@ def write_mtg_tsv(translations: Iterable[dict], path: Path) -> int:
         writer = csv.writer(f, delimiter='\t', lineterminator='\n')
         writer.writerow(MTG_TSV_COLUMNS)
         for record in translations:
-            text = ' '.join((record.get('translated_definition') or '').split())
+            text = collapse_whitespace(record.get('translated_definition'))
             if not text:
                 continue
             writer.writerow((record['definiendum_id'], 'en', record['source_language'], text))

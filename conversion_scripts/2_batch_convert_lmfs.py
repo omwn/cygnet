@@ -4,17 +4,13 @@ Step 2: clean every source wordnet listed in wordnets.toml into a WN-LMF
 pre-synth file (cyg.clean), one per source, in bin/cygnets_presynth.
 """
 
+import dataclasses
 import json
 import sys
 import tomllib
-from dataclasses import dataclass
 from pathlib import Path
 
-import cyg.cili
-import cyg.clean
-import cyg.linker
-import cyg.lmf
-import cyg.multilex
+from cyg import cili, clean, linker, lmf, multilex
 from cyg.cili import CiliIndex
 from cyg.clean import CHANGED_SUFFIX, CleanOptions, LmfCleaner, validate_lmf
 from cyg.lmf import DIRECTION_SWAP_CONFIG_FILENAME, load_direction_swap_config
@@ -37,15 +33,17 @@ from cyg.presynth import (
 # wordnets.toml key for multi-lexicon releases linked by a 'mul' concepts lexicon.
 MUL_KEY = "mul"
 
-# Written to the output directory: the outputs this build planned (converted
-# now or reused).  6_synthesise.py merges only these, so outputs left over
-# from earlier builds (a dropped or replaced wordnet) are not merged.
-
 # The code that determines the outputs. An existing output is reused only if
 # the last manifest lists it with the same hash of these files; otherwise it
 # is cleaned again, so a cleaner change reaches every wordnet.
-CLEANER_SOURCES = (cyg.clean.__file__, cyg.cili.__file__, cyg.lmf.__file__,
-                   cyg.linker.__file__, cyg.multilex.__file__, __file__)
+CLEANER_SOURCES = (
+    clean.__file__,
+    cili.__file__,
+    lmf.__file__,
+    linker.__file__,
+    multilex.__file__,
+    __file__,
+)
 
 # Some hosts (e.g. SADiLaR's DSpace bitstream URLs) put no filename in the
 # URL at all — it's just ".../download" — so the extracted content's actual
@@ -137,24 +135,9 @@ def drop_unusable_languages(xml_files: list[Path]) -> list[Path]:
     return kept
 
 
-@dataclass(frozen=True)
-class FileOptions:
-    """Per-file options for lexicons of multi-lexicon releases.
-
-    Attributes:
-        shared: The release's concepts and this file's role in it.
-        language: The code the build uses for a member's language.
-        requires: (id, version) of the concepts lexicon a member depends on.
-    """
-
-    shared: SharedConcepts
-    language: str | None = None
-    requires: tuple[str, str] | None = None
-
-
 def plan_multilexicon(
     toml_path: Path, raw_wns_dir: Path, xml_files: list[Path], all_languages: bool
-) -> tuple[dict[Path, FileOptions], set[Path]]:
+) -> tuple[dict[Path, CleanOptions], set[Path]]:
     """Decide how to convert each lexicon of the 'mul' releases.
 
     Each release listed under the 'mul' key must contain exactly one
@@ -181,21 +164,26 @@ def plan_multilexicon(
     mul_files = {p for g in groups for p in g}
     known = {
         fix_language(read_lexicon_header(p).language)
-        for p in xml_files if p not in mul_files
+        for p in xml_files
+        if p not in mul_files
     } - {None}
 
-    options: dict[Path, FileOptions] = {}
+    options: dict[Path, CleanOptions] = {}
     skip: set[Path] = set()
     for url, group in zip(mul_urls, groups):
         headers = {p: read_lexicon_header(p) for p in group}
         concept_files = [p for p, h in headers.items() if h.language == MUL_KEY]
         if len(concept_files) != 1:
-            print(f"  Warning: {url} has {len(concept_files)} 'mul' concepts "
-                  "lexicons (need exactly 1); skipping the release")
+            print(
+                f"  Warning: {url} has {len(concept_files)} 'mul' concepts "
+                "lexicons (need exactly 1); skipping the release"
+            )
             skip.update(group)
             continue
         concepts = build_concept_map(concept_files[0])
-        options[concept_files[0]] = FileOptions(SharedConcepts(concepts, "concepts"))
+        options[concept_files[0]] = CleanOptions(
+            shared=SharedConcepts(concepts, "concepts")
+        )
         concepts_header = headers[concept_files[0]]
         requires = (concepts_header.id, concepts_header.version)
         kept, dropped = [], []
@@ -208,18 +196,30 @@ def plan_multilexicon(
                 skip.add(p)
                 dropped.append(lang)
                 continue
-            options[p] = FileOptions(SharedConcepts(concepts, "member"), target or lang, requires)
+            options[p] = CleanOptions(
+                language=target or lang,
+                shared=SharedConcepts(concepts, "member"),
+                requires=requires,
+            )
             kept.append(lang if target in (None, lang) else f"{lang}->{target}")
-        print(f"  {concept_files[0].name}: {len(concepts)} concepts, "
-              f"{len(kept)} member lexicons kept, {len(dropped)} skipped "
-              "(no other wordnet for the language)")
+        print(
+            f"  {concept_files[0].name}: {len(concepts)} concepts, "
+            f"{len(kept)} member lexicons kept, {len(dropped)} skipped "
+            "(no other wordnet for the language)"
+        )
         if kept and not all_languages:
             print(f"    kept: {' '.join(kept)}")
     return options, skip
 
 
-def clean_all(cili_file, toml_path, raw_wns_dir="bin/raw_wns", output_dir="bin/cygnets_presynth",
-              all_languages=False, validate=False) -> int:
+def clean_all(
+    cili_file,
+    toml_path,
+    raw_wns_dir="bin/raw_wns",
+    output_dir="bin/cygnets_presynth",
+    all_languages=False,
+    validate=False,
+) -> int:
     """Clean every source listed in wordnets.toml into WN-LMF (cyg.clean).
 
     An existing output is reused when the manifest says this cleaner made
@@ -246,7 +246,8 @@ def clean_all(cili_file, toml_path, raw_wns_dir="bin/raw_wns", output_dir="bin/c
         return 0
     xml_files = drop_unusable_languages(xml_files)
     file_options, skip = plan_multilexicon(
-        Path(toml_path), Path(raw_wns_dir), xml_files, all_languages)
+        Path(toml_path), Path(raw_wns_dir), xml_files, all_languages
+    )
     xml_files = [p for p in xml_files if p not in skip]
     print(f"Found {len(xml_files)} files to clean")
 
@@ -256,9 +257,10 @@ def clean_all(cili_file, toml_path, raw_wns_dir="bin/raw_wns", output_dir="bin/c
     else:
         reusable = set()
         print(f"Cleaner {cleaner_hash} has not made these outputs: cleaning all")
-    cili = CiliIndex.from_file(Path(cili_file))
+    cili = CiliIndex.from_tsv(Path(cili_file))
     swaps, swap_stats = load_direction_swap_config(
-        Path(cili_file).parent / DIRECTION_SWAP_CONFIG_FILENAME)
+        Path(cili_file).parent / DIRECTION_SWAP_CONFIG_FILENAME
+    )
     print()
 
     counts = {"cleaned": 0, "unchanged": 0, "reused": 0, "errors": 0}
@@ -277,11 +279,8 @@ def clean_all(cili_file, toml_path, raw_wns_dir="bin/raw_wns", output_dir="bin/c
             counts["reused"] += 1
             planned.append(output_name)
             continue
-        opts = file_options.get(xml_file)
-        options = CleanOptions(
-            language=opts.language if opts else None,
-            shared=opts.shared if opts else None,
-            requires=opts.requires if opts else None,
+        options = dataclasses.replace(
+            file_options.get(xml_file, CleanOptions()),
             direction_swaps=swaps.get(header.id, frozenset()),
             swap_stats=swap_stats.get(header.id, {}),
         )
@@ -331,10 +330,14 @@ def main():
     parser.add_argument("--output-dir", default="bin/cygnets_presynth")
     parser.add_argument("--cili-file", default="bin/cili.tsv")
     parser.add_argument("--wordnets", default="wordnets.toml")
-    parser.add_argument("--validate", action="store_true",
-                        help="check each cleaned file with wn (slow for big files)")
     parser.add_argument(
-        "--all-languages", action="store_true",
+        "--validate",
+        action="store_true",
+        help="check each cleaned file with wn (slow for big files)",
+    )
+    parser.add_argument(
+        "--all-languages",
+        action="store_true",
         help="keep 'mul' member lexicons in every language (for local builds)",
     )
     args = parser.parse_args()

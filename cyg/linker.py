@@ -1,6 +1,6 @@
 """Locating a sense's word in an example sentence.
 
-The matcher the converter grew for annotating examples: cheap string
+The matcher for annotating examples: cheap string
 matching first, then spaCy (lemmas, inflections via pyinflect, NLTK's
 WordNet lemmatizer for English) for the rest, with the docs of a batch of
 examples parsed in one nlp.pipe() call.  Used by the per-source cleaner to
@@ -15,13 +15,13 @@ import sys
 from collections import OrderedDict
 
 import nltk
-import pyinflect
+import pyinflect  # noqa: F401  (registers the token._.inflect extension)
 import spacy
 from nltk.stem import WordNetLemmatizer
 
 logger = logging.getLogger(__name__)
 
-# spaCy docs kept by WordNetToCygnetConverter._get_doc.
+# spaCy docs kept by ExampleLinker.get_doc.
 DOC_CACHE_SIZE = 4096
 # Examples whose spaCy docs are parsed together in one nlp.pipe() batch:
 # batching gives the same docs as one nlp() call each, 4-12 times faster.
@@ -250,14 +250,13 @@ class ExampleLinker:
                 forms.add(lemma.split('+')[0])
 
             # 2. pyinflect - generate various inflections
-            if pyinflect is not None:
-                for pos_tag in ['VB', 'VBD', 'VBG', 'VBN', 'VBP', 'VBZ',  # Verbs
-                                'NN', 'NNS',  # Nouns
-                                'JJ', 'JJR', 'JJS',  # Adjectives
-                                'RB', 'RBR', 'RBS']:  # Adverbs
-                    inflection = token._.inflect(pos_tag)
-                    if inflection:
-                        forms.add(inflection.lower())
+            for pos_tag in ['VB', 'VBD', 'VBG', 'VBN', 'VBP', 'VBZ',  # Verbs
+                            'NN', 'NNS',  # Nouns
+                            'JJ', 'JJR', 'JJS',  # Adjectives
+                            'RB', 'RBR', 'RBS']:  # Adverbs
+                inflection = token._.inflect(pos_tag)
+                if inflection:
+                    forms.add(inflection.lower())
 
         # 3. NLTK WordNet lemmatization (all POS)
         if self.nltk_lemmatizer is not None:
@@ -453,7 +452,7 @@ class ExampleLinker:
                        batch: list[tuple[str, list[tuple[str, str]] | None]]) -> None:
         """Parse in one nlp.pipe() batch the docs these examples will need.
 
-        Mirrors _find_best_match and _expand_to_token_boundaries: if a cheap
+        Mirrors find_best_match and expand_to_token_boundaries: if a cheap
         match lies on token boundaries no doc is needed; if it does not, the
         doc of the lowercased text is; if there is no cheap match, the docs
         of the text and the candidate words are. (A spaCy match is a whole
