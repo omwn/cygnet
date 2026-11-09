@@ -493,21 +493,30 @@ if $DO_BUILD; then
         echo
     fi
 
+    STEP5_ARGS=()
+    if $LMF; then STEP5_ARGS+=(--presynth-dir "$PRESYNTH" --format lmf); fi
     if $WITH_TRANSLATE; then
         echo "=== Step 5: Translate definitions ==="
-        run_pipeline 5_translate_defns.py
+        run_pipeline 5_translate_defns.py ${STEP5_ARGS[@]+"${STEP5_ARGS[@]}"}
         echo
     fi
 
     if $TRANSLATE_ONLY; then
         echo "=== Translate-only mode: stopping after Step 5 ==="
-        echo "Output: $DATA_DIR/bin/cygnets_presynth/mtg-1.0.xml"
+        if $LMF; then
+            echo "Output: $DATA_DIR/$PRESYNTH/mtg.tsv"
+        else
+            echo "Output: $DATA_DIR/bin/cygnets_presynth/mtg-1.0.xml"
+        fi
         exit 0
     fi
 
     echo "=== Step 6: Synthesise ==="
     if $LMF; then
-        for f in cili-1.0.xml mtg-1.0.xml relation_direction_swaps.json; do
+        # The LMF path merges the CILI release file (and its GlossTag
+        # annotations, if Step 4 made them) directly, not Step 1's XML.
+        ln -sfn "../cili.tsv" "$DATA_DIR/$PRESYNTH/cili.tsv"
+        for f in cili_glosstag.json relation_direction_swaps.json; do
             if [[ -e "$DATA_DIR/bin/cygnets_presynth/$f" ]]; then
                 ln -sfn "../cygnets_presynth/$f" "$DATA_DIR/$PRESYNTH/$f"
             fi

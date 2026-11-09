@@ -35,7 +35,7 @@ def select_files(input_dir: Path) -> list[Path]:
     Returns:
         Files to merge, sorted by name
     """
-    all_files = sorted(input_dir.glob('*.xml'))
+    all_files = sorted(list(input_dir.glob('*.xml')) + list(input_dir.glob('*.tsv')))
     manifest = read_manifest(input_dir)
     if manifest is None:
         print(f'  Warning: no {MANIFEST_NAME}; merging every file in {input_dir}')
@@ -64,6 +64,8 @@ def is_concepts_lexicon(path: Path) -> bool:
     The language is on the root of a Cygnet XML file and on the first
     Lexicon of a WN-LMF file.
     """
+    if path.suffix != '.xml':
+        return False
     for _event, elem in etree.iterparse(str(path), events=('start',), load_dtd=False,
                                         no_network=True, resolve_entities=False):
         language = elem.get('language')
@@ -179,6 +181,10 @@ def main() -> None:
     builder.create_indexes()
 
     # The per-file check above should leave no cycles; this is a release gate.
+    n_ann = builder.resolve_pending_annotations()
+    if n_ann:
+        print(f'  {n_ann:,} definition annotation(s) resolved against the English base')
+
     print('\nPhase 1b: Checking that no cycles remain...')
     n_cycles = builder.detect_cycles()
     if n_cycles:

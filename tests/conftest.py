@@ -141,6 +141,7 @@ def build_test_db(db_path: Path, prov_path: Path,
     b = MergeBuilder(db_path, prov_path)
     for f in xml_files:
         b.process_file(f)
+    b.resolve_pending_annotations()
 
     b.cur.execute("UPDATE languages SET name = 'English' WHERE code = 'en'")
     b.cur.execute("UPDATE languages SET name = 'French' WHERE code = 'fr'")

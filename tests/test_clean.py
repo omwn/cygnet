@@ -306,10 +306,12 @@ class TestMulRelease:
 class TestCiliIndex:
     def test_from_tsv_and_lookup(self, tmp_path):
         tsv = tmp_path / 'cili.tsv'
-        tsv.write_text('# ili\tpos\ni1\tNOUN\ni2\t\n', encoding='utf-8')
+        tsv.write_text('ili_id\tstatus\tsuperseded_by\torigin\tdefinition\n'
+                       'i1\t1\t\tpwn-3.0:00001740-a\tgloss one\n'
+                       'i2\t1\t\tpwn-3.0:00002098-n\tgloss  two\n', encoding='utf-8')
         index = CiliIndex.from_file(tsv)
         assert 'i1' in index and 'i2' in index and 'i3' not in index
-        assert index.pos('i1') == 'NOUN' and index.pos('i2') is None
+        assert index.pos('i1') == 'ADJ' and index.pos('i2') == 'NOUN'
         assert len(index) == 2
 
     def test_from_cygnet_xml(self, tmp_path):

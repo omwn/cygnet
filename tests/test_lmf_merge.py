@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from conftest import build_test_db
 
-from cyg.merge import root_tag
+from cyg.merge import lmf_concept_index, root_tag
 
 _WORDNETS_DIR = Path(__file__).parent / 'wordnets'
 
@@ -267,3 +267,91 @@ class TestMulRelease:
         rows = _prov(mul_db, 'synsets', mul_db.execute(
             "SELECT synset_rowid FROM definitions WHERE definition = 'father'").fetchone()[0])
         assert rows == [('kin', '0.2', 'kin-Fa')]
+
+
+_CILI_TSV = ('ili_id\tstatus\tsuperseded_by\torigin\tdefinition\n'
+             'i1\t1\t\tpwn-3.0:00001740-n\tthat which is perceived\n'
+             'i2\t1\t\tpwn-3.0:00015388-n\ta living  organism\n'
+             'i3\t1\t\tpwn-3.0:02084071-n\ta member of the genus Canis\n'
+             'i50\t0\ti3\tpwn-3.0:02084072-n\t\n')
+_GLOSSTAG = {'i3': [[12, 20], ['sense-of-genus']]}
+_MTG_TSV = ('concept\tlanguage\ttranslated_from\tdefinition\n'
+            'cili.i3\ten\txx\ta barking pet\n'
+            'lmf-xx.xx-ghost\ten\txx\ta local concept\n'
+            'cili.i9999\ten\txx\tunknown concept\n')
+
+
+class TestSidecars:
+    """cili.tsv first and mtg.tsv last, around the wordnets."""
+
+    @pytest.fixture(scope='class')
+    def db(self, tmp_path_factory):
+        d = tmp_path_factory.mktemp('sidecars')
+        (d / 'cili.tsv').write_text(_CILI_TSV, encoding='utf-8')
+        import json
+        (d / 'cili_glosstag.json').write_text(
+            json.dumps({'i3': [[12, 20, 'xx-koira-n-1']]}), encoding='utf-8')
+        (d / 'mtg.tsv').write_text(_MTG_TSV, encoding='utf-8')
+        # the fixture's koira sense stands in for an English-base sense
+        import cyg.merge as merge_module
+        saved = merge_module.ENGLISH_BASE_IDS
+        merge_module.ENGLISH_BASE_IDS = frozenset({'lmf-xx'})
+        try:
+            build_test_db(d / 'c.db', d / 'p.db',
+                          [d / 'cili.tsv', _WORDNETS_DIR / 'lmf-xx.xml', d / 'mtg.tsv'])
+        finally:
+            merge_module.ENGLISH_BASE_IDS = saved
+        conn = sqlite3.connect(str(d / 'c.db'))
+        conn.execute(f"ATTACH '{d / 'p.db'}' AS p")
+        return conn
+
+    def test_cili_concepts_and_definitions_attributed_to_pwn(self, db):
+        rowid = _synset(db, 'i2')
+        assert _prov(db, 'synsets', rowid) == [('pwn', '3.0', '00015388-n')]
+        defs = db.execute('''SELECT d.rowid, d.definition FROM definitions d
+            JOIN languages l ON l.rowid = d.language_rowid
+            WHERE d.synset_rowid = ? AND l.code = 'en' ''', (rowid,)).fetchall()
+        assert [text for _r, text in defs] == ['a living organism']
+        assert _prov(db, 'definitions', defs[0][0]) == [('pwn', '3.0', '00015388-n')]
+        # i50 has no definition in the TSV, so cascade_delete() removed it
+        assert db.execute("SELECT COUNT(*) FROM synsets WHERE ili = 'i50'").fetchone()[0] == 0
+
+    def test_wordnet_definition_joins_cilis_as_provenance(self, db):
+        rows = db.execute('''SELECT pr.code FROM definitions d
+            JOIN languages l ON l.rowid = d.language_rowid
+            JOIN p.provenance pv ON pv.item_rowid = d.rowid
+            JOIN p.prov_tables pt ON pt.rowid = pv.table_rowid AND pt.name = 'definitions'
+            JOIN p.prov_resources pr ON pr.rowid = pv.resource_rowid
+            WHERE d.synset_rowid = ? AND l.code = 'en' ORDER BY pv.rowid''',
+            (_synset(db, 'i3'),)).fetchall()
+        assert [c for (c,) in rows] == ['pwn', 'lmf-xx', 'mtg']
+
+    def test_glosstag_annotation_resolves_after_the_base_is_merged(self, db):
+        (_s, koira), = _senses_of(db, 'koira')
+        rows = db.execute('''SELECT a.start_offset, a.end_offset, a.sense_rowid
+            FROM definition_annotations a JOIN definitions d ON d.rowid = a.definition_rowid
+            WHERE d.synset_rowid = ?''', (_synset(db, 'i3'),)).fetchall()
+        assert rows == [(12, 20, koira)]
+
+    def test_mtg_glosses_land_with_translated_from(self, db):
+        rows = db.execute('''SELECT syn.ili, d.definition, l2.code FROM definitions d
+            JOIN synsets syn ON syn.rowid = d.synset_rowid
+            JOIN languages l ON l.rowid = d.language_rowid
+            LEFT JOIN languages l2 ON l2.rowid = d.translated_from_rowid
+            JOIN p.provenance pv ON pv.item_rowid = d.rowid
+            JOIN p.prov_tables pt ON pt.rowid = pv.table_rowid AND pt.name = 'definitions'
+            JOIN p.prov_resources pr ON pr.rowid = pv.resource_rowid AND pr.code = 'mtg'
+            ORDER BY syn.ili''').fetchall()
+        # cili.i3 already has an English definition (first wins; mtg only adds
+        # provenance); the local concept gets the translation
+        assert [(ili, text, src) for ili, text, src in rows if ili is None] == [
+            (None, 'a local concept', 'xx')]
+        assert any(ili == 'i3' for ili, _t, _s in rows)
+
+
+class TestConceptIndex:
+    def test_shared_helper_agrees_with_the_merge(self):
+        lexicons, index = lmf_concept_index(_WORDNETS_DIR / 'lmf-xx.xml')
+        assert [lx['id'] for lx in lexicons] == ['lmf-xx']
+        assert index['xx-dog'] == ('cili.i3', 'NOUN')
+        assert index['xx-ghost'] == ('lmf-xx.xx-ghost', 'NOUN')
