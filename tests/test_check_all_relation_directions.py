@@ -1,11 +1,10 @@
-"""Tests for scripts/check_all_relation_directions.py's pure logic.
+"""Tests for scripts/check_all_relation_directions.py.
 
-Only build_swap_config(), _file_stat_key() and load_cache() are tested
-here -- the wn-backed loading in compute_candidate_stats()/main() needs a
-live wn database and real wordnet files, and is exercised manually
-against the actual corpus instead (see the full-run findings in
+build_swap_config(), the cache helpers and compute_candidate_stats() are
+tested here on fixtures; main()'s report is exercised manually against the
+actual corpus instead (see the full-run findings in
 scripts/check_all_relation_directions.py's docstring and the
-plwordrelation_direction_checker project memory).
+relation-direction-checker memory note).
 """
 
 import importlib.util
@@ -31,6 +30,11 @@ DirectionStats = crd.DirectionStats
 build_swap_config = carb.build_swap_config
 _file_stat_key = carb._file_stat_key
 load_cache = carb.load_cache
+load_cached_reference_pairs = carb.load_cached_reference_pairs
+reference_pairs_cache_entry = carb.reference_pairs_cache_entry
+compute_candidate_stats = carb.compute_candidate_stats
+candidate_files = carb.candidate_files
+unlisted_files = carb.unlisted_files
 
 
 def _stats(rel_type, agree=0, reversed_=0, no_overlap=0):
@@ -146,3 +150,122 @@ class TestLoadCache:
         cache_path = tmp_path / 'cache.json'
         cache_path.write_text('not json')
         assert load_cache(cache_path, ref) == {}
+
+
+class TestReferencePairsCache:
+    def _write_reference(self, tmp_path):
+        ref = tmp_path / 'ref.xml'
+        ref.write_text('reference')
+        return ref
+
+    def test_round_trip_through_cache_entry(self, tmp_path):
+        ref = self._write_reference(tmp_path)
+        pairs = {'hypernym': {('i1', 'i2'), ('i3', 'i4')}, 'mero_part': {('i5', 'i6')}}
+        cache_path = tmp_path / 'cache.json'
+        cache_path.write_text(json.dumps({
+            'reference': {'path': str(ref), **_file_stat_key(ref)},
+            'reference_pairs': reference_pairs_cache_entry('oewn:2025+', pairs),
+            'files': {},
+        }))
+        assert load_cached_reference_pairs(cache_path, ref) == ('oewn:2025+', pairs)
+
+    def test_cache_entry_is_json_serialisable_and_sorted(self):
+        entry = reference_pairs_cache_entry('x:1', {'hypernym': {('i2', 'i1'), ('i1', 'i2')}})
+        assert json.loads(json.dumps(entry)) == {
+            'spec': 'x:1', 'pairs': {'hypernym': [['i1', 'i2'], ['i2', 'i1']]}}
+
+    def test_missing_or_old_style_cache_returns_none(self, tmp_path):
+        ref = self._write_reference(tmp_path)
+        assert load_cached_reference_pairs(None, ref) is None
+        cache_path = tmp_path / 'cache.json'
+        cache_path.write_text(json.dumps({
+            'reference': {'path': str(ref), **_file_stat_key(ref)},
+            'files': {},
+        }))
+        assert load_cached_reference_pairs(cache_path, ref) is None
+
+    def test_changed_reference_discards_pairs(self, tmp_path):
+        ref = self._write_reference(tmp_path)
+        cache_path = tmp_path / 'cache.json'
+        cache_path.write_text(json.dumps({
+            'reference': {'path': str(ref), 'mtime': 0.0, 'size': 999},
+            'reference_pairs': reference_pairs_cache_entry('x:1', {'hypernym': {('i1', 'i2')}}),
+            'files': {},
+        }))
+        assert load_cached_reference_pairs(cache_path, ref) is None
+
+
+_LMF = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE LexicalResource SYSTEM "https://globalwordnet.github.io/schemas/WN-LMF-1.4.dtd">
+<LexicalResource xmlns:dc="https://globalwordnet.github.io/schemas/dc/">
+<Lexicon id="cand" label="c" language="xx" email="e" license="l" version="1" url="u">
+<LexicalEntry id="e"><Lemma writtenForm="w" partOfSpeech="n"/><Sense id="s" synset="c-1"/></LexicalEntry>
+<Synset id="c-1" ili="i1" partOfSpeech="n">
+  <SynsetRelation relType="hypernym" target="c-2"/>
+  <SynsetRelation relType="mero_part" target="c-2"/>
+  <SynsetRelation relType="mero_part" target="c-3"/>
+</Synset>
+<Synset id="c-2" ili="i2" partOfSpeech="n"/>
+<Synset id="c-3" ili="i3" partOfSpeech="n"/>
+</Lexicon>
+</LexicalResource>
+"""
+
+
+class TestComputeCandidateStats:
+    def test_stats_per_lexicon_and_relation_type(self, tmp_path):
+        path = tmp_path / 'cand.xml'
+        path.write_text(_LMF)
+        reference = {'hypernym': {('i1', 'i2')}, 'mero_part': {('i2', 'i1')}}
+        per_lexicon, failures = compute_candidate_stats(path, reference)
+        assert failures == []
+        assert set(per_lexicon) == {'cand:1'}
+        stats = per_lexicon['cand:1']
+        assert (stats['hypernym'].agree, stats['hypernym'].reversed, stats['hypernym'].no_overlap) == (1, 0, 0)
+        assert (stats['mero_part'].agree, stats['mero_part'].reversed, stats['mero_part'].no_overlap) == (0, 1, 1)
+
+    def test_unparseable_file_is_reported_not_raised(self, tmp_path):
+        path = tmp_path / 'broken.xml'
+        path.write_text('<LexicalResource><Lexicon id="x" version="1"><Synset')
+        per_lexicon, failures = compute_candidate_stats(path, {})
+        assert per_lexicon == {}
+        assert len(failures) == 1 and failures[0][0] == 'broken.xml'
+
+
+class TestCandidateFiles:
+    def _populate(self, tmp_path):
+        raw = tmp_path / 'raw_wns'
+        raw.mkdir()
+        for name in ('mywn-1.0.xml', 'other-2.3.xml.gz', 'third.xml.xz', 'ref.xml.gz',
+                     'sources.tsv', 'notes.txt'):
+            (raw / name).write_text('x')
+        return raw
+
+    def test_without_toml_every_lmf_file_but_the_reference(self, tmp_path):
+        raw = self._populate(tmp_path)
+        got = candidate_files(raw, raw / 'ref.xml.gz')
+        assert [p.name for p in got] == ['mywn-1.0.xml', 'other-2.3.xml.gz', 'third.xml.xz']
+
+    def test_with_toml_only_the_files_step_2_would_convert(self, tmp_path):
+        raw = self._populate(tmp_path)
+        toml = tmp_path / 'wordnets.toml'
+        toml.write_text('xx = ["https://example.org/mywn-1.0.xml"]\n'
+                        'yy = ["https://example.org/other-2.3.xml.gz"]\n')
+        got = candidate_files(raw, raw / 'ref.xml.gz', toml)
+        assert [p.name for p in got] == ['mywn-1.0.xml', 'other-2.3.xml.gz']
+
+    def test_reference_is_never_a_candidate_even_when_listed(self, tmp_path):
+        raw = self._populate(tmp_path)
+        toml = tmp_path / 'wordnets.toml'
+        toml.write_text('en = ["https://example.org/ref.xml.gz"]\n'
+                        'xx = ["https://example.org/mywn-1.0.xml"]\n')
+        got = candidate_files(raw, raw / 'ref.xml.gz', toml)
+        assert [p.name for p in got] == ['mywn-1.0.xml']
+
+    def test_unlisted_files_are_the_lmf_files_left_over(self, tmp_path):
+        raw = self._populate(tmp_path)
+        toml = tmp_path / 'wordnets.toml'
+        toml.write_text('xx = ["https://example.org/mywn-1.0.xml"]\n')
+        ref = raw / 'ref.xml.gz'
+        got = candidate_files(raw, ref, toml)
+        assert [p.name for p in unlisted_files(raw, ref, got)] == ['other-2.3.xml.gz', 'third.xml.xz']

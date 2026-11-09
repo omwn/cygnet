@@ -6,18 +6,16 @@ against a single reference (default: OEWN), to find any resource -- not
 just plWordnet -- with a relation type that looks systematically reversed.
 
 Unlike the single-file script, this:
-  - loads the reference once and computes its per-relation-type ILI pairs
+  - reads the reference once and computes its per-relation-type ILI pairs
     once, reusing them as the comparison denominator for every candidate
     (the reference side of the comparison never changes between files);
-  - loads every candidate into one shared --data-dir instead of a fresh
-    tempdir per file, so repeated runs (e.g. after adding a new wordnet)
-    don't have to re-add resources that haven't changed;
-  - keeps going past a single file that fails to load, reporting the
+  - keeps going past a single file that fails to parse, reporting the
     failure, rather than aborting the whole batch;
-  - optionally caches each file's per-relation stats by (path, mtime,
-    size) with --cache, so an unchanged file skips the slow wn.add() /
-    comparison step on the next run (the cache is invalidated wholesale
-    if the reference file itself changes);
+  - optionally caches with --cache: each file's per-relation stats, keyed
+    by (path, mtime, size), so an unchanged file is not re-read on the
+    next run, and the reference's own pairs, so an unchanged reference is
+    not re-read either (the whole cache is invalidated if the reference
+    file changes);
   - optionally writes a swap config with --write-swap-config: for every
     flagged (resource, relation type), the type AND its GWA inverse (e.g.
     mero_part + holo_part) are marked for swapping, since a source wordnet
@@ -30,9 +28,9 @@ Unlike the single-file script, this:
 
 Usage:
     uv run python scripts/check_all_relation_directions.py \\
-        [--raw-wns-dir bin/raw_wns] \\
+        [--raw-wns-dir bin/raw_wns] [--wordnets-toml wordnets.toml] \\
         [--reference bin/raw_wns/english-wordnet-2025-plus.xml.gz] \\
-        [--data-dir DIR] [--min-pairs 20] [--threshold 0.9] \\
+        [--min-pairs 20] [--threshold 0.9] \\
         [--out results.json] [--cache cache.json] \\
         [--write-swap-config bin/cygnets_presynth/relation_direction_swaps.json]
 """
@@ -40,15 +38,16 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import sys
-import tempfile
 from pathlib import Path
-
-import wn
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import check_relation_directions as crd  # noqa: E402
+
+PROJECT_DIR = Path(__file__).resolve().parent.parent
+LMF_SUFFIXES = ('.xml', '.xml.gz', '.xml.xz')
 
 # Relative to the current working directory, like 2_batch_convert_lmfs.py's
 # own --raw-wns-dir default -- build.sh invokes both after cd'ing into the
@@ -58,14 +57,62 @@ DEFAULT_RAW_WNS_DIR = Path('bin/raw_wns')
 DEFAULT_REFERENCE = Path('bin/raw_wns/english-wordnet-2025-plus.xml.gz')
 
 
-def add_all_lexicons(path: Path) -> list[str]:
-    """Add *path* to the wn database and return every new 'id:version' it
-    introduced (a single physical file occasionally bundles more than one
-    lexicon)."""
-    before = {(lx.id, lx.version) for lx in wn.lexicons()}
-    wn.add(str(path), progress_handler=None)
-    new = {(lx.id, lx.version) for lx in wn.lexicons()} - before
-    return [f'{lid}:{ver}' for lid, ver in sorted(new)]
+def _step2_file_selection():
+    """conversion_scripts/2_batch_convert_lmfs.py's collect_xml_files(),
+    loaded by path since the module name starts with a digit."""
+    script = PROJECT_DIR / 'conversion_scripts' / '2_batch_convert_lmfs.py'
+    spec = importlib.util.spec_from_file_location('batch_convert_lmfs', script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.collect_xml_files
+
+
+def candidate_files(
+    raw_wns_dir: Path, reference: Path, wordnets_toml: Path | None = None,
+) -> list[Path]:
+    """The files to check: the LMF files in *raw_wns_dir* other than the
+    reference.
+
+    With *wordnets_toml*, only the files Step 2 would convert from it (the
+    same selection as 2_batch_convert_lmfs.py makes). The swap config is
+    keyed by lexicon id, so a file lying in the directory but not listed
+    in wordnets.toml -- an old release, a local test export -- would
+    otherwise have its reversed relations swapped in the release the
+    build actually uses, which may be perfectly fine.
+
+    Args:
+        raw_wns_dir: Directory of downloaded wordnet files.
+        reference: The reference file, never a candidate.
+        wordnets_toml: The build's wordnets.toml, if the selection should
+            follow it.
+
+    Returns:
+        Sorted candidate paths.
+    """
+    if wordnets_toml is not None:
+        files = _step2_file_selection()(wordnets_toml, raw_wns_dir)
+    else:
+        files = _lmf_files_in(raw_wns_dir)
+    ref = reference.resolve()
+    return sorted(
+        p for p in files
+        if p.name.endswith(LMF_SUFFIXES) and p.resolve() != ref
+    )
+
+
+def _lmf_files_in(raw_wns_dir: Path) -> list[Path]:
+    return [p for p in raw_wns_dir.iterdir()
+            if p.is_file() and p.name.endswith(LMF_SUFFIXES)]
+
+
+def unlisted_files(
+    raw_wns_dir: Path, reference: Path, candidates: list[Path],
+) -> list[Path]:
+    """The LMF files lying in *raw_wns_dir* that are neither the reference
+    nor among *candidates*: with --wordnets-toml, the files the build
+    ignores, worth a warning since they are usually leftovers."""
+    chosen = {p.resolve() for p in candidates} | {reference.resolve()}
+    return sorted(p for p in _lmf_files_in(raw_wns_dir) if p.resolve() not in chosen)
 
 
 def _file_stat_key(path: Path) -> dict:
@@ -73,8 +120,9 @@ def _file_stat_key(path: Path) -> dict:
     return {'mtime': st.st_mtime, 'size': st.st_size}
 
 
-def load_cache(cache_path: Path | None, reference_path: Path) -> dict[str, dict]:
-    """Return {file_path: cache_entry}, or {} if there's no usable cache.
+def _read_cache(cache_path: Path | None, reference_path: Path) -> dict:
+    """The parsed cache file, or {} if there is none, it is unreadable, or
+    it was computed against a different reference file.
 
     The whole cache is discarded (not just the stale parts) if the
     reference file itself has changed, since every entry's stats were
@@ -88,13 +136,39 @@ def load_cache(cache_path: Path | None, reference_path: Path) -> dict[str, dict]
         return {}
     if data.get('reference') != {'path': str(reference_path), **_file_stat_key(reference_path)}:
         return {}
-    return data.get('files', {})
+    return data
+
+
+def load_cache(cache_path: Path | None, reference_path: Path) -> dict[str, dict]:
+    """Return {file_path: cache_entry} for the per-file stats, or {} if
+    there's no usable cache (see _read_cache)."""
+    return _read_cache(cache_path, reference_path).get('files', {})
+
+
+def load_cached_reference_pairs(
+    cache_path: Path | None, reference_path: Path,
+) -> tuple[str, dict[str, set[tuple[str, str]]]] | None:
+    """The reference's (spec, {relType: pairs}) from the cache, or None if
+    there's no usable cache or it predates reference-pair caching."""
+    cached = _read_cache(cache_path, reference_path).get('reference_pairs')
+    if not cached:
+        return None
+    return cached['spec'], {
+        rel: {tuple(pair) for pair in pairs} for rel, pairs in cached['pairs'].items()
+    }
+
+
+def reference_pairs_cache_entry(
+    spec: str, pairs: dict[str, set[tuple[str, str]]],
+) -> dict:
+    """The JSON-ready cache record for load_cached_reference_pairs()."""
+    return {'spec': spec, 'pairs': {rel: sorted(ps) for rel, ps in pairs.items()}}
 
 
 def compute_candidate_stats(
     path: Path, reference_pairs: dict[str, set[tuple[str, str]]],
 ) -> tuple[dict[str, dict[str, crd.DirectionStats]], list[tuple[str, str]]]:
-    """Load *path*'s lexicon(s) and compute per-relation DirectionStats
+    """Read *path*'s lexicon(s) and compute per-relation DirectionStats
     against *reference_pairs* for each.
 
     Returns ({lexicon_spec: {relation_type: DirectionStats}}, failures).
@@ -102,24 +176,15 @@ def compute_candidate_stats(
     per_lexicon: dict[str, dict[str, crd.DirectionStats]] = {}
     failures: list[tuple[str, str]] = []
     try:
-        specs = add_all_lexicons(path)
+        by_lexicon = crd.lmf_ili_relation_pairs(path)
     except Exception as e:
         failures.append((path.name, str(e)))
         return per_lexicon, failures
-    for spec in specs:
-        try:
-            candidate = wn.Wordnet(lexicon=spec)
-        except Exception as e:
-            failures.append((spec, str(e)))
-            continue
-        per_rel = {}
-        for rel in crd.DIRECTED_RELATION_TYPES:
-            cand_pairs = crd.ili_relation_pairs(candidate, rel)
-            if not cand_pairs:
-                continue
-            per_rel[rel] = crd.compute_direction_stats(
-                rel, cand_pairs, reference_pairs.get(rel, set()))
-        per_lexicon[spec] = per_rel
+    for spec, cand_pairs in by_lexicon.items():
+        per_lexicon[spec] = {
+            rel: crd.compute_direction_stats(rel, pairs, reference_pairs.get(rel, set()))
+            for rel, pairs in cand_pairs.items()
+        }
     return per_lexicon, failures
 
 
@@ -161,8 +226,9 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--raw-wns-dir', type=Path, default=DEFAULT_RAW_WNS_DIR)
     parser.add_argument('--reference', type=Path, default=DEFAULT_REFERENCE)
-    parser.add_argument('--data-dir', type=Path, default=None,
-                         help='wn database directory (default: a fresh temp dir)')
+    parser.add_argument('--wordnets-toml', type=Path, default=None,
+                         help='Check only the files this wordnets.toml selects, as Step 2 '
+                              'would (default: every LMF file in --raw-wns-dir)')
     parser.add_argument('--min-pairs', type=int, default=20)
     parser.add_argument('--threshold', type=float, default=0.9)
     parser.add_argument('--out', type=Path, default=None,
@@ -178,38 +244,31 @@ def main() -> int:
         parser.error(f'raw-wns-dir not found: {args.raw_wns_dir}')
     if not args.reference.exists():
         parser.error(f'reference file not found: {args.reference}')
+    if args.wordnets_toml is not None and not args.wordnets_toml.exists():
+        parser.error(f'wordnets.toml not found: {args.wordnets_toml}')
 
-    tmp_ctx = None
-    if args.data_dir is None:
-        tmp_ctx = tempfile.TemporaryDirectory(prefix='cygnet-wn-check-all-')
-        data_dir = Path(tmp_ctx.name)
+    cached_reference = load_cached_reference_pairs(args.cache, args.reference)
+    if cached_reference:
+        reference_spec, reference_pairs = cached_reference
+        print(f'Reference ({args.reference.name}) relation pairs read from cache')
     else:
-        data_dir = args.data_dir
-        data_dir.mkdir(parents=True, exist_ok=True)
-    wn.config.data_directory = str(data_dir)
-
-    print(f'Loading reference ({args.reference.name})...')
-    ref_specs = add_all_lexicons(args.reference)
-    if len(ref_specs) != 1:
-        raise RuntimeError(f'expected exactly one lexicon from the reference file, '
-                            f'got {ref_specs}')
-    reference_spec = ref_specs[0]
-    reference = wn.Wordnet(lexicon=reference_spec)
+        print(f'Reading reference ({args.reference.name})...')
+        reference_spec, reference_pairs = crd.single_lexicon_pairs(args.reference)
     print(f'  -> {reference_spec}')
-
-    print('Computing reference relation pairs (once, reused for every candidate)...')
-    reference_pairs = {
-        rel: crd.ili_relation_pairs(reference, rel) for rel in crd.DIRECTED_RELATION_TYPES
-    }
-    for rel, pairs in reference_pairs.items():
+    for rel in crd.DIRECTED_RELATION_TYPES:
+        pairs = reference_pairs.get(rel)
         if pairs:
             print(f'  {rel}: {len(pairs)} pairs')
 
-    candidate_files = sorted(
-        p for p in args.raw_wns_dir.iterdir()
-        if p.is_file() and p.resolve() != args.reference.resolve()
-    )
-    print(f'\n{len(candidate_files)} candidate file(s) to check\n')
+    candidates = candidate_files(args.raw_wns_dir, args.reference, args.wordnets_toml)
+    print(f'\n{len(candidates)} candidate file(s) to check')
+    if args.wordnets_toml is not None:
+        ignored = unlisted_files(args.raw_wns_dir, args.reference, candidates)
+        if ignored:
+            print(f'  ignoring {len(ignored)} file(s) in {args.raw_wns_dir} that '
+                  f'{args.wordnets_toml} does not list: '
+                  + ', '.join(p.name for p in ignored))
+    print()
 
     file_cache = load_cache(args.cache, args.reference)
     new_cache_files: dict[str, dict] = {}
@@ -218,11 +277,11 @@ def main() -> int:
     flagged: list[tuple[str, str, crd.DirectionStats]] = []
     failed: list[tuple[str, str]] = []
 
-    for i, path in enumerate(candidate_files, 1):
+    for i, path in enumerate(candidates, 1):
         stat_key = _file_stat_key(path)
         cached = file_cache.get(str(path))
         if cached and cached.get('mtime') == stat_key['mtime'] and cached.get('size') == stat_key['size']:
-            print(f'[{i}/{len(candidate_files)}] {path.name} (cached)', flush=True)
+            print(f'[{i}/{len(candidates)}] {path.name} (cached)', flush=True)
             new_cache_files[str(path)] = cached
             per_lexicon = {
                 spec: {
@@ -232,7 +291,7 @@ def main() -> int:
                 for spec, rel_data in cached['lexicons'].items()
             }
         else:
-            print(f'[{i}/{len(candidate_files)}] {path.name} ...', flush=True)
+            print(f'[{i}/{len(candidates)}] {path.name} ...', flush=True)
             per_lexicon, failures = compute_candidate_stats(path, reference_pairs)
             failed.extend(failures)
             for name, err in failures:
@@ -298,6 +357,7 @@ def main() -> int:
     if args.cache:
         args.cache.write_text(json.dumps({
             'reference': {'path': str(args.reference), **_file_stat_key(args.reference)},
+            'reference_pairs': reference_pairs_cache_entry(reference_spec, reference_pairs),
             'files': new_cache_files,
         }))
         print(f'Cache written to {args.cache}')
@@ -308,8 +368,6 @@ def main() -> int:
         print(f'Swap config for {len(swap_config)} resource(s) written to '
               f'{args.write_swap_config}')
 
-    if tmp_ctx:
-        tmp_ctx.cleanup()
     return 0
 
 

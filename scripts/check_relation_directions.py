@@ -27,23 +27,27 @@ meaningful (>= --min-pairs) AND the reversed share is high enough
 noise -- see the project's own 0%/100% split on plwn's meronyms, versus
 near-100%/0% on its hypernyms, for calibration.
 
+Both files are read straight from their WN-LMF XML (one streaming pass
+each, no wn database): only Synset@ili and SynsetRelation@relType/@target
+matter here, and loading a wordnet into wn is far slower than reading them.
+
 Usage:
     uv run python scripts/check_relation_directions.py <candidate.xml[.gz|.xz]> \\
         [--reference bin/raw_wns/english-wordnet-2025-plus.xml.gz] \\
-        [--data-dir DIR] [--min-pairs 20] [--threshold 0.9]
+        [--min-pairs 20] [--threshold 0.9]
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-import wn
+from lxml import etree
 
 from cyg.merge import INVERSE_CONCEPT_RELATIONS
+from cyg.multilex import open_xml
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REFERENCE = PROJECT_ROOT / 'bin' / 'raw_wns' / 'english-wordnet-2025-plus.xml.gz'
@@ -98,60 +102,105 @@ def compute_direction_stats(
     return DirectionStats(relation_type, agree, reversed_, no_overlap)
 
 
-def ili_relation_pairs(wordnet: wn.Wordnet, relation_type: str) -> set[tuple[str, str]]:
-    """All (source_ili, target_ili) pairs this wordnet declares for
-    *relation_type*, restricted to pairs where both ends have an ILI."""
-    pairs = set()
-    for ss in wordnet.synsets():
-        if not ss.ili:
-            continue
-        for target in ss.get_related(relation_type):
-            if target.ili:
-                pairs.add((ss.ili, target.ili))
-    return pairs
+# Pairs per lexicon per relation type: {'id:version': {relType: {(ili, ili)}}}
+PairsByLexicon = dict[str, dict[str, set[tuple[str, str]]]]
 
 
-def load_lexicon(path: Path) -> str:
-    """Add *path* to the wn database and return its 'id:version' spec.
+def _ili_of(elem: etree._Element) -> str | None:
+    """A synset's ILI id, or None when it has none or only a proposed one
+    (ili="in") -- the same reading wn gives Synset.ili."""
+    ili = elem.get('ili')
+    return ili if ili and ili != 'in' else None
 
-    Assumes a fresh database (see --data-dir): if *path* was already
-    loaded, wn.add() is a no-op and no new lexicon appears, so this
-    raises rather than silently guessing which existing lexicon to use.
+
+def lmf_ili_relation_pairs(
+    path: Path, relation_types: tuple[str, ...] = DIRECTED_RELATION_TYPES,
+) -> PairsByLexicon:
+    """Every (source_ili, target_ili) pair each lexicon in *path* declares
+    for each of *relation_types*, read straight from the WN-LMF XML.
+
+    Pairs are restricted to those where both synsets have an ILI. The
+    target may sit in another lexicon of the same file (an extension's
+    relations into its base, say); a target not in the file at all is
+    skipped, as are synsets without an ILI.
+
+    Args:
+        path: A WN-LMF file (.xml, .xml.gz or .xml.xz).
+        relation_types: The SynsetRelation relTypes to collect.
+
+    Returns:
+        {'id:version': {relType: {(source_ili, target_ili), ...}}}, with a
+        key for every Lexicon/LexiconExtension in the file (possibly with
+        no relations at all).
     """
-    before = {(lx.id, lx.version) for lx in wn.lexicons()}
-    wn.add(str(path), progress_handler=None)
-    new = {(lx.id, lx.version) for lx in wn.lexicons()} - before
-    if not new:
+    wanted = frozenset(relation_types)
+    ili_by_id: dict[str, str | None] = {}
+    # (lexicon spec, source ili, relType, target id) for every relation
+    # of a wanted type whose source has an ILI; resolved after the parse,
+    # since a target may be declared later in the file.
+    relations: list[tuple[str, str, str, str]] = []
+    by_lexicon: PairsByLexicon = {}
+    spec = ''
+    with open_xml(path) as fh:
+        for event, elem in etree.iterparse(
+                fh, events=('start', 'end'),
+                tag=('Lexicon', 'LexiconExtension', 'Synset', 'ExternalSynset'),
+                resolve_entities=False, load_dtd=False, no_network=True):
+            if event == 'start':
+                if elem.tag != 'Synset' and elem.tag != 'ExternalSynset':
+                    spec = f"{elem.get('id')}:{elem.get('version')}"
+                    by_lexicon.setdefault(spec, {})
+                continue
+            if elem.tag == 'Synset' or elem.tag == 'ExternalSynset':
+                sid = elem.get('id')
+                ili = _ili_of(elem)
+                if sid:
+                    ili_by_id[sid] = ili
+                if ili:
+                    for rel in elem.iterchildren('SynsetRelation'):
+                        rtype = rel.get('relType')
+                        target = rel.get('target')
+                        if rtype in wanted and target:
+                            relations.append((spec, ili, rtype, target))
+                elem.clear(keep_tail=True)
+            # Lexicon ends are left alone: clearing them would drop nothing
+            # of use (their children were cleared as they ended).
+    for spec, src_ili, rtype, target in relations:
+        tgt_ili = ili_by_id.get(target)
+        if tgt_ili:
+            by_lexicon[spec].setdefault(rtype, set()).add((src_ili, tgt_ili))
+    return by_lexicon
+
+
+def single_lexicon_pairs(path: Path) -> tuple[str, dict[str, set[tuple[str, str]]]]:
+    """*path*'s one lexicon's spec and its pairs; raises if the file holds
+    several lexicons, since the comparison is per lexicon."""
+    by_lexicon = lmf_ili_relation_pairs(path)
+    if len(by_lexicon) != 1:
         raise RuntimeError(
-            f'{path} added no new lexicon to the wn database -- is it '
-            f'already loaded? Use a fresh --data-dir for a clean run.'
-        )
-    lid, ver = next(iter(new))
-    return f'{lid}:{ver}'
+            f'{path} holds {len(by_lexicon)} lexicons ({", ".join(by_lexicon)}); '
+            f'expected exactly one')
+    (spec, pairs), = by_lexicon.items()
+    return spec, pairs
 
 
-def run(candidate_path: Path, reference_path: Path, data_dir: Path,
+def run(candidate_path: Path, reference_path: Path,
         min_pairs: int, threshold: float) -> list[DirectionStats]:
-    data_dir.mkdir(parents=True, exist_ok=True)
-    wn.config.data_directory = str(data_dir)
-
-    print(f'Loading reference ({reference_path.name})...')
-    reference_spec = load_lexicon(reference_path)
-    reference = wn.Wordnet(lexicon=reference_spec)
+    """Compare *candidate_path*'s directed relations with *reference_path*'s
+    and print a per-relation-type report; returns the stats, most
+    comparable first."""
+    print(f'Reading reference ({reference_path.name})...')
+    reference_spec, reference_pairs = single_lexicon_pairs(reference_path)
     print(f'  -> {reference_spec}')
 
-    print(f'Loading candidate ({candidate_path.name})...')
-    candidate_spec = load_lexicon(candidate_path)
-    candidate = wn.Wordnet(lexicon=candidate_spec)
+    print(f'Reading candidate ({candidate_path.name})...')
+    candidate_spec, candidate_pairs = single_lexicon_pairs(candidate_path)
     print(f'  -> {candidate_spec}')
 
-    results = []
-    for rel in DIRECTED_RELATION_TYPES:
-        candidate_pairs = ili_relation_pairs(candidate, rel)
-        if not candidate_pairs:
-            continue
-        reference_pairs = ili_relation_pairs(reference, rel)
-        results.append(compute_direction_stats(rel, candidate_pairs, reference_pairs))
+    results = [
+        compute_direction_stats(rel, pairs, reference_pairs.get(rel, set()))
+        for rel, pairs in candidate_pairs.items()
+    ]
 
     results.sort(key=lambda s: s.comparable, reverse=True)
 
@@ -193,8 +242,6 @@ def main() -> int:
     parser.add_argument('candidate', type=Path, help='Candidate wordnet LMF file (.xml/.gz/.xz)')
     parser.add_argument('--reference', type=Path, default=DEFAULT_REFERENCE,
                          help=f'Reference wordnet LMF file (default: {DEFAULT_REFERENCE})')
-    parser.add_argument('--data-dir', type=Path, default=None,
-                         help='wn database directory (default: a fresh temp dir)')
     parser.add_argument('--min-pairs', type=int, default=20,
                          help='Minimum comparable pairs before a relation type can be flagged (default: 20)')
     parser.add_argument('--threshold', type=float, default=0.9,
@@ -206,12 +253,7 @@ def main() -> int:
     if not args.reference.exists():
         parser.error(f'reference file not found: {args.reference}')
 
-    if args.data_dir is not None:
-        run(args.candidate, args.reference, args.data_dir, args.min_pairs, args.threshold)
-        return 0
-
-    with tempfile.TemporaryDirectory(prefix='cygnet-wn-check-') as tmp:
-        run(args.candidate, args.reference, Path(tmp), args.min_pairs, args.threshold)
+    run(args.candidate, args.reference, args.min_pairs, args.threshold)
     return 0
 
 

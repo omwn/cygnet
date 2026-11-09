@@ -1,10 +1,9 @@
-"""Tests for scripts/check_relation_directions.py's pure comparison logic.
+"""Tests for scripts/check_relation_directions.py.
 
-Only compute_direction_stats()/DirectionStats are tested here -- the
-wn-backed loading and reporting in run()/main() need a live wn database
-and real wordnet files, and are exercised manually against the actual
-candidate file instead (see the plWordnet meronym-direction investigation
-this script grew out of).
+compute_direction_stats()/DirectionStats are the pure comparison logic;
+lmf_ili_relation_pairs() is the XML reader that feeds it. The report in
+run()/main() is exercised manually against real candidate files (see the
+plWordnet meronym-direction investigation this script grew out of).
 """
 
 from pathlib import Path
@@ -19,6 +18,8 @@ _spec.loader.exec_module(_mod)
 
 compute_direction_stats = _mod.compute_direction_stats
 DirectionStats = _mod.DirectionStats
+lmf_ili_relation_pairs = _mod.lmf_ili_relation_pairs
+single_lexicon_pairs = _mod.single_lexicon_pairs
 
 
 class TestComputeDirectionStats:
@@ -88,3 +89,115 @@ class TestDirectionStats:
     def test_is_flagged_false_with_no_comparable_pairs(self):
         stats = DirectionStats('x', agree=0, reversed=0, no_overlap=1000)
         assert not stats.is_flagged(min_pairs=20, threshold=0.9)
+
+
+_LMF_HEADER = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE LexicalResource SYSTEM "https://globalwordnet.github.io/schemas/WN-LMF-1.4.dtd">
+<LexicalResource xmlns:dc="https://globalwordnet.github.io/schemas/dc/">
+"""
+
+
+def _lexicon(lid, version, body):
+    return (f'<Lexicon id="{lid}" label="{lid}" language="xx" email="e" license="l" '
+            f'version="{version}" url="u">\n'
+            f'<LexicalEntry id="{lid}-e"><Lemma writtenForm="w" partOfSpeech="n"/>'
+            f'<Sense id="{lid}-s" synset="{lid}-1"/></LexicalEntry>\n{body}</Lexicon>\n')
+
+
+def _synset(sid, ili, relations=()):
+    rels = ''.join(f'<SynsetRelation relType="{r}" target="{t}"/>' for r, t in relations)
+    ili_attr = f' ili="{ili}"' if ili is not None else ''
+    return f'<Synset id="{sid}"{ili_attr} partOfSpeech="n">{rels}</Synset>\n'
+
+
+class TestLmfIliRelationPairs:
+    def _write(self, tmp_path, lexicons, name='wn.xml'):
+        path = tmp_path / name
+        text = _LMF_HEADER + ''.join(lexicons) + '</LexicalResource>\n'
+        if name.endswith('.gz'):
+            import gzip
+            path.write_bytes(gzip.compress(text.encode()))
+        else:
+            path.write_text(text)
+        return path
+
+    def test_pairs_keyed_by_lexicon_spec_and_relation_type(self, tmp_path):
+        path = self._write(tmp_path, [_lexicon('a', '1.0',
+            _synset('a-1', 'i1', [('hypernym', 'a-2'), ('mero_part', 'a-2')])
+            + _synset('a-2', 'i2', [('mero_member', 'a-1')]))])
+        assert lmf_ili_relation_pairs(path) == {
+            'a:1.0': {
+                'hypernym': {('i1', 'i2')},
+                'mero_part': {('i1', 'i2')},
+                'mero_member': {('i2', 'i1')},
+            }
+        }
+
+    def test_only_requested_relation_types_are_collected(self, tmp_path):
+        path = self._write(tmp_path, [_lexicon('a', '1.0',
+            _synset('a-1', 'i1', [('hypernym', 'a-2'), ('antonym', 'a-2'), ('similar', 'a-2')])
+            + _synset('a-2', 'i2'))])
+        # symmetric types are not directed (and inverse-side types like
+        # hyponym are not in the checked list), so not collected by default
+        assert lmf_ili_relation_pairs(path) == {'a:1.0': {'hypernym': {('i1', 'i2')}}}
+        assert lmf_ili_relation_pairs(path, ('similar',)) == {'a:1.0': {'similar': {('i1', 'i2')}}}
+
+    def test_synsets_without_an_ili_or_with_a_proposed_one_are_skipped(self, tmp_path):
+        path = self._write(tmp_path, [_lexicon('a', '1.0',
+            _synset('a-1', 'i1', [('hypernym', 'a-2'), ('hypernym', 'a-3'), ('hypernym', 'a-4')])
+            + _synset('a-2', None, [('hypernym', 'a-1')])
+            + _synset('a-3', 'in', [('hypernym', 'a-1')])
+            + _synset('a-4', '', [('hypernym', 'a-1')])
+            + _synset('a-5', 'i5', [('hypernym', 'a-1')]))])
+        assert lmf_ili_relation_pairs(path) == {'a:1.0': {'hypernym': {('i5', 'i1')}}}
+
+    def test_target_missing_from_the_file_is_skipped(self, tmp_path):
+        path = self._write(tmp_path, [_lexicon('a', '1.0',
+            _synset('a-1', 'i1', [('hypernym', 'nowhere'), ('hypernym', 'a-2')])
+            + _synset('a-2', 'i2'))])
+        assert lmf_ili_relation_pairs(path) == {'a:1.0': {'hypernym': {('i1', 'i2')}}}
+
+    def test_target_declared_later_in_the_file_is_resolved(self, tmp_path):
+        path = self._write(tmp_path, [_lexicon('a', '1.0',
+            _synset('a-1', 'i1', [('hypernym', 'a-9')])
+            + _synset('a-9', 'i9'))])
+        assert lmf_ili_relation_pairs(path)['a:1.0'] == {'hypernym': {('i1', 'i9')}}
+
+    def test_several_lexicons_are_kept_apart_but_targets_resolve_across_them(self, tmp_path):
+        path = self._write(tmp_path, [
+            _lexicon('a', '1.0', _synset('a-1', 'i1', [('hypernym', 'b-1')])),
+            _lexicon('b', '2.0', _synset('b-1', 'i2', [('mero_part', 'a-1')])),
+        ])
+        assert lmf_ili_relation_pairs(path) == {
+            'a:1.0': {'hypernym': {('i1', 'i2')}},
+            'b:2.0': {'mero_part': {('i2', 'i1')}},
+        }
+
+    def test_lexicon_without_relations_still_appears(self, tmp_path):
+        path = self._write(tmp_path, [_lexicon('a', '1.0', _synset('a-1', 'i1'))])
+        assert lmf_ili_relation_pairs(path) == {'a:1.0': {}}
+
+    def test_duplicate_declarations_collapse_to_one_pair(self, tmp_path):
+        path = self._write(tmp_path, [_lexicon('a', '1.0',
+            _synset('a-1', 'i1', [('hypernym', 'a-2'), ('hypernym', 'a-2')])
+            + _synset('a-2', 'i2'))])
+        assert lmf_ili_relation_pairs(path)['a:1.0'] == {'hypernym': {('i1', 'i2')}}
+
+    def test_gzipped_input(self, tmp_path):
+        path = self._write(tmp_path, [_lexicon('a', '1.0',
+            _synset('a-1', 'i1', [('hypernym', 'a-2')]) + _synset('a-2', 'i2'))], name='wn.xml.gz')
+        assert lmf_ili_relation_pairs(path) == {'a:1.0': {'hypernym': {('i1', 'i2')}}}
+
+    def test_single_lexicon_pairs_returns_spec_and_pairs(self, tmp_path):
+        path = self._write(tmp_path, [_lexicon('a', '1.0',
+            _synset('a-1', 'i1', [('hypernym', 'a-2')]) + _synset('a-2', 'i2'))])
+        assert single_lexicon_pairs(path) == ('a:1.0', {'hypernym': {('i1', 'i2')}})
+
+    def test_single_lexicon_pairs_rejects_multi_lexicon_files(self, tmp_path):
+        path = self._write(tmp_path, [
+            _lexicon('a', '1.0', _synset('a-1', 'i1')),
+            _lexicon('b', '1.0', _synset('b-1', 'i2')),
+        ])
+        import pytest
+        with pytest.raises(RuntimeError, match='2 lexicons'):
+            single_lexicon_pairs(path)

@@ -329,8 +329,9 @@ old name and the log gains `format: "wn-lmf-1.4"`.
    and `wn.add()` of a cleaned fixture, the `cili.tsv` and `mtg.tsv`
    readers.  Also
    `scripts/make_table_examples.py`, `scripts/paper_facts.py`,
-   `scripts/check_all_relation_directions.py` (already loads sources
-   with `wn`).
+   `scripts/check_all_relation_directions.py` (reads `Synset@ili` and
+   `SynsetRelation` straight from the raw LMF with lxml, so it is
+   unaffected by the Cygnet XML going away).
 7. **Docs.**  `conversion_scripts/SCHEMA.md` (intermediate section),
    `CUSTOMIZE.md`, `README.md`, `REPORT.md`, the `wordnet-cygnet` skill.
 

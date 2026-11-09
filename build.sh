@@ -456,8 +456,13 @@ if $DO_BUILD; then
     # reads to auto-correct the direction during conversion (see
     # cyg.converters.load_direction_swap_config). The per-file cache
     # (.direction_check_cache.json) means only new/changed raw_wns files
-    # get re-run through this on subsequent builds.
+    # get re-run through this on subsequent builds. Only the files
+    # wordnets.toml selects are checked: the swap config is keyed by
+    # lexicon id, so a stray file in bin/raw_wns (an old release, a local
+    # test export) would otherwise get its swaps applied to the release
+    # Step 2 really converts.
     run_script check_all_relation_directions.py \
+        --wordnets-toml wordnets.toml \
         --write-swap-config bin/cygnets_presynth/relation_direction_swaps.json \
         --cache bin/cygnets_presynth/.direction_check_cache.json
     echo
