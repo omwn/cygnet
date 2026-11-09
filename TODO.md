@@ -9,9 +9,9 @@ senses.  Those cleaned files are then merged.  The public products
 (`cygnet.db.gz`, `provenance.db.gz`, the per-resource provenance splits)
 and the web UI read only SQLite, so neither changes.
 
-Status (2026-11-09): step 1 (prep) done on the `lmf-intermediate`
-branch; steps 2–7 not started.  Supersedes the 2026-10-11 plan.
-Decisions taken on 2026-11-09:
+Status (2026-11-09): steps 1 (prep) and 2 (merge reads LMF) done on the
+`lmf-intermediate` branch; steps 3–7 not started.  Supersedes the
+2026-10-11 plan.  Decisions taken on 2026-11-09:
 
 - The intermediate is one cleaned LMF file per source lexicon, useful on
   its own (loads in `wn`, validates, can be sent upstream as "your
@@ -284,14 +284,32 @@ old name and the log gains `format: "wn-lmf-1.4"`.
    provenance rows without an original id, and `cyg/cygnet.xsd` no
    longer enumerates relation types.  `tests/test_lmf.py`,
    `tests/test_export.py`.
-2. **Merge reads LMF.**  Add `MergeBuilder.process_lmf_file()` beside
-   `process_file()`, dispatching on the root tag.  Iterparse over
-   Lexicon → Synset / LexicalEntry / Sense / Definition / Example /
-   SynsetRelation / SenseRelation; the `note` parser; the `lexicalized`
-   skip; `dc:type` lookup.  Decide here whether per-file cycle removal
-   stays in merge or moves to the cleaner.  `6_synthesise.py` accepts a
-   mixed directory.  Test by merging a raw pass-through source (omw-sk)
-   directly and comparing with its converted output.
+2. **Merge reads LMF.**  *Done.*  `process_file()` dispatches on the
+   root tag to `process_lmf_file()`: a first pass indexes the Synsets and
+   creates the concepts (senses precede their synsets in LMF), a second
+   streams entries and synsets, and sense relations are resolved at the
+   end of the file.  The Cygnet handlers were split into `_do_*` parsers
+   and `_add_*` workers that both paths share, so the two formats cannot
+   drift.  Reading helpers (`pos_label`, `entry_written_forms`,
+   `lexeme_id`, `relation_type`, `relation_subtype`, `parse_note`,
+   `note_offsets`) live in `cyg/lmf.py` for the cleaner to reuse.
+   Decisions: per-file cycle removal stays in merge (the LMF path feeds
+   the same hypernym tracker); a `lexicalized="false"` Sense is skipped
+   but its Synset is kept (as the converter does for a single lexicon);
+   a Synset whose concept already exists adds no synset provenance (as
+   today, so CILI-linked synsets keep only their creator's row -- adding
+   one per file would give every wordnet deep links by synset id at the
+   cost of ~1.5M provenance rows; revisit); a same-file duplicate entry
+   is merged into the first (`_flush_forms()` before the lookup); a
+   relation written as its inverse-only type (`hyponym`, `is_caused_by`,
+   `holo_part`) is stored the forward way round (`canonical_relation()`),
+   where the old merge took such a type for unknown and made it
+   symmetric.
+   Fixture `tests/wordnets/lmf-xx.xml`, tests `tests/test_lmf_merge.py`;
+   omw-sk merged raw and converted gives identical tables; norwegian-nb
+   (450K relations), with its 80 repeated ILIs cleared as the cleaner
+   will do in step 3, differs only by the 280 relations the converter
+   dropped as already in OEWN, which are now kept by decision.
 3. **Cleaner.**  `cyg/clean.py` with the seven passes above, lifting the
    converter's existing logic pass by pass; `2_batch_convert_lmfs.py`
    calls it, writing to `bin/lmf_presynth/`; the `mul` planning shrinks

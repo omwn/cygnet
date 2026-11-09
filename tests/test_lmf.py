@@ -99,3 +99,67 @@ class TestLoadDirectionSwapConfig:
             'mero_part': {'reversed': 925, 'comparable': 935, 'reversed_share': 0.989},
             'hypernym': {'reversed': 1, 'comparable': 900, 'reversed_share': 0.001},
         }}
+
+
+class TestLmfReadingHelpers:
+    def test_pos_label(self):
+        assert [lmf.pos_label(p) for p in ('n', 's', 'u', '', None, 'zz')] == [
+            'NOUN', 'ADJ', 'UNK', 'UNK', 'UNK', 'UNK']
+
+    def test_entry_written_forms_lemma_first_then_sorted_distinct(self):
+        entry = etree.fromstring(
+            '<LexicalEntry id="e"><Lemma writtenForm="zebra" partOfSpeech="n"/>'
+            '<Form writtenForm="zebras"/><Form writtenForm="Zebra"/><Form writtenForm="zebra"/>'
+            '<Form/></LexicalEntry>')
+        assert lmf.entry_written_forms(entry) == ['zebra', 'Zebra', 'zebras']
+        assert lmf.entry_written_forms(etree.fromstring('<LexicalEntry id="e"/>')) == []
+
+    def test_lexeme_id_matches_the_converter_scheme(self):
+        assert lmf.lexeme_id('en', 'NOUN', ['dog', 'dogs']) == 'en.NOUN.dog-dogs'
+
+    def test_relation_type_and_subtype(self):
+        dc = 'xmlns:dc="https://globalwordnet.github.io/schemas/dc/"'
+        plain = etree.fromstring(f'<SynsetRelation {dc} relType="hypernym" target="t"/>')
+        other = etree.fromstring(
+            f'<SynsetRelation {dc} relType="other" dc:type="https://w3id.org/own/schema/agent" target="t"/>')
+        finer = etree.fromstring(
+            f'<SynsetRelation {dc} relType="diminutive" dc:type="plwn:56" dc:description="x" target="t"/>')
+        assert lmf.relation_type(plain) == 'hypernym'
+        assert lmf.relation_type(other) == 'agent'
+        assert lmf.relation_subtype(other, 'agent') == (None, None)
+        assert lmf.relation_type(finer) == 'diminutive'
+        assert lmf.relation_subtype(finer, 'diminutive') == ('plwn:56', 'x')
+
+    def test_parse_note_keeps_source_keys_and_ignores_bare_notes(self):
+        assert lmf.parse_note('R=1;F=2;offsets=0,3') == {'R': '1', 'F': '2', 'offsets': '0,3'}
+        assert lmf.parse_note('@is_primary') == {}
+        assert lmf.parse_note('offsets=0,3;offsets=5,8') == {'offsets': '0,3'}
+        assert lmf.parse_note(None) == {}
+
+    @pytest.mark.parametrize('note, expected', [
+        ('offsets=0,5', [(0, 5)]),
+        ('offsets=0,5 6,8', [(0, 5), (6, 8)]),
+        ('R=1;offsets=6,8', [(6, 8)]),
+        ('offsets=5,0', []),          # reversed
+        ('offsets=0,99', []),         # past the end
+        ('offsets=3,3', []),          # empty span
+        ('offsets=a,b', []),          # malformed
+        ('offsets=', []),
+        (None, []),
+    ])
+    def test_note_offsets(self, note, expected):
+        assert lmf.note_offsets(note, 'Koira haukkuu.') == expected
+
+
+class TestCanonicalRelation:
+    def test_inverse_only_type_is_turned_round(self):
+        assert lmf.canonical_relation('hyponym', 'a', 'b', lmf.CONCEPT_FORWARD_OF_INVERSE) == ('hypernym', 'b', 'a')
+        assert lmf.canonical_relation('has_feminine', 1, 2, lmf.SENSE_FORWARD_OF_INVERSE) == ('feminine', 2, 1)
+
+    def test_forward_symmetric_and_unknown_types_are_kept(self):
+        for rel in ('hypernym', 'antonym', 'other', 'plwn:19'):
+            assert lmf.canonical_relation(rel, 'a', 'b', lmf.CONCEPT_FORWARD_OF_INVERSE) == (rel, 'a', 'b')
+
+    def test_forward_of_inverse_covers_exactly_the_inverse_only_types(self):
+        assert set(lmf.CONCEPT_FORWARD_OF_INVERSE) == lmf.CONCEPT_INVERSE_ONLY_TYPES
+        assert lmf.CONCEPT_FORWARD_OF_INVERSE['is_caused_by'] == 'causes'

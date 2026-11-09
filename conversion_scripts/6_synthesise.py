@@ -58,11 +58,18 @@ def select_files(input_dir: Path) -> list[Path]:
 def is_concepts_lexicon(path: Path) -> bool:
     """True if a pre-synth file is a 'mul' concepts lexicon.
 
-    Its member lexicons' senses point at its concepts, and _do_sense() drops
-    a sense whose concept is not registered yet, so it must be merged first.
+    Its member lexicons' senses point at its concepts, and a sense whose
+    concept is not registered yet is dropped, so it must be merged first.
+    The language is on the root of a Cygnet XML file and on the first
+    Lexicon of a WN-LMF file.
     """
-    for _event, elem in etree.iterparse(str(path), events=('start',)):
-        return elem.get('language') == 'mul'
+    for _event, elem in etree.iterparse(str(path), events=('start',), load_dtd=False,
+                                        no_network=True, resolve_entities=False):
+        language = elem.get('language')
+        if language is not None:
+            return language == 'mul'
+        if etree.QName(elem).localname not in ('LexicalResource',):
+            return False
     return False
 
 

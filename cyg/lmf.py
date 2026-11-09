@@ -10,13 +10,15 @@ them.  See TODO.md, "Replace the Cygnet XML schema with GWA WN-LMF".
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from lxml import etree
 
-from cyg.multilex import dc_attr, fix_language
+from cyg.multilex import dc_attr, encode_for_xml_id, fix_language
 
 __all__ = [
+    'CONCEPT_FORWARD_OF_INVERSE',
     'CONCEPT_INVERSE_ONLY_TYPES',
     'CONCEPT_REVERSE_RELATIONS',
     'CONCEPT_SYMMETRIC_TYPES',
@@ -24,16 +26,207 @@ __all__ = [
     'DIRECTION_SWAP_CONFIG_FILENAME',
     'INVERSE_CONCEPT_RELATIONS',
     'INVERSE_SENSE_RELATIONS',
+    'POS_LABELS',
+    'SENSE_FORWARD_OF_INVERSE',
     'SENSE_INVERSE_ONLY_TYPES',
     'SENSE_REVERSE_RELATIONS',
     'SENSE_SYMMETRIC_TYPES',
     'below_confidence_threshold',
+    'canonical_relation',
+    'entry_written_forms',
     'fix_language',
+    'forward_of_inverse',
     'inverse_only_types',
     'is_forward_relation',
+    'lexeme_id',
     'load_direction_swap_config',
+    'note_offsets',
+    'parse_note',
+    'pos_label',
+    'relation_subtype',
+    'relation_type',
+    'shorten_uri',
     'symmetric_types',
 ]
+
+# WN-LMF partOfSpeech code -> the label the database stores.  's' (adjective
+# satellite) is an adjective; anything else unknown is 'u'.
+POS_LABELS = {
+    'n': 'NOUN',
+    'v': 'VERB',
+    'a': 'ADJ',
+    'r': 'ADV',
+    's': 'ADJ',
+    'c': 'CONJ',
+    'p': 'ADP',
+    'x': 'NREF',
+    'u': 'UNK',
+}
+
+
+def pos_label(pos: str | None) -> str:
+    """The database's label for an LMF partOfSpeech code.
+
+    Args:
+        pos: The code as written in the file ('n', 's', '' ...).
+
+    Returns:
+        The label; 'UNK' for a missing or unknown code.
+    """
+    return POS_LABELS.get(pos or '', POS_LABELS['u'])
+
+
+def entry_written_forms(entry: etree._Element) -> list[str]:
+    """A LexicalEntry's distinct written forms, lemma first, the rest
+    sorted, as they identify the entry.
+
+    Args:
+        entry: A LexicalEntry element (Lemma, Form and ExternalForm children).
+
+    Returns:
+        The forms; empty if the entry has no lemma with a written form.
+    """
+    lemma = entry.find('Lemma')
+    lemma_form = lemma.get('writtenForm') if lemma is not None else None
+    if not lemma_form:
+        return []
+    others = {
+        form.get('writtenForm')
+        for form in entry.iterchildren('Form', 'ExternalForm')
+        if form.get('writtenForm')
+    }
+    others.discard(lemma_form)
+    return [lemma_form, *sorted(others)]
+
+
+def lexeme_id(language: str, pos: str, forms: list[str]) -> str:
+    """The id under which the merge unifies entries across files: one per
+    (language, POS label, set of written forms).
+
+    Args:
+        language: The lexicon's language code.
+        pos: The POS label (see pos_label()).
+        forms: The written forms, as entry_written_forms() orders them.
+
+    Returns:
+        An id such as 'en.NOUN.dog-domestic_dog'.
+    """
+    return f"{language}.{pos}.{'-'.join(encode_for_xml_id(f) for f in forms)}"
+
+
+def shorten_uri(value: str) -> str:
+    """The local name of a URI-shaped value: its last path segment or
+    fragment (e.g. 'https://w3id.org/own/schema/agent' -> 'agent').
+
+    Args:
+        value: A relation type as written by the source.
+
+    Returns:
+        The local name, or *value* unchanged if it isn't URI-shaped.
+    """
+    if '://' not in value:
+        return value
+    return re.split(r'[/#]', value.rstrip('/'))[-1]
+
+
+def relation_type(rel: etree._Element) -> str:
+    """A relation's type: its dc:type when relType is 'other' and one is given.
+
+    LMF expresses relations outside its fixed list as relType="other" with
+    dc:type naming the real relation (e.g. "possessive").  Keeping only
+    'other' would merge distinct relations and make inverse pairs look like
+    reversed duplicates.  A source that uses its own ontology's URI instead
+    of a bare word (own-pt's "https://w3id.org/own/schema/agent") is
+    shortened to its local name, so it still matches the catalog.
+
+    Args:
+        rel: A SynsetRelation or SenseRelation element.
+
+    Returns:
+        The type name.
+    """
+    rel_type = rel.get('relType')
+    if rel_type != 'other':
+        return rel_type
+    raw = dc_attr(rel, 'type')
+    return shorten_uri(raw) if raw else rel_type
+
+
+def relation_subtype(rel: etree._Element, resolved_type: str) -> tuple[str | None, str | None]:
+    """A finer-grained sub-relation code and/or human-readable label the
+    source gives beyond *resolved_type*, or (None, None) when there is none.
+
+    Some sources attach a dc:type more specific than their relType
+    (plWordnet's relType="diminutive" dc:type="plwn:56", a particular
+    diminutive subtype), which relation_type() does not surface since it
+    only substitutes dc:type for relType="other".  dc:description (or
+    dc:relation, for the one case that names the general relation family
+    instead of the specific sub-code -- plWordnet's "unresolved aspect
+    orientation" export-compatibility relations) gives a label for it, in
+    the source's own language.  A URI-shaped dc:type (own-pt's ontology) is
+    another spelling of the type itself, not a finer subtype.
+
+    Args:
+        rel: A SynsetRelation or SenseRelation element.
+        resolved_type: What relation_type() returned for it.
+
+    Returns:
+        (subtype, label), each None when absent.
+    """
+    raw = dc_attr(rel, 'type')
+    subtype = raw if raw and '://' not in raw and raw != resolved_type else None
+    label = dc_attr(rel, 'description') or dc_attr(rel, 'relation')
+    return subtype, label
+
+
+def parse_note(note: str | None) -> dict[str, str]:
+    """The key=value pairs of a note attribute, split on ';'.
+
+    Cygnet writes its own keys ('offsets', 'merged') after whatever the
+    source had (TUFS uses "R=...;F=...", EstWN "@is_primary").  Parts
+    without '=' are not keys and are ignored; a repeated key keeps its first
+    value, the source's.
+
+    Args:
+        note: The note attribute, or None.
+
+    Returns:
+        {key: value}.
+    """
+    pairs: dict[str, str] = {}
+    for part in (note or '').split(';'):
+        key, sep, value = part.strip().partition('=')
+        if sep and key and key not in pairs:
+            pairs[key] = value.strip()
+    return pairs
+
+
+def note_offsets(note: str | None, text: str) -> list[tuple[int, int]]:
+    """The spans an Example's note marks as the annotated sense's word.
+
+    'offsets' is a space-separated list of 'start,end' pairs: 0-based code
+    point offsets into *text*, end exclusive.  A malformed or out-of-range
+    span is dropped.
+
+    Args:
+        note: The Example's note attribute.
+        text: The Example's text.
+
+    Returns:
+        The valid (start, end) spans, in the order written.
+    """
+    raw = parse_note(note).get('offsets')
+    if not raw:
+        return []
+    spans = []
+    for pair in raw.split():
+        start, sep, end = pair.partition(',')
+        if not sep or not start.isdigit() or not end.isdigit():
+            continue
+        start_i, end_i = int(start), int(end)
+        if start_i < end_i <= len(text):
+            spans.append((start_i, end_i))
+    return spans
 
 # Maps each forward relation type to its inverse (or itself if symmetric, None if no inverse).
 # Used to deduplicate, add missing inverses, and identify canonical direction.
@@ -198,6 +391,44 @@ def symmetric_types(reverse: dict[str, str | None]) -> frozenset[str]:
 
 SENSE_INVERSE_ONLY_TYPES = inverse_only_types(SENSE_REVERSE_RELATIONS)
 CONCEPT_INVERSE_ONLY_TYPES = inverse_only_types(CONCEPT_REVERSE_RELATIONS)
+
+
+def forward_of_inverse(reverse: dict[str, str | None]) -> dict[str, str]:
+    """Inverse-only type -> its forward type ('hyponym' -> 'hypernym').
+
+    Args:
+        reverse: SENSE_REVERSE_RELATIONS or CONCEPT_REVERSE_RELATIONS.
+
+    Returns:
+        The mapping, for the inverse-only types (see inverse_only_types()).
+    """
+    only = inverse_only_types(reverse)
+    return {inv: fwd for fwd, inv in reverse.items() if inv in only}
+
+
+SENSE_FORWARD_OF_INVERSE = forward_of_inverse(SENSE_REVERSE_RELATIONS)
+CONCEPT_FORWARD_OF_INVERSE = forward_of_inverse(CONCEPT_REVERSE_RELATIONS)
+
+
+def canonical_relation(
+    rel_type: str, source, target, forward_of: dict[str, str],
+) -> tuple[str, object, object]:
+    """A relation in the forward direction: an inverse-only type is turned
+    round ('A hyponym B' becomes 'B hypernym A'), anything else is kept.
+
+    Args:
+        rel_type: The relation type as written.
+        source: The source id.
+        target: The target id.
+        forward_of: SENSE_FORWARD_OF_INVERSE or CONCEPT_FORWARD_OF_INVERSE.
+
+    Returns:
+        (type, source, target).
+    """
+    forward = forward_of.get(rel_type)
+    if forward is None:
+        return rel_type, source, target
+    return forward, target, source
 SENSE_SYMMETRIC_TYPES = symmetric_types(SENSE_REVERSE_RELATIONS)
 CONCEPT_SYMMETRIC_TYPES = symmetric_types(CONCEPT_REVERSE_RELATIONS)
 

@@ -9,7 +9,6 @@ import gc
 import html
 import json
 import logging
-import re
 import sys
 from collections import OrderedDict, defaultdict
 from pathlib import Path
@@ -19,7 +18,6 @@ from lxml import etree
 
 from cyg.multilex import (
     SharedConcepts,
-    dc_attr,
     dc_identifier,
     encode_for_xml_id,
     fix_language,
@@ -29,9 +27,13 @@ from cyg.lmf import (
     CONCEPT_REVERSE_RELATIONS,
     CONFIDENCE_THRESHOLD,
     DIRECTION_SWAP_CONFIG_FILENAME,
+    POS_LABELS,
     SENSE_REVERSE_RELATIONS,
     below_confidence_threshold,
     load_direction_swap_config,
+    relation_subtype,
+    relation_type,
+    shorten_uri,
 )
 from cyg.presynth import log_path as presynth_log_path
 import spacy
@@ -83,17 +85,7 @@ def release_memory() -> None:
     if malloc_trim is not None:
         malloc_trim(0)
 
-NEW_POS_LABELS = {
-    'n': 'NOUN',
-    'v': 'VERB',
-    'a': 'ADJ',
-    'r': 'ADV',
-    's': 'ADJ',  # adjective satellite -> adjective
-    'c': 'CONJ',
-    'p': 'ADP',
-    'x': 'NREF',
-    'u': 'UNK'
-}
+NEW_POS_LABELS = POS_LABELS
 
 CONCEPT_RELATIONS_REQUIRING_SAME_CATEGORY = {
     'hypernym',
@@ -1399,59 +1391,11 @@ class WordNetToCygnetConverter:
 
         return None
 
-    @staticmethod
-    def _shorten_uri(value: str) -> str:
-        """The local name of a URI-shaped value: its last path segment or
-        fragment (e.g. "https://w3id.org/own/schema/agent" -> "agent").
-        Returns *value* unchanged if it isn't URI-shaped.
-        """
-        if '://' not in value:
-            return value
-        return re.split(r'[/#]', value.rstrip('/'))[-1]
-
-    @staticmethod
-    def _relation_type(rel: etree.Element) -> str:
-        """A relation's type: its dc:type when relType is 'other' and one is given.
-
-        LMF expresses relations outside its fixed list as relType="other"
-        with dc:type naming the real relation (e.g. "possessive").  Keeping
-        only 'other' would merge distinct relations and make inverse pairs
-        look like reversed duplicates. A source that uses its own ontology's
-        URI instead of a bare word (e.g. own-pt's "https://w3id.org/own/
-        schema/agent") is shortened to its local name, so it still matches
-        the catalog.
-        """
-        rel_type = rel.get('relType')
-        if rel_type != 'other':
-            return rel_type
-        raw = dc_attr(rel, 'type')
-        return WordNetToCygnetConverter._shorten_uri(raw) if raw else rel_type
-
-    @staticmethod
-    def _relation_subtype(rel: etree.Element, resolved_type: str) -> tuple[str | None, str | None]:
-        """A finer-grained sub-relation code and/or human-readable label the
-        source gives beyond *resolved_type*, or (None, None) when there is
-        none.
-
-        Some sources attach a dc:type more specific than their relType
-        (e.g. plWordnet's relType="diminutive" dc:type="plwn:56" -- a
-        particular diminutive subtype), which _relation_type() does not
-        otherwise surface since it only substitutes dc:type for relType=
-        "other". dc:description (or dc:relation, for the one case that
-        names the general relation family instead of the specific
-        sub-code -- see plWordnet's "unresolved aspect orientation"
-        export-compatibility relations) gives a human-readable label for it,
-        in the source's own language.
-
-        A URI-shaped dc:type (own-pt's own ontology) is treated as another
-        spelling of the relation type itself, not a finer subtype --
-        _relation_type() already resolved it, so it carries no extra
-        information here.
-        """
-        raw = dc_attr(rel, 'type')
-        subtype = raw if raw and '://' not in raw and raw != resolved_type else None
-        label = dc_attr(rel, 'description') or dc_attr(rel, 'relation')
-        return subtype, label
+    # The relation-type readers live in cyg.lmf; kept here as the names
+    # this class's callers and tests use.
+    _shorten_uri = staticmethod(shorten_uri)
+    _relation_type = staticmethod(relation_type)
+    _relation_subtype = staticmethod(relation_subtype)
 
     def pass3_relations(self, root: etree.Element):
         """

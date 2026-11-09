@@ -15,7 +15,21 @@ from pathlib import Path
 import langcodes
 from lxml import etree as ET
 
-from cyg.lmf import INVERSE_CONCEPT_RELATIONS, INVERSE_SENSE_RELATIONS
+from cyg.lmf import (
+    CONCEPT_FORWARD_OF_INVERSE,
+    INVERSE_CONCEPT_RELATIONS,
+    INVERSE_SENSE_RELATIONS,
+    SENSE_FORWARD_OF_INVERSE,
+    canonical_relation,
+    entry_written_forms,
+    lexeme_id,
+    note_offsets,
+    parse_note,
+    pos_label,
+    relation_subtype,
+    relation_type,
+)
+from cyg.multilex import open_xml
 
 logger = logging.getLogger(__name__)
 
@@ -409,6 +423,47 @@ def parse_annotated_sentence(elem) -> tuple[str, list[dict]]:
     return ''.join(parts), annotations
 
 
+def root_tag(xml_file: Path) -> str | None:
+    """The local name of an XML file's root element, read without parsing
+    the rest.
+
+    Args:
+        xml_file: An XML file (.xml, .xml.gz or .xml.xz).
+
+    Returns:
+        The tag, or None for an empty file.
+    """
+    with open_xml(xml_file) as f:
+        for _event, elem in ET.iterparse(f, events=('start',), load_dtd=False,
+                                         no_network=True, resolve_entities=False):
+            return ET.QName(elem).localname
+    return None
+
+
+class _LmfFileState:
+    """What process_lmf_file() carries through one file."""
+
+    def __init__(self, index: dict[str, tuple[str, str]]) -> None:
+        self.index = index                       # synset id -> (concept id, POS)
+        self.lexicon = self.version = self.language = None
+        self.sense_ids: dict[str, str] = {}      # source sense id -> merged sense id
+        self.sense_relations: list[tuple] = []   # deferred until every sense exists
+        self.skipped: dict[str, int] = {
+            'entries without a lemma': 0,
+            'unlexicalized senses': 0,
+            'senses of an unknown synset': 0,
+            'sense relations to an unknown sense': 0,
+            'synset relations to an unknown synset': 0,
+            'synset-level examples (no sense)': 0,
+        }
+
+    def enter_lexicon(self, elem) -> None:
+        """Note the Lexicon (or LexiconExtension) the next elements belong to."""
+        self.lexicon = elem.get('id')
+        self.version = elem.get('version')
+        self.language = elem.get('language')
+
+
 # ---------------------------------------------------------------------------
 # Main builder class
 # ---------------------------------------------------------------------------
@@ -585,56 +640,115 @@ class MergeBuilder:
             self._prov_table_cache, self.prov_cur, 'prov_tables', 'name', name,
         )
 
-    def _insert_prov(self, table_name: str, item_rowid: int, prov_elems) -> int:
+    def _insert_prov(
+        self, table_name: str, item_rowid: int,
+        prov: list[tuple[str, str | None, str | None]],
+    ) -> int:
+        """Record where an item came from.
+
+        Args:
+            table_name: The item's table ('synsets', 'senses', ...).
+            item_rowid: Its rowid.
+            prov: (resource code, version, original id) per contributing
+                source; version and original id may be None.
+
+        Returns:
+            The number of rows recorded.
+        """
         # Called once per item (~10M times), so look the caches up directly.
         table_rowid = (self._prov_table_cache.get(table_name)
                        or self._prov_table_rowid(table_name))
         resources = self._prov_resource_cache
         append = self._prov_buf.append
-        count = 0
-        for p in prov_elems:
-            resource = p.get('resource')
-            if resource:
-                append((
-                    table_rowid, item_rowid,
-                    resources.get(resource) or self._prov_resource_rowid(resource),
-                    p.get('version'), p.get('original_id'),
-                ))
-                count += 1
+        for resource, version, original_id in prov:
+            append((
+                table_rowid, item_rowid,
+                resources.get(resource) or self._prov_resource_rowid(resource),
+                version, original_id,
+            ))
         if len(self._prov_buf) >= BATCH_SIZE:
             self._flush_prov()
-        return count
+        return len(prov)
+
+    @staticmethod
+    def _prov_rows(elem) -> list[tuple[str, str | None, str | None]]:
+        """(resource, version, original_id) of a Cygnet element's Provenance children."""
+        return [
+            (p.get('resource'), p.get('version'), p.get('original_id'))
+            for p in elem.findall('Provenance') if p.get('resource')
+        ]
 
     # --- Element processors ---
+    # Each _do_* reads one pre-synth Cygnet element and hands plain values
+    # to the _add_* method that does the work; process_lmf_file() calls the
+    # _add_* methods directly.
 
     def _do_concept(self, elem) -> None:
-        cid = elem.get('id')
+        self._add_concept(elem.get('id'), elem.get('ontological_category'),
+                          self._prov_rows(elem))
+
+    def _add_concept(self, cid: str, pos: str | None, prov: list[tuple]) -> None:
+        """Create a concept.
+
+        Args:
+            cid: Its id: 'cili.<ili>' for an ILI concept, else a local id.
+            pos: Its part of speech label.
+            prov: Provenance rows (see _insert_prov).
+
+        Raises:
+            ValueError: If the id was already created.
+        """
         if cid in self.synset_id_to_rowid:
             raise ValueError(f'Duplicate concept id: {cid}')
         ili = cid.removeprefix('cili.') if cid.startswith('cili.') else None
         rowid = self._next_synset_id
         self._next_synset_id += 1
-        self._synsets_buf.append((rowid, ili, elem.get('ontological_category')))
+        self._synsets_buf.append((rowid, ili, pos))
         self.synset_id_to_rowid[cid] = rowid
         self._synset_rowid_to_ili[rowid] = cid
-        self.n_prov += self._insert_prov('synsets', rowid, elem.findall('Provenance'))
+        self.n_prov += self._insert_prov('synsets', rowid, prov)
         self.n_synsets += 1
 
     def _do_lexeme(self, elem) -> None:
-        lid = elem.get('id')
+        forms = []
+        for wf in elem.findall('Wordform'):
+            form = wf.get('form')
+            if not form:
+                continue
+            forms.append((form, [
+                (p.get('variety'), p.text or '', p.get('audio'))
+                for p in wf.findall('Pronunciation') if p.text or p.get('audio')
+            ]))
+        self._add_lexeme(elem.get('id'), elem.get('language'),
+                         elem.get('grammatical_category'), forms, self._prov_rows(elem))
+
+    def _add_lexeme(
+        self, lid: str, language: str, pos: str | None,
+        forms: list[tuple[str, list[tuple[str | None, str, str | None]]]],
+        prov: list[tuple],
+    ) -> None:
+        """Create a lexical entry, or merge into the one with the same id.
+
+        Args:
+            lid: The id entries are unified by (see cyg.lmf.lexeme_id).
+            language: Language code.
+            pos: Part of speech label.
+            forms: (written form, [(variety, pronunciation, audio), ...]) in
+                rank order; a form seen twice keeps its first occurrence.
+            prov: Provenance rows (see _insert_prov).
+        """
         if lid in self.entry_id_to_rowid:
-            # Merge: same lexeme in a second wordnet — add new wordforms and
+            # Merge: same lexeme in a second wordnet -- add new wordforms and
             # any new pronunciations (including audio) for existing wordforms.
             entry_rowid = self.entry_id_to_rowid[lid]
+            # The first entry's forms may still be buffered (same file).
+            self._flush_forms()
             existing_rows = self.cur.execute(
                 'SELECT rowid, form, rank FROM forms WHERE entry_rowid = ?', (entry_rowid,)
             ).fetchall()
             existing = {form: rowid for rowid, form, _rank in existing_rows}
             new_rank = (max(r for _, _, r in existing_rows) + 1) if existing_rows else 0
-            for wf in elem.findall('Wordform'):
-                form = wf.get('form')
-                if not form:
-                    continue
+            for form, prons in forms:
                 form = normalize_form(form)
                 if form not in existing:
                     fid = self._next_form_id
@@ -645,17 +759,13 @@ class MergeBuilder:
                     existing[form] = fid
                     new_rank += 1
                     self.n_forms += 1
-                    for p in wf.findall('Pronunciation'):
-                        audio = p.get('audio')
-                        if p.text or audio:
-                            pid = self._next_pronunciation_id
-                            self._next_pronunciation_id += 1
-                            self._pronunciations_buf.append(
-                                (pid, fid, p.get('variety'), p.text or '', audio)
-                            )
-                            self.n_pronunciations += 1
+                    for variety, ptext, audio in prons:
+                        pid = self._next_pronunciation_id
+                        self._next_pronunciation_id += 1
+                        self._pronunciations_buf.append((pid, fid, variety, ptext, audio))
+                        self.n_pronunciations += 1
                 else:
-                    # Form exists — add any pronunciations not already present.
+                    # Form exists -- add any pronunciations not already present.
                     # Audio-only records attach to the single existing IPA entry
                     # when unambiguous, rather than adding a redundant record.
                     fid = existing[form]
@@ -664,14 +774,9 @@ class MergeBuilder:
                         'SELECT variety, pronunciation, audio FROM pronunciations'
                         ' WHERE form_rowid = ?', (fid,)
                     ).fetchall()
-                    for p in wf.findall('Pronunciation'):
-                        audio = p.get('audio')
-                        ptext = p.text or ''
-                        variety = p.get('variety')
-                        # Skip if exact record already exists
+                    for variety, ptext, audio in prons:
                         if any(ev == variety and ep == ptext for ev, ep, _ in existing_prons):
                             continue
-                        # Audio-only: attach to the single existing entry without audio
                         if audio and not ptext:
                             without_audio = [(ev, ep, ea) for ev, ep, ea in existing_prons
                                              if not ea]
@@ -681,55 +786,43 @@ class MergeBuilder:
                                     ' WHERE form_rowid = ? AND variety IS ? AND pronunciation = ?',
                                     (audio, fid, without_audio[0][0], without_audio[0][1])
                                 )
-                                # Reflect the update in local cache
                                 ev, ep, _ = without_audio[0]
                                 existing_prons = [(v, t, a if (v != ev or t != ep) else audio)
                                                   for v, t, a in existing_prons]
                                 continue
-                        if ptext or audio:
-                            pid = self._next_pronunciation_id
-                            self._next_pronunciation_id += 1
-                            self._pronunciations_buf.append((pid, fid, variety, ptext, audio))
-                            existing_prons.append((variety, ptext, audio))
-                            self.n_pronunciations += 1
-            self.n_prov += self._insert_prov(
-                'entries', entry_rowid, elem.findall('Provenance')
-            )
+                        pid = self._next_pronunciation_id
+                        self._next_pronunciation_id += 1
+                        self._pronunciations_buf.append((pid, fid, variety, ptext, audio))
+                        existing_prons.append((variety, ptext, audio))
+                        self.n_pronunciations += 1
+            self.n_prov += self._insert_prov('entries', entry_rowid, prov)
             return
 
-        # Build form rows first; skip entry entirely if no valid forms
+        # Build form rows first; skip the entry entirely if it has no form.
         seen: set[str] = set()
         form_rows: list[tuple] = []
         pron_rows: list[tuple] = []  # (fid, variety, text, audio)
-        for wf in elem.findall('Wordform'):
-            form = wf.get('form')
-            if form:
-                form = normalize_form(form)
-            if form and form not in seen:
-                seen.add(form)
-                fid = self._next_form_id
-                self._next_form_id += 1
-                form_rows.append(
-                    (fid, 0, form, remove_accents(form.lower()), len(form_rows))
-                )
-                for p in wf.findall('Pronunciation'):
-                    audio = p.get('audio')
-                    if p.text or audio:
-                        pron_rows.append((fid, p.get('variety'), p.text or '', audio))
+        for form, prons in forms:
+            form = normalize_form(form)
+            if form in seen:
+                continue
+            seen.add(form)
+            fid = self._next_form_id
+            self._next_form_id += 1
+            form_rows.append((fid, form, remove_accents(form.lower()), len(form_rows)))
+            pron_rows.extend((fid, variety, ptext, audio) for variety, ptext, audio in prons)
         if not form_rows:
             return
 
-        lang_rowid = self._lang_rowid(elem.get('language'))
+        lang_rowid = self._lang_rowid(language)
         entry_rowid = self._next_entry_id
         self._next_entry_id += 1
-        self._entries_buf.append((entry_rowid, lang_rowid, elem.get('grammatical_category')))
+        self._entries_buf.append((entry_rowid, lang_rowid, pos))
         self.entry_id_to_rowid[lid] = entry_rowid
-        self.n_prov += self._insert_prov(
-            'entries', entry_rowid, elem.findall('Provenance')
-        )
+        self.n_prov += self._insert_prov('entries', entry_rowid, prov)
         self.n_entries += 1
 
-        for fid, _, form, norm, rank in form_rows:
+        for fid, form, norm, rank in form_rows:
             self._forms_buf.append((fid, entry_rowid, form, norm, rank))
         self.n_forms += len(form_rows)
         if len(self._forms_buf) >= BATCH_SIZE:
@@ -742,8 +835,21 @@ class MergeBuilder:
         self.n_pronunciations += len(pron_rows)
 
     def _do_sense(self, elem) -> None:
-        entry_rowid = self.entry_id_to_rowid.get(elem.get('signifier'))
-        synset_rowid = self.synset_id_to_rowid.get(elem.get('signified'))
+        self._add_sense(elem.get('id'), elem.get('signifier'), elem.get('signified'),
+                        self._prov_rows(elem))
+
+    def _add_sense(self, sid: str, lexeme: str, concept: str, prov: list[tuple]) -> None:
+        """Create a sense, unless its entry or concept is unknown or the pair
+        already has one.
+
+        Args:
+            sid: The sense id later relations and examples refer to.
+            lexeme: The entry's id (see _add_lexeme).
+            concept: The concept's id (see _add_concept).
+            prov: Provenance rows (see _insert_prov).
+        """
+        entry_rowid = self.entry_id_to_rowid.get(lexeme)
+        synset_rowid = self.synset_id_to_rowid.get(concept)
         if not entry_rowid or not synset_rowid:
             return
         key = (entry_rowid, synset_rowid)
@@ -753,46 +859,55 @@ class MergeBuilder:
         sense_rowid = self._next_sense_id
         self._next_sense_id += 1
         self._senses_buf.append((sense_rowid, entry_rowid, synset_rowid))
-        sid = elem.get('id')
         self.sense_id_to_rowid[sid] = sense_rowid
         self._sense_rowid_to_id[sense_rowid] = sid
-        self.n_prov += self._insert_prov(
-            'senses', sense_rowid, elem.findall('Provenance')
-        )
+        self.n_prov += self._insert_prov('senses', sense_rowid, prov)
         self.n_senses += 1
         if len(self._senses_buf) >= BATCH_SIZE:
             self._flush_senses()
 
     def _do_gloss(self, elem) -> None:
-        synset_rowid = self.synset_id_to_rowid.get(elem.get('definiendum'))
+        text, annotations = parse_annotated_sentence(elem.find('AnnotatedSentence'))
+        self._add_gloss(elem.get('definiendum'), elem.get('language'), text, annotations,
+                        elem.get('translated_from'), self._prov_rows(elem))
+
+    def _add_gloss(
+        self, concept: str, language: str | None, text: str, annotations: list[dict],
+        translated_from: str | None, prov: list[tuple],
+    ) -> None:
+        """Add a definition: the first per (concept, language) is kept, a
+        later one only adds its provenance, and a non-English copy of an
+        English one is dropped.
+
+        Args:
+            concept: The defined concept's id.
+            language: The definition's language code.
+            text: The definition.
+            annotations: {'sense', 'start', 'end'} per annotated span.
+            translated_from: Source language of a machine translation, if any.
+            prov: Provenance rows (see _insert_prov).
+        """
+        synset_rowid = self.synset_id_to_rowid.get(concept)
         if not synset_rowid:
             return
-        language = elem.get('language')
-        text, annotations = parse_annotated_sentence(elem.find('AnnotatedSentence'))
         if self._is_english_copy(synset_rowid, language, text):
-            prov = elem.find('Provenance')
-            resource = prov.get('resource', '') if prov is not None else ''
+            resource = prov[0][0] if prov else ''
             self.english_glosses_dropped[resource] = (
                 self.english_glosses_dropped.get(resource, 0) + 1)
             return
         lang_rowid = self._lang_rowid(language)
         key = (synset_rowid, lang_rowid)
         if key in self._gloss_keys:
-            self.n_prov += self._insert_prov(
-                'definitions', self._gloss_keys[key], elem.findall('Provenance')
-            )
+            self.n_prov += self._insert_prov('definitions', self._gloss_keys[key], prov)
             return
         def_rowid = self._next_def_id
         self._next_def_id += 1
         self._gloss_keys[key] = def_rowid
-        translated_from = elem.get('translated_from')
         translated_from_rowid = self._lang_rowid(translated_from) if translated_from else None
         self._defs_buf.append(
             (def_rowid, synset_rowid, text, lang_rowid, translated_from_rowid)
         )
-        self.n_prov += self._insert_prov(
-            'definitions', def_rowid, elem.findall('Provenance')
-        )
+        self.n_prov += self._insert_prov('definitions', def_rowid, prov)
         self.n_defs += 1
 
         for ann in annotations:
@@ -828,13 +943,27 @@ class MergeBuilder:
                 and folded in self._english_glosses.get(synset_rowid, ()))
 
     def _do_example(self, elem) -> None:
-        sentence = elem.find('AnnotatedSentence')
-        text, annotations = parse_annotated_sentence(sentence)
+        text, annotations = parse_annotated_sentence(elem.find('AnnotatedSentence'))
+        self._add_example(text, annotations, set(), self._prov_rows(elem))
 
+    def _add_example(
+        self, text: str, annotations: list[dict], owners: set[str], prov: list[tuple],
+    ) -> None:
+        """Add an example sentence to the senses it illustrates.
+
+        Args:
+            text: The sentence.
+            annotations: {'sense', 'start', 'end'} per span marking a sense's
+                word; each annotated sense is an owner too.
+            owners: Ids of further senses the example belongs to (an LMF
+                Example sits under its Sense whether or not a word in it
+                could be located).
+            prov: Provenance rows (see _insert_prov).
+        """
         referenced = {
-            self.sense_id_to_rowid[a['sense']]
-            for a in annotations
-            if a['sense'] in self.sense_id_to_rowid
+            self.sense_id_to_rowid[sid]
+            for sid in owners | {a['sense'] for a in annotations}
+            if sid in self.sense_id_to_rowid
         }
         if not referenced:
             return
@@ -842,9 +971,7 @@ class MergeBuilder:
         ex_rowid = self._next_example_id
         self._next_example_id += 1
         self._examples_buf.append((ex_rowid, text))
-        self.n_prov += self._insert_prov(
-            'examples', ex_rowid, elem.findall('Provenance')
-        )
+        self.n_prov += self._insert_prov('examples', ex_rowid, prov)
         self.n_examples += 1
 
         for sense_rowid in referenced:
@@ -857,16 +984,36 @@ class MergeBuilder:
                 )
 
     def _do_sense_relation(self, elem) -> None:
-        rel_type = elem.get('relation_type')
-        source = self.sense_id_to_rowid.get(elem.get('source'))
-        target = self.sense_id_to_rowid.get(elem.get('target'))
+        self._add_sense_relation(
+            elem.get('relation_type'), elem.get('source'), elem.get('target'),
+            elem.get('subtype'), elem.get('subtype_label'), self._prov_rows(elem))
+
+    def _add_sense_relation(
+        self, rel_type: str, source_id: str, target_id: str,
+        subtype: str | None, subtype_label: str | None, prov: list[tuple],
+    ) -> None:
+        """Add a sense relation and its inverse, unless the reversed relation
+        is already there (a conflict, recorded) or either sense is unknown.
+        A relation given as its inverse-only type ('has_feminine') is
+        stored the forward way round.
+
+        Args:
+            rel_type: The relation type.
+            source_id: The source sense's id.
+            target_id: The target sense's id.
+            subtype: A finer sub-relation code, if the source gives one.
+            subtype_label: Its label.
+            prov: Provenance rows (see _insert_prov); the first names the
+                resource the relation is attributed to.
+        """
+        rel_type, source_id, target_id = canonical_relation(
+            rel_type, source_id, target_id, SENSE_FORWARD_OF_INVERSE)
+        source = self.sense_id_to_rowid.get(source_id)
+        target = self.sense_id_to_rowid.get(target_id)
         if not source or not target:
             return
 
-        subtype = elem.get('subtype')
-        subtype_label = elem.get('subtype_label')
-        prov_elems = elem.findall('Provenance')
-        current_resource = prov_elems[0].get('resource') if prov_elems else ''
+        current_resource = prov[0][0] if prov else ''
         type_rowid = self._rel_type_rowid(rel_type)
         # Unknown types (e.g. a resource's own relType="other" + dc:type
         # subtype, like plWordnet's "fuzzynimia"/"bliskoznaczność") default
@@ -908,7 +1055,7 @@ class MergeBuilder:
             self._next_sense_rel_id += 1
             self._sense_rels_buf.append(
                 (sr_rowid, source, target, type_rowid, subtype, subtype_label))
-            self.n_prov += self._insert_prov('sense_relations', sr_rowid, prov_elems)
+            self.n_prov += self._insert_prov('sense_relations', sr_rowid, prov)
             self.n_sense_rels += 1
 
         if inv:
@@ -923,18 +1070,35 @@ class MergeBuilder:
                 self.n_sense_rels += 1
 
     def _do_concept_relation(self, elem) -> None:
-        rel_type = elem.get('relation_type')
-        source = self.synset_id_to_rowid.get(elem.get('source'))
-        target = self.synset_id_to_rowid.get(elem.get('target'))
+        self._add_concept_relation(
+            elem.get('relation_type'), elem.get('source'), elem.get('target'),
+            elem.get('subtype'), elem.get('subtype_label'), self._prov_rows(elem))
+
+    def _add_concept_relation(
+        self, rel_type: str, source_id: str, target_id: str,
+        subtype: str | None, subtype_label: str | None, prov: list[tuple],
+    ) -> None:
+        """Add a concept relation and its inverse; see _add_sense_relation.
+
+        Args:
+            rel_type: The relation type.
+            source_id: The source concept's id.
+            target_id: The target concept's id.
+            subtype: A finer sub-relation code, if the source gives one.
+            subtype_label: Its label.
+            prov: Provenance rows (see _insert_prov); the first names the
+                resource the relation is attributed to.
+        """
+        rel_type, source_id, target_id = canonical_relation(
+            rel_type, source_id, target_id, CONCEPT_FORWARD_OF_INVERSE)
+        source = self.synset_id_to_rowid.get(source_id)
+        target = self.synset_id_to_rowid.get(target_id)
         if not source or not target:
             return
 
-        subtype = elem.get('subtype')
-        subtype_label = elem.get('subtype_label')
-        prov_elems = elem.findall('Provenance')
-        current_resource = prov_elems[0].get('resource') if prov_elems else ''
+        current_resource = prov[0][0] if prov else ''
         type_rowid = self._rel_type_rowid(rel_type)
-        # See the matching comment in _do_sense_relation: unknown types
+        # See the matching comment in _add_sense_relation: unknown types
         # default to symmetric rather than directional.
         inv = INVERSE_CONCEPT_RELATIONS.get(rel_type, rel_type)
 
@@ -968,7 +1132,7 @@ class MergeBuilder:
             self._next_synset_rel_id += 1
             self._synset_rels_buf.append(
                 (cr_rowid, source, target, type_rowid, subtype, subtype_label))
-            self.n_prov += self._insert_prov('synset_relations', cr_rowid, prov_elems)
+            self.n_prov += self._insert_prov('synset_relations', cr_rowid, prov)
             self.n_synset_rels += 1
             if rel_type in HYPERNYM_TYPES:
                 self._track_hypernym(cr_rowid, source, target, type_rowid, rel_type)
@@ -1129,7 +1293,15 @@ class MergeBuilder:
     # --- File processing ---
 
     def process_file(self, xml_file: Path) -> None:
-        """Stream one pre-synth XML file into the DB using iterparse."""
+        """Stream one pre-synth file into the DB: a WN-LMF file
+        (LexicalResource root) or a Cygnet XML file (CygnetResource root).
+
+        Args:
+            xml_file: The file to merge.
+        """
+        if root_tag(xml_file) == 'LexicalResource':
+            self.process_lmf_file(xml_file)
+            return
         tag_to_handler = {
             'Concept':         self._do_concept,
             'Lexeme':          self._do_lexeme,
@@ -1154,6 +1326,168 @@ class MergeBuilder:
                     while elem.getprevious() is not None:
                         del elem.getparent()[0]
         self._flush_all()
+
+    # --- WN-LMF input ---
+
+    def process_lmf_file(self, xml_file: Path) -> None:
+        """Stream one WN-LMF 1.4 file into the DB.
+
+        The file is a cleaned source (TODO.md, "Replace the Cygnet XML schema
+        with GWA WN-LMF") and is trusted: no confidence filtering, within-file
+        dedup or direction swapping happens here, only the cross-wordnet work.
+
+        An LMF file lists LexicalEntries before the Synsets their Senses
+        point at, so a first pass indexes every Synset and the concepts are
+        created from that index; a second pass streams entries and synsets.
+        Sense relations may point at a sense declared later, so they are
+        added after the second pass.  A Synset's ILI names its concept; a
+        synset without one is a local concept '<lexicon id>.<synset id>'.
+        Examples under a Sense belong to it, with the sense's word at the
+        spans in note="offsets=..."; Examples left under a Synset have no
+        sense and are not merged.  A sense marked lexicalized="false" (a
+        lexical gap) is skipped.
+
+        Args:
+            xml_file: The LMF file (.xml, .xml.gz or .xml.xz).
+        """
+        index = self._index_lmf_synsets(xml_file)
+        state = _LmfFileState(index)
+        for event, elem in ET.iterparse(
+                open_xml(xml_file), events=('start', 'end'),
+                tag=('Lexicon', 'LexiconExtension', 'LexicalEntry', 'Synset'),
+                load_dtd=False, no_network=True, resolve_entities=False):
+            if event == 'start':
+                if elem.tag in ('Lexicon', 'LexiconExtension'):
+                    state.enter_lexicon(elem)
+                continue
+            if elem.tag == 'LexicalEntry':
+                self._lmf_entry(elem, state)
+            elif elem.tag == 'Synset':
+                self._lmf_synset(elem, state)
+            else:
+                continue
+            elem.clear()
+            while elem.getprevious() is not None:
+                del elem.getparent()[0]
+        for old_source, target, rel_type, subtype, label, prov in state.sense_relations:
+            source_id = state.sense_ids.get(old_source)
+            target_id = state.sense_ids.get(target)
+            if source_id and target_id:
+                self._add_sense_relation(rel_type, source_id, target_id, subtype, label, prov)
+            else:
+                state.skipped['sense relations to an unknown sense'] += 1
+        self._flush_all()
+        for what, n in sorted(state.skipped.items()):
+            if n:
+                logger.info('  %s: %d %s', xml_file.name, n, what)
+
+    def _index_lmf_synsets(self, xml_file: Path) -> dict[str, tuple[str, str]]:
+        """First pass over an LMF file: record each lexicon's header and
+        create its concepts.
+
+        Args:
+            xml_file: The LMF file.
+
+        Returns:
+            {synset id: (concept id, POS label)} for every Synset in the file.
+        """
+        index: dict[str, tuple[str, str]] = {}
+        lexicon = version = None
+        for event, elem in ET.iterparse(
+                open_xml(xml_file), events=('start', 'end'),
+                tag=('Lexicon', 'LexiconExtension', 'Synset'),
+                load_dtd=False, no_network=True, resolve_entities=False):
+            if event == 'start':
+                if elem.tag != 'Synset':
+                    lexicon, version = elem.get('id'), elem.get('version')
+                    if lexicon and lexicon not in self._resources:
+                        self._resources[lexicon] = dict(elem.attrib)
+                continue
+            if elem.tag != 'Synset':
+                continue
+            sid = elem.get('id')
+            ili = elem.get('ili')
+            cid = f'cili.{ili}' if ili and ili != 'in' else f'{lexicon}.{sid}'
+            pos = pos_label(elem.get('partOfSpeech'))
+            index[sid] = (cid, pos)
+            if cid not in self.synset_id_to_rowid:
+                self._add_concept(cid, pos, [(lexicon, version, sid)])
+            elem.clear()
+            while elem.getprevious() is not None:
+                del elem.getparent()[0]
+        return index
+
+    def _lmf_entry(self, elem, state: '_LmfFileState') -> None:
+        """Merge one LexicalEntry: its entry, senses and sense examples;
+        its sense relations are deferred to the end of the file."""
+        forms = entry_written_forms(elem)
+        if not forms:
+            state.skipped['entries without a lemma'] += 1
+            return
+        lemma = elem.find('Lemma')
+        pos = pos_label(lemma.get('partOfSpeech'))
+        lid = lexeme_id(state.language, pos, forms)
+        prons: dict[str, list] = {}
+        for form_elem in elem.iterchildren('Lemma', 'Form', 'ExternalForm'):
+            written = form_elem.get('writtenForm')
+            if written:
+                prons.setdefault(written, []).extend(
+                    (p.get('variety'), p.text or '', p.get('audio'))
+                    for p in form_elem.iterchildren('Pronunciation')
+                    if p.text or p.get('audio'))
+        prov = [(state.lexicon, state.version, elem.get('id'))]
+        prov.extend((state.lexicon, state.version, merged)
+                    for merged in parse_note(elem.get('note')).get('merged', '').split())
+        self._add_lexeme(lid, state.language, pos, [(f, prons.get(f, [])) for f in forms], prov)
+
+        for sense in elem.iterchildren('Sense', 'ExternalSense'):
+            if sense.get('lexicalized') == 'false':
+                state.skipped['unlexicalized senses'] += 1
+                continue
+            old_sid = sense.get('id')
+            concept = state.index.get(sense.get('synset'))
+            if concept is None:
+                state.skipped['senses of an unknown synset'] += 1
+                continue
+            cid = concept[0]
+            sid = f'{lid}.{cid}'
+            state.sense_ids[old_sid] = sid
+            self._add_sense(sid, lid, cid, [(state.lexicon, state.version, old_sid)])
+            rel_prov = [(state.lexicon, state.version, None)]
+            for example in sense.iterchildren('Example'):
+                text = example.text or ''
+                if not text.strip():
+                    continue
+                spans = note_offsets(example.get('note'), text)
+                annotations = [{'sense': sid, 'start': a, 'end': b} for a, b in spans]
+                self._add_example(text, annotations, {sid}, rel_prov)
+            for rel in sense.iterchildren('SenseRelation'):
+                rel_type = relation_type(rel)
+                subtype, label = relation_subtype(rel, rel_type)
+                state.sense_relations.append(
+                    (old_sid, rel.get('target'), rel_type, subtype, label, rel_prov))
+
+    def _lmf_synset(self, elem, state: '_LmfFileState') -> None:
+        """Merge one Synset's definitions and relations (its concept was
+        created in the first pass)."""
+        cid, _pos = state.index[elem.get('id')]
+        prov = [(state.lexicon, state.version, None)]
+        for definition in elem.iterchildren('Definition'):
+            text = definition.text or ''
+            if not text.strip():
+                continue
+            language = definition.get('language') or state.language
+            self._add_gloss(cid, language, text, [], None, prov)
+        for rel in elem.iterchildren('SynsetRelation'):
+            target = state.index.get(rel.get('target'))
+            if target is None:
+                state.skipped['synset relations to an unknown synset'] += 1
+                continue
+            rel_type = relation_type(rel)
+            subtype, label = relation_subtype(rel, rel_type)
+            self._add_concept_relation(rel_type, cid, target[0], subtype, label, prov)
+        state.skipped['synset-level examples (no sense)'] += sum(
+            1 for _ in elem.iterchildren('Example'))
 
     # --- Post-processing (run after all files are loaded) ---
 
