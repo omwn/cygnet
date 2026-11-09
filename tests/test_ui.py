@@ -948,6 +948,48 @@ class TestPublications:
             page_ready.locator('a[href="https://github.com/rowanhm/cygnet"]')
         ).to_be_visible()
 
+    def test_each_distinct_citation_listed_once(self, page_ready: Page):
+        """The two fixture wordnets have different citations: one entry each,
+        named after its wordnet, without a group count."""
+        page_ready.locator('button', has_text='Publications').click()
+        page_ready.wait_for_selector('text=Wordnet Citations', timeout=5_000)
+        items = page_ready.locator('h2:has-text("Wordnet Citations") ~ ul > li')
+        expect(items.filter(has_text='Test English WordNet:')).to_have_count(1)
+        expect(items.filter(has_text='Test French WordNet:')).to_have_count(1)
+        expect(page_ready.locator('text=wordnets)')).to_have_count(0)
+
+    def test_wordnets_sharing_a_citation_are_grouped(self, page_ready: Page):
+        """groupByCitation() puts wordnets with the same citation (modulo
+        whitespace) under one entry, in first-seen order, and skips wordnets
+        without a citation -- the OMW kinship lexicons, one per language,
+        cite one paper 68 times otherwise."""
+        groups = page_ready.evaluate('''() => window._uiTestHook.groupByCitation([
+            {code: 'kin-a', label: 'Kinship A', citation: 'Paper One. 2024.'},
+            {code: 'other', label: 'Other', citation: 'Paper Two.'},
+            {code: 'kin-b', label: 'Kinship B', citation: 'Paper  One.\\n2024.'},
+            {code: 'none', label: 'No citation', citation: null},
+            {code: 'kin-c', label: 'Kinship C', citation: ' Paper One. 2024. '},
+        ]).map(g => [g.citation, g.resources.map(r => r.label)])''')
+        assert groups == [
+            ['Paper One. 2024.', ['Kinship A', 'Kinship B', 'Kinship C']],
+            ['Paper Two.', ['Other']],
+        ]
+
+    def test_common_label_prefix_is_factored_out_of_a_group(self, page_ready: Page):
+        """commonLabelPrefix(): at least two whole words that at least two
+        labels start with (and are not just equal to), the prefix shared by
+        most labels winning, so one odd label does not spoil a group."""
+        cases = page_ready.evaluate('''() => [
+            ['OMW kinship Abui', 'OMW kinship Afrikaans', 'OMW kinship concepts'],
+            ['TUFS Basic Arabic Wordnet', 'TUFS Basic Burmese Wordnet'],
+            ['OMW pronoun concepts', 'OMW pronouns: Abui', 'OMW pronouns: Afrikaans'],
+            ['OMW pronoun concepts', 'OMW pronouns: Abui'],
+            ['OMW kinship', 'OMW kinship Abui'],
+            ['Albanet', 'Arabic WordNet'],
+            ['Only one'],
+        ].map(labels => window._uiTestHook.commonLabelPrefix(labels))''')
+        assert cases == ['OMW kinship ', 'TUFS Basic ', 'OMW pronouns: ', '', '', '', '']
+
     def test_about_tab_citation_section(self, page_ready: Page):
         """About tab has a Citation section with content from local.json."""
         page_ready.locator('button', has_text='About').click()

@@ -321,6 +321,57 @@
         // Test hook -- lets Playwright assert the full DB was never loaded.
         window._dbTestHook = { isLoaded: () => _db !== null };
 
+        // The Publications tab lists one entry per distinct citation, with
+        // every wordnet that gives it: the OMW kinship and pronoun lexicons
+        // (one per language) and the TUFS wordnets would otherwise repeat
+        // the same paper dozens of times. Citations are compared after
+        // collapsing whitespace; resources keep their incoming order, and
+        // each group takes the position of its first resource.
+        function groupByCitation(resources) {
+            const groups = [];
+            const byText = new Map();
+            for (const r of resources) {
+                if (!r.citation) continue;
+                const key = r.citation.replace(/\s+/g, ' ').trim();
+                let group = byText.get(key);
+                if (!group) {
+                    group = { citation: r.citation, resources: [] };
+                    byText.set(key, group);
+                    groups.push(group);
+                }
+                group.resources.push(r);
+            }
+            return groups;
+        }
+
+        // The whole words most labels in a citation group start with, so
+        // that a group reads "OMW kinship (68 wordnets: Abui, Afrikaans,
+        // ...)" rather than repeating "OMW kinship" 68 times. The prefix
+        // must be at least two words and shared by at least two labels,
+        // none of which is the prefix alone; among candidates the one
+        // shared by most labels wins, then the longest. Labels that do
+        // not start with it (an "OMW pronoun concepts" beside 51 "OMW
+        // pronouns: ..." lexicons) are listed after the group. '' when
+        // nothing qualifies.
+        function commonLabelPrefix(labels) {
+            let best = '';
+            let bestCount = 0;
+            for (const label of labels) {
+                const words = label.split(' ');
+                for (let n = 2; n < words.length; n++) {
+                    const prefix = words.slice(0, n).join(' ') + ' ';
+                    const count = labels.filter(l => l.startsWith(prefix) && l.length > prefix.length).length;
+                    if (count < 2) continue;
+                    if (count > bestCount || (count === bestCount && prefix.length > best.length)) {
+                        best = prefix;
+                        bestCount = count;
+                    }
+                }
+            }
+            return best;
+        }
+        window._uiTestHook = { groupByCitation, commonLabelPrefix };
+
         // ========== HTML SAFETY ==========
         // Shared helpers for anywhere untrusted or semi-trusted text becomes HTML.
         const _HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
@@ -3789,7 +3840,7 @@
                                 html += renderText(text.slice(lastIndex));
                                 return html;
                             };
-                            const wnsWithCitation = allResources.filter(r => r.citation);
+                            const citationGroups = groupByCitation(allResources);
                             return (
                             <div>
                                 <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight mb-4">Publications</h2>
@@ -3801,15 +3852,28 @@
                                 </ul>
                                 <h2 className="text-xl font-semibold mb-2">Wordnet Citations</h2>
                                 <p className="text-sm text-slate-500 italic mb-4">Citation data taken from each wordnet's source XML.</p>
-                                {wnsWithCitation.length === 0
+                                {citationGroups.length === 0
                                     ? <p className="text-sm text-slate-500">No wordnet citation data available (database not loaded).</p>
                                     : <ul className="space-y-4">
-                                        {wnsWithCitation.map(r => (
-                                            <li key={r.code} className="text-sm text-slate-800">
-                                                <span className="font-medium">{r.label}:</span>{' '}
-                                                <span dangerouslySetInnerHTML={{ __html: rstToHtml(r.citation) }} />
-                                            </li>
-                                        ))}
+                                        {citationGroups.map(g => {
+                                            const labels = g.resources.map(r => r.label);
+                                            const prefix = commonLabelPrefix(labels);
+                                            const members = labels.filter(l => l.startsWith(prefix) && l.length > prefix.length);
+                                            const others = prefix ? labels.filter(l => !members.includes(l)) : labels;
+                                            const heading = <>
+                                                {prefix && <><span className="font-medium">{prefix.trim().replace(/:$/, '')}</span>
+                                                    <span className="text-slate-500"> ({members.length} wordnets: {members.map(l => l.slice(prefix.length)).join(', ')})</span>
+                                                    {others.length > 0 && ', '}</>}
+                                                {others.length > 0 && <span className="font-medium">{others.join(', ')}</span>}
+                                                {!prefix && labels.length > 1 && <span className="text-slate-500"> ({labels.length} wordnets)</span>}
+                                            </>;
+                                            return (
+                                                <li key={g.resources[0].code} className="text-sm text-slate-800">
+                                                    {heading}<span className="font-medium">:</span>{' '}
+                                                    <span dangerouslySetInnerHTML={{ __html: rstToHtml(g.citation) }} />
+                                                </li>
+                                            );
+                                        })}
                                     </ul>
                                 }
                             </div>
