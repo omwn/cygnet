@@ -24,8 +24,11 @@ __all__ = [
     'CONCEPT_SYMMETRIC_TYPES',
     'CONFIDENCE_THRESHOLD',
     'DIRECTION_SWAP_CONFIG_FILENAME',
+    'DTD_SENSE_RELATION_TYPES',
+    'DTD_SYNSET_RELATION_TYPES',
     'INVERSE_CONCEPT_RELATIONS',
     'INVERSE_SENSE_RELATIONS',
+    'POS_CODES',
     'POS_LABELS',
     'SENSE_FORWARD_OF_INVERSE',
     'SENSE_INVERSE_ONLY_TYPES',
@@ -42,12 +45,41 @@ __all__ = [
     'load_direction_swap_config',
     'note_offsets',
     'parse_note',
+    'pos_code',
     'pos_label',
     'relation_subtype',
     'relation_type',
     'shorten_uri',
     'symmetric_types',
 ]
+
+# The relType values the WN-LMF 1.4 DTD allows; any other type is written
+# as relType="other" with the type in dc:type (see relation_type()).
+DTD_SYNSET_RELATION_TYPES = frozenset("""
+agent also attribute be_in_state causes classified_by classifies co_agent_instrument
+co_agent_patient co_agent_result co_instrument_agent co_instrument_patient
+co_instrument_result co_patient_agent co_patient_instrument co_result_agent
+co_result_instrument co_role direction domain_region domain_topic exemplifies entails
+eq_synonym has_domain_region has_domain_topic is_exemplified_by holo_location holo_member
+holo_part holo_portion holo_substance holonym hypernym hyponym in_manner instance_hypernym
+instance_hyponym instrument involved involved_agent involved_direction involved_instrument
+involved_location involved_patient involved_result involved_source_direction
+involved_target_direction is_caused_by is_entailed_by location manner_of mero_location
+mero_member mero_part mero_portion mero_substance meronym similar other patient
+restricted_by restricts result role source_direction state_of target_direction subevent
+is_subevent_of antonym feminine has_feminine masculine has_masculine young has_young
+diminutive has_diminutive augmentative has_augmentative anto_gradable anto_simple
+anto_converse ir_synonym
+""".split())
+DTD_SENSE_RELATION_TYPES = frozenset("""
+antonym also participle pertainym derivation domain_topic has_domain_topic domain_region
+has_domain_region exemplifies is_exemplified_by similar other simple_aspect_ip
+secondary_aspect_ip simple_aspect_pi secondary_aspect_pi feminine has_feminine masculine
+has_masculine young has_young diminutive has_diminutive augmentative has_augmentative
+anto_gradable anto_simple anto_converse metaphor has_metaphor metonym has_metonym agent
+material event instrument location by_means_of undergoer property result state uses
+destination body_part vehicle
+""".split())
 
 # WN-LMF partOfSpeech code -> the label the database stores.  's' (adjective
 # satellite) is an adjective; anything else unknown is 'u'.
@@ -62,6 +94,21 @@ POS_LABELS = {
     'x': 'NREF',
     'u': 'UNK',
 }
+
+
+POS_CODES = {label: code for code, label in POS_LABELS.items() if code != 's'}
+
+
+def pos_code(label: str | None) -> str:
+    """The LMF partOfSpeech code for a database label ('NOUN' -> 'n').
+
+    Args:
+        label: The label as stored.
+
+    Returns:
+        The code; 'u' for an unknown label.
+    """
+    return POS_CODES.get(label or '', 'u')
 
 
 def pos_label(pos: str | None) -> str:

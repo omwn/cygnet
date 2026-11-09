@@ -337,14 +337,19 @@ old name and the log gains `format: "wn-lmf-1.4"`.
    `scripts/upload_translations.sh`, `build.sh` (Steps 1, 3–5 and the
    `--translate-only` message), `test_translate_defns.py`.  Rebuild,
    compare DBs.
-4. **Export.**  `7_validate_and_export.py` emits WN-LMF 1.4 from the DB.
-   A merged lexeme belongs to several resources, so the export is one
-   Lexicon per language (`cygnet-{lang}`), synsets with `@ili`,
-   examples under their Sense with `note="offsets=…"` (an example linked
-   to several senses is repeated under each), forward relations only.
-   The provenance variant puts contributing sources in `dc:source` as
-   space-separated `resource:version:original_id` tokens; the small
-   variant omits it.  Validate with the DTD via `xmlstarlet`.
+4. **Export.**  *Done.*  `cyg/export.py` (`LmfExporter`) writes the DB
+   as a multi-lexicon WN-LMF release of the kind Cygnet itself merges: a
+   concepts lexicon `cygnet` (language `mul`; every concept once, with
+   its definitions in every language and its forward relations, keyed by
+   `ili` or `dc:identifier="cyg:<rowid>"`) and one lexicon `cygnet-{lang}`
+   per language that `Requires` it (entries, senses with their examples
+   and `note="offsets=…"`, and a Synset per concept the language
+   lexicalises with that language's definitions).  A type outside the
+   DTD's list is `relType="other"` + `dc:type`.  The provenance variant
+   carries `dc:source` tokens `resource:version:original_id`.
+   `7_validate_and_export.py` validates both files against the vendored
+   `cyg/WN-LMF-1.4.dtd` (a copy with a local DOCTYPE under `xmlstarlet`,
+   lxml otherwise); the test suite also `wn.add()`s the export.
 5. **Delete** `cyg/cygnet.xsd`, `WordNetToCygnetConverter`,
    `process_file()` and the Cygnet-tag `_do_*` handlers,
    `parse_annotated_sentence()`, `build_annotated_sentence()`; rename

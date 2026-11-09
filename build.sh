@@ -99,8 +99,6 @@ if [[ -n "$WORK_DIR" ]]; then
     if [[ ! -f "$DATA_DIR/wordnets.toml" ]]; then
         cp "$PROJECT_DIR/wordnets.toml" "$DATA_DIR/wordnets.toml"
     fi
-    # 7_validate_and_export.py reads cygnet.xsd from cwd; copy it into DATA_DIR.
-    cp "$PROJECT_DIR/cyg/cygnet.xsd" "$DATA_DIR/cygnet.xsd"
     # 11_add_arasaac.py uses the pre-built ILI mapping from the cygnet repo
     # rather than re-downloading and re-building it from scratch.
     if [[ -f "$PROJECT_DIR/data/araasac-ili.json" ]]; then
