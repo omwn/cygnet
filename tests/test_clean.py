@@ -301,6 +301,20 @@ class TestMulRelease:
         assert lexicon[0].tag == 'Requires' and lexicon[0].get('ref') == 'kin'
         assert [s.get('ili') for s in tree.iter('Synset')] == ['i7', '']
         assert log['changes']['synsets.ili_filled'] == 1
+        assert log['changes']['metadata.requires'] == 1
+
+    def test_member_that_needs_only_requires_is_still_rewritten(self, tmp_path):
+        """A member whose only edit is the Requires element must not pass
+        through unchanged, or the merge cannot tell whose concepts it uses."""
+        shared = SharedConcepts({'k:Mo': (None, 'kin.Mo')}, 'member')
+        text = _lexicon(_entry('e1', 'äiti', _sense('s1', 'y1'))
+                        + _synset('y1', '', '    <Definition language="fi">d</Definition>\n',
+                                  attrs=' dc:identifier="k:Mo"'),
+                        lid='kin-fi', language='fi')
+        result, tree, log = _clean(tmp_path, text, options=CleanOptions(shared=shared, requires=('kin', '0.2')))
+        assert result.changed
+        assert tree.getroot()[0][0].tag == 'Requires'
+        assert log['changes'] == {'metadata.requires': 1}
 
 
 class TestCiliIndex:

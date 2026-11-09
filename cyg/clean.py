@@ -346,12 +346,17 @@ class LmfCleaner:
         example texts, and decide what merges, moves or goes."""
         self._check_header()
         current: dict | None = None
-        for event, elem in self._iterparse((*LEXICON_TAGS, 'LexicalEntry', 'Synset')):
+        requires_seen = False
+        for event, elem in self._iterparse((*LEXICON_TAGS, 'Requires', 'LexicalEntry', 'Synset')):
             if event == 'start':
                 if elem.tag in LEXICON_TAGS:
                     current = self._index_lexicon(elem)
                 continue
             if elem.getparent() is None or elem.getparent().tag not in LEXICON_TAGS:
+                continue
+            if elem.tag == 'Requires':
+                if self.options.requires and elem.get('ref') == self.options.requires[0]:
+                    requires_seen = True
                 continue
             if elem.tag == 'LexicalEntry':
                 self._index_entry(elem, current)
@@ -364,6 +369,10 @@ class LmfCleaner:
                 del elem.getparent()[0]
         if not self.lexicons:
             raise ValueError(f'{self.source}: no Lexicon found')
+        if self.options.requires and not requires_seen:
+            self._changed('metadata.requires')
+            self.log['metadata_changes']['requires'] = {
+                'from': None, 'to': '%s %s' % self.options.requires}
 
     def _index_lexicon(self, elem: etree._Element) -> dict:
         for ns in DC_NAMESPACES:
@@ -415,6 +424,7 @@ class LmfCleaner:
                 self._changed('definitions.blank')
             else:
                 self._note_normalised(text, norm, 'definitions')
+                self.log['statistics']['glosses']['created'] += 1
                 if not definition.get('language'):
                     self._changed('definitions.language_added')
                 elif fix_language(definition.get('language')) != definition.get('language'):
@@ -689,7 +699,7 @@ class LmfCleaner:
                 resolved = rel.rel_type
                 if resolved == 'other' and rel.dc_type:
                     resolved = shorten_uri(rel.dc_type)
-                if resolved not in reverse:
+                if resolved not in reverse and resolved not in forward_of:
                     rp['unknown_relation_types'][key]['count'] += 1
                 src, tgt = source, target
                 attrs = dict(rel.attrs)

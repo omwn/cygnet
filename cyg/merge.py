@@ -466,7 +466,9 @@ def lmf_concept_index(
             Requires must name one of them).
 
     Returns:
-        ([{'id', 'version', 'language', 'attrib'} per lexicon],
+        ([{'id', 'version', 'language', 'attrib', 'concepts_owner'} per
+          lexicon; concepts_owner names the lexicon whose dc:identifiers key
+          the concepts, None outside a mul release],
          {synset id: (concept id, POS label)}).
     """
     mul_lexicons = set(mul_lexicons or ())
@@ -482,15 +484,18 @@ def lmf_concept_index(
             if elem.tag in ('Lexicon', 'LexiconExtension'):
                 lexicon = elem.get('id')
                 lexicons.append({'id': lexicon, 'version': elem.get('version'),
-                                 'language': elem.get('language'), 'attrib': dict(elem.attrib)})
+                                 'language': elem.get('language'), 'attrib': dict(elem.attrib),
+                                 'concepts_owner': None})
                 concepts_owner = lexicon if elem.get('language') == 'mul' else None
                 if concepts_owner:
                     mul_lexicons.add(lexicon)
+                lexicons[-1]['concepts_owner'] = concepts_owner
             continue
         if elem.tag == 'Requires':
             ref = elem.get('ref')
             if concepts_owner is None and ref in mul_lexicons:
                 concepts_owner = ref
+                lexicons[-1]['concepts_owner'] = ref
             continue
         if elem.tag != 'Synset':
             continue
@@ -650,6 +655,9 @@ class MergeBuilder:
         # sense ids of the English base they refer to (see process_cili_tsv)
         self._pending_def_annotations: list[tuple[int, int, int, str]] = []
         self._original_sense_rowids: dict[str, int] = {}
+        # Lexicons of a mul release (its concepts lexicon and members), whose
+        # lexicalized="false" senses mark lexical gaps and are skipped
+        self._mul_release_lexicons: set[str] = set()
 
         # Folded English definitions of each synset, and the number of
         # non-English definitions dropped as copies of them, by resource.
@@ -1497,8 +1505,10 @@ class MergeBuilder:
         concept per dc:identifier, '<concepts lexicon id>.<identifier>'.
         Examples under a Sense belong to it, with the sense's word at the
         spans in note="offsets=..."; Examples left under a Synset have no
-        sense and are not merged.  A sense marked lexicalized="false" (a
-        lexical gap) is skipped.
+        sense and are not merged.  In a mul release a sense marked
+        lexicalized="false" is a lexical-gap marker and is skipped; other
+        sources use the flag for ordinary senses (COW marks 19K adjective
+        senses so), which are kept, as the converter kept them.
 
         Args:
             xml_file: The LMF file (.xml, .xml.gz or .xml.xz).
@@ -1549,6 +1559,9 @@ class MergeBuilder:
         for lexicon in lexicons:
             if lexicon['id'] and lexicon['id'] not in self._resources:
                 self._resources[lexicon['id']] = lexicon['attrib']
+            self._mul_release_lexicons.discard(lexicon['id'])
+            if lexicon['concepts_owner']:
+                self._mul_release_lexicons.add(lexicon['id'])
         current = (None, None)   # the lexicon a synset belongs to, for its provenance
         for event, elem in ET.iterparse(
                 open_xml(xml_file), events=('start', 'end'),
@@ -1591,8 +1604,9 @@ class MergeBuilder:
                     for merged in parse_note(elem.get('note')).get('merged', '').split())
         self._add_lexeme(lid, state.language, pos, [(f, prons.get(f, [])) for f in forms], prov)
 
+        gap_marker = state.lexicon in self._mul_release_lexicons
         for sense in elem.iterchildren('Sense', 'ExternalSense'):
-            if sense.get('lexicalized') == 'false':
+            if gap_marker and sense.get('lexicalized') == 'false':
                 state.skipped['unlexicalized senses'] += 1
                 continue
             old_sid = sense.get('id')

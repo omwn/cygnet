@@ -225,7 +225,8 @@ Merge trusts the cleaned files and keeps only the cross-wordnet work:
 - Relations: inverses generated, cross-file dedup by (source, target,
   type), reversed-relation conflicts recorded in `conflicts.json`,
   cycle detection on the union graph.
-- `lexicalized="false"` synsets and senses skipped.
+- `lexicalized="false"` senses skipped in a mul release (gap markers);
+  elsewhere kept, as the converter kept them (COW).
 - `dc:type` → `subtype`, and `dc:description`/`dc:relation` →
   `subtype_label`, exactly as `_relation_subtype()` reads them today;
   `web/relations.json` is only the display lookup.
@@ -297,7 +298,8 @@ old name and the log gains `format: "wn-lmf-1.4"`.
    `note_offsets`) live in `cyg/lmf.py` for the cleaner to reuse.
    Decisions: per-file cycle removal stays in merge (the LMF path feeds
    the same hypernym tracker); a `lexicalized="false"` Sense is skipped
-   but its Synset is kept (as the converter does for a single lexicon);
+   only inside a mul release, where it marks a lexical gap -- COW flags
+   19K ordinary adjective senses that way and the converter kept them;
    a Synset whose concept already exists adds no synset provenance (as
    today, so CILI-linked synsets keep only their creator's row -- adding
    one per file would give every wordnet deep links by synset id at the

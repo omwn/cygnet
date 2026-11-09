@@ -115,9 +115,10 @@ class TestEntriesAndSenses:
         # the duplicate's sense collapsed into the first; its id is not recorded
         assert _prov(dbs, 'senses', sense_rowid) == [('lmf-xx', '1.0', 'xx-koira-n-1')]
 
-    def test_unlexicalized_and_dangling_senses_are_skipped(self, dbs):
-        assert _senses_of(dbs, 'gap') == []
+    def test_dangling_sense_skipped_unlexicalized_kept_outside_a_mul_release(self, dbs):
         assert _senses_of(dbs, 'orpo') == []
+        (synset_rowid, _s), = _senses_of(dbs, 'gap')
+        assert synset_rowid == _synset(dbs, 'i2')
 
 
 class TestDefinitions:
