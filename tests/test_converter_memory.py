@@ -11,7 +11,9 @@ import pytest
 from lxml import etree
 
 import cyg.converters as converters
+from cyg import linker as linker_module
 from cyg.converters import WordNetToCygnetConverter
+from cyg.linker import ExampleLinker
 
 _CILI_XML = """\
 <?xml version='1.0' encoding='UTF-8'?>
@@ -88,18 +90,16 @@ def test_cili_kept_as_categories(tmp_path):
 
 def test_doc_cache_bounded(monkeypatch):
     """The spaCy document cache drops the least recently used document."""
-    monkeypatch.setattr(converters, "DOC_CACHE_SIZE", 2)
-    conv = object.__new__(WordNetToCygnetConverter)
-    conv.doc_cache = converters.OrderedDict()
-    conv.prefetched_docs = {}
-    conv.nlp = lambda text: object()
-    first = conv._get_doc("a")
-    conv._get_doc("b")
-    assert conv._get_doc("a") is first  # cache hit; "b" is now the oldest
+    monkeypatch.setattr(linker_module, "DOC_CACHE_SIZE", 2)
+    linker = ExampleLinker("en")
+    linker.nlp = lambda text: object()
+    first = linker.get_doc("a")
+    linker.get_doc("b")
+    assert linker.get_doc("a") is first  # cache hit; "b" is now the oldest
 
-    conv._get_doc("c")
+    linker.get_doc("c")
 
-    assert list(conv.doc_cache) == ["a", "c"]
+    assert list(linker.doc_cache) == ["a", "c"]
 
 
 _WORDNETS = Path(__file__).parent / "wordnets"
