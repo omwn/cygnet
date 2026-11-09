@@ -2043,7 +2043,7 @@ class WordNetToCygnetConverter:
         candidates = self._example_candidates(is_synset_example, concept_id,
                                               old_sense_id)
         if candidates is None:
-            self.log['examples']['skipped'] += 1
+            self.log['statistics']['examples']['skipped'] += 1
             return
 
         if not candidates:

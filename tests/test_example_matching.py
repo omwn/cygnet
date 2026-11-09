@@ -210,3 +210,36 @@ class TestPrefetchDocs:
         finally:
             conv.nlp = nlp
             conv.prefetched_docs = {}
+
+
+# ---------------------------------------------------------------------------
+# Examples whose sense was not converted
+# ---------------------------------------------------------------------------
+
+class TestExampleOfUnconvertedSense:
+    """A sense example whose sense was dropped (below the confidence
+    threshold, say) is counted as skipped, not a crash: estwn-et-2.7.0
+    failed to convert at all on a KeyError here (2026-11-09)."""
+
+    def _bare_converter(self):
+        conv = object.__new__(WordNetToCygnetConverter)
+        conv.old_sense_to_new_sense = {'kept': 'sense.1'}
+        conv.sense_lookup = {'sense.1': 'lex.1'}
+        conv.concept_to_senses = {}
+        conv.log = {'statistics': {'examples': {
+            'skipped': 0, 'processed': 0, 'failed_matches': []}}}
+        return conv
+
+    def test_dropped_sense_counts_as_skipped(self):
+        conv = self._bare_converter()
+        conv._process_single_example('Mingi lause.', 'ex-1', is_synset_example=False,
+                                     old_sense_id='dropped')
+        assert conv.log['statistics']['examples']['skipped'] == 1
+        assert conv.log['statistics']['examples']['failed_matches'] == []
+
+    def test_sense_without_lexeme_counts_as_skipped(self):
+        conv = self._bare_converter()
+        conv.sense_lookup = {}
+        conv._process_single_example('Mingi lause.', 'ex-1', is_synset_example=False,
+                                     old_sense_id='kept')
+        assert conv.log['statistics']['examples']['skipped'] == 1
