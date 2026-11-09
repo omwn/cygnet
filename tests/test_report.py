@@ -1349,3 +1349,38 @@ class TestFetchSensesPerLemmaRanking:
 
     def test_empty_input_returns_empty(self):
         assert fetch_senses_per_lemma_ranking({}) == []
+
+
+
+# ---------------------------------------------------------------------------
+# parse_xml on a WN-LMF file
+# ---------------------------------------------------------------------------
+
+class TestParseLmf:
+    @pytest.fixture(scope="class")
+    def data(self):
+        return parse_xml(Path(__file__).parent / "wordnets" / "lmf-xx.xml")
+
+    def test_header_and_concepts(self, data):
+        assert (data.resource_id, data.language, data.version) == ("lmf-xx", "xx", "1.0")
+        assert data.concepts["xx-dog"] == "NOUN"
+        assert set(data.concepts) == {"xx-dog", "xx-cat", "xx-animal", "xx-ghost", "xx-gap"}
+        assert data.glossed == set(data.concepts)
+
+    def test_entries_senses_and_relations(self, data):
+        assert data.entry_forms["xx-koira-n"] == "koira"
+        assert data.senses["xx-koira-n-1"] == ("xx-koira-n", "xx-dog")
+        assert "xx-koira-n-1" in data.concept_senses["xx-dog"]
+        assert ("xx-dog", "hypernym", "xx-animal") in data.concept_rels
+        assert ("xx-koira-n-1", "antonym", "xx-kissa-n-1") in data.sense_rels
+
+    def test_examples_located_or_not(self, data):
+        by_text = {text: senses for text, senses in data.examples}
+        assert by_text["Koira haukkuu."] == frozenset({"xx-koira-n-1"})
+        assert by_text["Se on eläin."] == frozenset()
+        assert by_text["Tämä esimerkki jää synsetille."] == frozenset()
+
+    def test_checks_run_on_lmf_data(self, data):
+        issues = _mod.run_checks(data)
+        titles = {i.title for i in issues}
+        assert titles  # the fixture has dangling senses and self-contained checks run

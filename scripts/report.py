@@ -20,7 +20,9 @@ from pathlib import Path
 
 from lxml import etree as ET
 
-from cyg.merge import INVERSE_CONCEPT_RELATIONS, INVERSE_SENSE_RELATIONS
+from cyg.lmf import parse_note, pos_label
+from cyg.merge import INVERSE_CONCEPT_RELATIONS, INVERSE_SENSE_RELATIONS, root_tag
+from cyg.multilex import open_xml
 from cyg.presynth import log_path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -152,7 +154,9 @@ class Issue:
 # ---------------------------------------------------------------------------
 
 def parse_xml(path: Path) -> WordnetData:
-    """Stream-parse a pre-synth Cygnet XML file into a WordnetData structure."""
+    """Stream-parse a pre-synth file, WN-LMF or Cygnet XML, into a WordnetData."""
+    if root_tag(path) == "LexicalResource":
+        return parse_lmf(path)
     data = WordnetData()
     root_seen = False
 
@@ -228,6 +232,69 @@ def parse_xml(path: Path) -> WordnetData:
                 data.examples.append((text, sense_ids))
             elem.clear()
 
+    return data
+
+
+def parse_lmf(path: Path) -> WordnetData:
+    """Stream-parse a cleaned WN-LMF file into a WordnetData.
+
+    Concepts are the file's synsets (by id); an Example under a Sense counts
+    as annotated with that sense when its note carries offsets, a
+    synset-level Example as unmatched.
+    """
+    data = WordnetData()
+    for event, elem in ET.iterparse(
+            open_xml(path), events=("start", "end"),
+            tag=("Lexicon", "LexiconExtension", "LexicalEntry", "Synset"),
+            load_dtd=False, no_network=True, resolve_entities=False):
+        if event == "start":
+            if elem.tag in ("Lexicon", "LexiconExtension") and not data.resource_id:
+                data.resource_id = elem.get("id", "")
+                data.label = elem.get("label", "") or data.resource_id
+                data.language = elem.get("language", "")
+                data.version = elem.get("version", "")
+            continue
+        if elem.getparent() is None or elem.getparent().tag not in ("Lexicon", "LexiconExtension"):
+            continue
+        if elem.tag == "LexicalEntry":
+            eid = elem.get("id", "")
+            if eid in data.entries:
+                data.duplicate_entry_ids.append(eid)
+            else:
+                data.entries[eid] = data.language
+                lemma = elem.find("Lemma")
+                if lemma is not None and lemma.get("writtenForm"):
+                    data.entries_with_forms.add(eid)
+                    data.entry_forms[eid] = lemma.get("writtenForm")
+            for sense in elem.iterchildren("Sense"):
+                sid = sense.get("id", "")
+                if sid in data.senses:
+                    data.duplicate_sense_ids.append(sid)
+                else:
+                    synset = sense.get("synset", "")
+                    data.senses[sid] = (eid, synset)
+                    data.concept_senses.setdefault(synset, []).append(sid)
+                for rel in sense.iterchildren("SenseRelation"):
+                    data.sense_rels.append((sid, rel.get("relType", ""), rel.get("target", "")))
+                for example in sense.iterchildren("Example"):
+                    text = (example.text or "").strip()[:80]
+                    located = "offsets" in parse_note(example.get("note"))
+                    data.examples.append((text, frozenset({sid}) if located else frozenset()))
+        elif elem.tag == "Synset":
+            sid = elem.get("id", "")
+            if sid in data.concepts:
+                data.duplicate_concept_ids.append(sid)
+            else:
+                data.concepts[sid] = pos_label(elem.get("partOfSpeech"))
+            if elem.find("Definition") is not None:
+                data.glossed.add(sid)
+            for rel in elem.iterchildren("SynsetRelation"):
+                data.concept_rels.append((sid, rel.get("relType", ""), rel.get("target", "")))
+            for example in elem.iterchildren("Example"):
+                data.examples.append(((example.text or "").strip()[:80], frozenset()))
+        elem.clear()
+        while elem.getprevious() is not None:
+            del elem.getparent()[0]
     return data
 
 
