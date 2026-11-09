@@ -9,11 +9,11 @@ senses.  Those cleaned files are then merged.  The public products
 (`cygnet.db.gz`, `provenance.db.gz`, the per-resource provenance splits)
 and the web UI read only SQLite, so neither changes.
 
-Status (2026-11-09): steps 1 (prep) and 2 (merge reads LMF) done on the
-`lmf-intermediate` branch; step 3 (the cleaner, `cyg/clean.py`) written
-and run on the corpus, its sidecar changes and the old/new comparison
-still to do; steps 4–7 not started.  Supersedes the 2026-10-11 plan.
-Decisions taken on 2026-11-09:
+Status (2026-11-09): steps 1–4 done on the `lmf-intermediate` branch
+(`build.sh --lmf` runs the whole new path; the old path still runs by
+default for comparison); steps 5–7 (delete the old path, tests, docs)
+not started.  The full-corpus comparison is in "Behaviour changes" below.
+Supersedes the 2026-10-11 plan.  Decisions taken on 2026-11-09:
 
 - The intermediate is one cleaned LMF file per source lexicon, useful on
   its own (loads in `wn`, validates, can be sent upstream as "your
@@ -314,7 +314,7 @@ old name and the log gains `format: "wn-lmf-1.4"`.
    (450K relations), with its 80 repeated ILIs cleared as the cleaner
    will do in step 3, differs only by the 280 relations the converter
    dropped as already in OEWN, which are now kept by decision.
-3. **Cleaner.**  *In progress.*  `cyg/clean.py` (`LmfCleaner`) does the
+3. **Cleaner.**  *Done.*  `cyg/clean.py` (`LmfCleaner`) does the
    seven passes in two streaming passes plus the linking stage; the
    matcher moved to `cyg/linker.py` (`ExampleLinker`), shared with the
    converter until step 5.  `2_batch_convert_lmfs.py --format lmf` runs
@@ -329,8 +329,16 @@ old name and the log gains `format: "wn-lmf-1.4"`.
    no-op).  First corpus run: omw-sk passes through byte for byte;
    estwn 12 s, norwegian-nb 21 s, oewn 25 s (49,391 of 49,724 synset
    examples moved to senses), plwn 282 s at 1.8 GB peak, all loading in
-   `wn` with no E-codes.  Still to do here: `scripts/report.py` and
-   `scripts/log_summary.py` on the new logs; freeze the baseline, then:
+   `wn` with no E-codes.  `scripts/report.py` parses either format and
+   `scripts/log_summary.py` reads the new logs.  Sidecars: merge reads
+   `cili.tsv` directly (`cyg/cili.py`), with `cili_glosstag.json`
+   annotations resolved against OEWN's senses after the merge
+   (`resolve_pending_annotations()`; the old path dropped them, which is
+   why the DB never had definition annotations); Step 5 writes `mtg.tsv`
+   via `cyg/mtg.py`, which shares `lmf_concept_index()` with the merge.
+   Not yet done from the list below: deleting `1_extract_cili.py` (the
+   old path still needs its XML) and `4_add_glosstag_to_cili.py` writing
+   the JSON sidecar.  Originally planned as:
    merge reads `cili.tsv`, delete `1_extract_cili.py`;
    `4_add_glosstag_to_cili.py` writes `cili_glosstag.json`;
    `5_translate_defns.py` writes `mtg.tsv`; update `release.yml`,
@@ -385,17 +393,34 @@ emitter and the Cygnet-side readers go.  Suite today: 615 tests.
 
 ### Behaviour changes to expect in the DB
 
-- Sense-level examples whose lemma was not found are now kept; example
-  counts rise for estwn, the `tufs-*` lexicons and others with
-  sense-level examples.
-- Relations present in both OEWN and another wordnet now get a
-  provenance row for each (today only OEWN's); relation counts are
-  unchanged because merge dedups by key.
-- Versions shown in the Wordnets tab carry `.🦢` for cleaned sources.
+Measured on 2026-11-09 against the converter-path build of the same
+sources (`build.sh --lmf` vs. default; 814 of 1,249 compared measures
+identical, every difference below accounted for):
+
+- Sense-level examples whose lemma was not found are now kept: examples
+  427,658 → 488,288 (tufs-ar 1,400 → 12,340, plwn 201,549 → 230,170,
+  estwn 7,271 → 11,146, galnet, wordnet_lv ...).
+- English definitions now add provenance to CILI's (oewn 3,217 →
+  120,569 definition provenance rows); a non-English definition that
+  copies OEWN's *modern* English gloss is now caught as a copy, where
+  before only PWN 3.0's text was known: definitions 1,102,633 →
+  1,102,268 (fi −138, la −147, nl −39, ckb −13 ...), all English text
+  under a non-English label.
+- Each Lexicon of a multi-lexicon file is its own resource (cantown-en
+  appears beside cantown-yue); mul members get their own definitions.
+- Entries whose written forms differ only in NFC or whitespace now
+  merge: entries 2,357,998 → 2,357,211, senses 3,712,379 → 3,711,615
+  (copwn −137, UzWordnet-uz −17 ...).
+- Definition annotations from GlossTag now land (0 before).
+- Relations present in both OEWN and another wordnet get a provenance
+  row for each; relation counts are unchanged because merge dedups by
+  key (synset_relations 1,285,953 → 1,285,682 after cycle removal moved
+  slightly).
+- Versions shown in the Wordnets tab carry `.🦢` for cleaned sources
+  (198 of 204 files change, 118 of them only by the `Requires` element
+  a mul member gains).
 - Machine-translated glosses of local (non-ILI) concepts disappear
   until the next translation run, because their sidecar keys change.
-- Nothing else should change; any other diff in the step-2/3
-  comparisons is a bug.
 
 ### Possible upstream proposals for WN-LMF 1.5
 
