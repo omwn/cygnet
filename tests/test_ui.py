@@ -24,6 +24,7 @@ Expected search results (exact/glob match on normalized_form):
   "def:animal" + English filter → 2 (en:animal, en:dog)   across 1 language
 """
 
+import os
 from pathlib import Path
 
 import pytest
@@ -496,6 +497,54 @@ class TestConceptNavigation:
 # ---------------------------------------------------------------------------
 # Stable links by original synset id
 # ---------------------------------------------------------------------------
+
+class TestProvenanceDbCache:
+    """The browser caches provenance.db.gz in IndexedDB. Provenance rows
+    point at rowids that change with every build, so a cached copy from
+    before a redeploy must be dropped once the server's file changes, or
+    every item is labelled with another build's sources (2026-11-09: the
+    definitions of 'dog' attributed to wordnets of other languages)."""
+
+    def _open_with_provenance(self, page: Page, url: str) -> list:
+        """Open the oewn-dog-n id link in a freshly loaded page (so nothing
+        is held in memory from before); the link needs the whole provenance
+        DB. Returns the GET requests made while loading."""
+        gets = []
+
+        def record(request):
+            if request.method == 'GET':
+                gets.append(request.url)
+
+        page.goto(url + '#/search?q=dog')
+        page.reload()
+        page.on('request', record)
+        page.goto(url + '#/search?id=oewn-dog-n')
+        page.wait_for_selector(
+            'text=All forms expressing this concept', timeout=_DB_LOAD_TIMEOUT
+        )
+        page.remove_listener('request', record)
+        return gets
+
+    def test_unchanged_provenance_db_is_served_from_cache(
+        self, page: Page, http_server_mutable
+    ):
+        url, _directory = http_server_mutable
+        first = self._open_with_provenance(page, url)
+        assert any(u.endswith('/provenance.db.gz') for u in first)
+        second = self._open_with_provenance(page, url)
+        assert not any(u.endswith('/provenance.db.gz') for u in second)
+
+    def test_changed_provenance_db_is_fetched_again(
+        self, page: Page, http_server_mutable
+    ):
+        url, directory = http_server_mutable
+        self._open_with_provenance(page, url)
+        prov = directory / 'provenance.db.gz'
+        later = prov.stat().st_mtime + 120  # a redeploy: new Last-Modified
+        os.utime(prov, (later, later))
+        again = self._open_with_provenance(page, url)
+        assert any(u.endswith('/provenance.db.gz') for u in again)
+
 
 class TestOriginalIdLink:
     def test_id_link_opens_concept(self, page: Page, http_server):

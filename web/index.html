@@ -1199,7 +1199,8 @@
                                     await Promise.all([
                                         idbDel('db'), idbDel('provdb'),
                                         idbDel('db-mtime'), idbDel('db-filename'),
-                                        idbDel('provdb-filename'), idbDel('db-compressed'),
+                                        idbDel('provdb-filename'), idbDel('provdb-mtime'),
+                                        idbDel('db-compressed'),
                                     ]);
                                 } else {
                                     setDbProgress('Loading from cache...');
@@ -1579,13 +1580,30 @@
                     const provFile = _siteConfig.databases?.provenance?.filename;
                     if (!provFile) { setProvLoading(false); return; }
                     await ensureSqlJs();
+                    // Check the IndexedDB cache, validating against the filename
+                    // and the server's mtime as loadMainDb() does: the rowids
+                    // provenance rows point at change with every build, so a
+                    // cached provenance DB from before a redeploy would label
+                    // items with the wrong sources (a dog definition attributed
+                    // to a wordnet in another language).
                     let buf;
                     try {
                         const cached = await idbGet('provdb');
                         if (cached) {
+                            let stale = false;
                             const cachedFilename = await idbGet('provdb-filename');
                             if (!cachedFilename || cachedFilename !== provFile) {
-                                await Promise.all([idbDel('provdb'), idbDel('provdb-filename')]);
+                                stale = true;
+                            } else {
+                                try {
+                                    const head = await fetch(DB_BASE + provFile, { method: 'HEAD', cache: 'no-cache' });
+                                    const serverMtime = head.headers.get('last-modified') || head.headers.get('etag');
+                                    const cachedMtime = await idbGet('provdb-mtime');
+                                    if (serverMtime && serverMtime !== cachedMtime) stale = true;
+                                } catch (_) { /* offline — trust cache */ }
+                            }
+                            if (stale) {
+                                await Promise.all([idbDel('provdb'), idbDel('provdb-filename'), idbDel('provdb-mtime')]);
                             } else {
                                 buf = new Uint8Array(cached);
                             }
@@ -1597,6 +1615,7 @@
                     if (!buf) {
                         const response = await fetch(DB_BASE + provFile, { cache: 'reload' });
                         if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`);
+                        const serverMtime = response.headers.get('last-modified') || response.headers.get('etag') || '';
                         const ds = new DecompressionStream('gzip');
                         const reader = response.body.pipeThrough(ds).getReader();
                         const chunks = [];
@@ -1613,6 +1632,7 @@
                         try {
                             await idbPut('provdb', buf.buffer);
                             await idbPut('provdb-filename', provFile);
+                            if (serverMtime) await idbPut('provdb-mtime', serverMtime);
                         } catch (e) {
                             console.warn('IndexedDB provenance cache write failed:', e);
                         }

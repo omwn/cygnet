@@ -280,6 +280,20 @@ def http_server(test_db_dir):
     server.shutdown()
 
 
+@pytest.fixture
+def http_server_mutable(test_db_dir, tmp_path_factory):
+    """A per-test HTTP server on its own copy of the test DB directory, so a
+    test can change a served file (as a redeploy does) and reload.
+
+    Yields (url, directory).
+    """
+    own_dir = tmp_path_factory.mktemp('serve_mutable')
+    _copy_serve_dir(test_db_dir, own_dir)
+    server, url = _start_server(str(own_dir))
+    yield url, own_dir
+    server.shutdown()
+
+
 @pytest.fixture(scope='session')
 def http_server_with_stale_split(test_db_dir, tmp_path_factory):
     """HTTP server whose per-resource provenance index is from another build.
