@@ -160,6 +160,26 @@ class TestFixtureEndToEnd:
         assert again_tree.getroot()[0].get('version') == '1.0' + CHANGED_SUFFIX  # not appended twice
 
 
+class TestSynsetExamples:
+    def test_blank_example_does_not_shift_the_moved_ones(self, tmp_path):
+        """Pass A numbers the non-blank examples of a synset; pass B must
+        count the same way, or a blank example before one that moved under
+        a sense leaves the moved one duplicated on the synset and drops
+        the wrong one after it."""
+        text = _lexicon(
+            _entry('e1', 'koira', _sense('s1', 'y1'))
+            + _synset('y1', 'i1',
+                      '    <Definition>d</Definition>\n'
+                      '    <Example> </Example>\n'
+                      '    <Example>Koira haukkuu.</Example>\n'
+                      '    <Example>Ei vastaavaa sanaa.</Example>\n'))
+        _r, tree, log = _clean(tmp_path, text)
+        assert [e.text for e in tree.find('.//Synset').iter('Example')] == ['Ei vastaavaa sanaa.']
+        assert [e.text for e in tree.find('.//Sense').iter('Example')] == ['Koira haukkuu.']
+        assert log['changes']['examples.blank'] == 1
+        assert log['changes']['examples.moved_to_sense'] == 1
+
+
 class TestPassThrough:
     def test_clean_source_is_copied_byte_for_byte(self, tmp_path):
         text = _lexicon(_entry('e1', 'word', _sense('s1', 'y1'))
@@ -315,6 +335,28 @@ class TestMulRelease:
         assert [s.get('ili') for s in tree.iter('Synset')] == ['i7', '']
         assert log['changes']['synsets.ili_filled'] == 1
         assert log['changes']['metadata.requires'] == 1
+
+    def test_existing_requires_takes_the_cleaned_concepts_version(self, tmp_path):
+        """A member's own Requires names the upstream version; the cleaned
+        concepts lexicon may carry CHANGED_SUFFIX, and the member must
+        require that, once."""
+        shared = SharedConcepts({'k:Mo': None}, 'member')
+        text = _lexicon('  <Requires ref="kin" version="0.2"/>\n'
+                        + _entry('e1', 'äiti', _sense('s1', 'y1'))
+                        + _synset('y1', '', '    <Definition language="fi">d</Definition>\n',
+                                  attrs=' dc:identifier="k:Mo"'),
+                        lid='kin-fi', language='fi')
+        cleaned = CleanOptions(shared=shared, requires=('kin', '0.2' + CHANGED_SUFFIX))
+        _r, tree, log = _clean(tmp_path, text, options=cleaned)
+        requires = tree.findall('.//Requires')
+        assert [(r.get('ref'), r.get('version')) for r in requires] == [('kin', '0.2' + CHANGED_SUFFIX)]
+        assert log['changes']['metadata.requires'] == 1
+        assert log['metadata_changes']['requires'] == {'from': 'kin 0.2', 'to': 'kin 0.2' + CHANGED_SUFFIX}
+
+        same = CleanOptions(shared=shared, requires=('kin', '0.2'))
+        _r, tree, log = _clean(tmp_path, text, options=same, name='same.xml')
+        assert [r.get('version') for r in tree.findall('.//Requires')] == ['0.2']
+        assert 'metadata.requires' not in log['changes']
 
     def test_member_that_needs_only_requires_is_still_rewritten(self, tmp_path):
         """A member whose only edit is the Requires element must not pass

@@ -335,7 +335,7 @@ class LmfCleaner:
         example texts, and decide what merges, moves or goes."""
         self._check_header()
         current: dict | None = None
-        requires_seen = False
+        requires_version: str | None = None   # of the source's Requires for the concepts lexicon
         for event, elem in iter_lmf(self.source, (*LEXICON_TAGS, 'Requires', 'LexicalEntry', 'Synset')):
             if event == 'start':
                 if elem.tag in LEXICON_TAGS:
@@ -345,17 +345,18 @@ class LmfCleaner:
                 continue
             if elem.tag == 'Requires':
                 if self.options.requires and elem.get('ref') == self.options.requires[0]:
-                    requires_seen = True
+                    requires_version = elem.get('version') or ''
             elif elem.tag == 'LexicalEntry':
                 self._index_entry(elem, current)
             elif elem.tag == 'Synset':
                 self._index_synset(elem, current)
         if not self.lexicons:
             raise ValueError(f'{self.source}: no Lexicon found')
-        if self.options.requires and not requires_seen:
+        if self.options.requires and requires_version != self.options.requires[1]:
             self._changed('metadata.requires')
             self.log['metadata_changes']['requires'] = {
-                'from': None, 'to': '%s %s' % self.options.requires}
+                'from': None if requires_version is None else f'{self.options.requires[0]} {requires_version}',
+                'to': '%s %s' % self.options.requires}
 
     def _index_lexicon(self, elem: etree._Element) -> dict:
         for ns in DC_NAMESPACES:
@@ -807,13 +808,14 @@ class LmfCleaner:
                     continue
                 if elem.getparent() is None or elem.getparent().tag not in LEXICON_TAGS:
                     continue
-                if requires_due:
+                if requires_due and (elem.tag != 'Requires' or elem.get('ref') == self.options.requires[0]):
+                    # written at the version the cleaned concepts lexicon carries,
+                    # in place of the source's own Requires for it if there is one
                     ref, version = self.options.requires
-                    if elem.tag == 'Requires' and elem.get('ref') == ref:
-                        requires_due = False
-                    elif elem.tag != 'Requires':
-                        out.write(serialize(etree.Element('Requires', ref=ref, version=version)))
-                        requires_due = False
+                    out.write(serialize(etree.Element('Requires', ref=ref, version=version)))
+                    requires_due = False
+                    if elem.tag == 'Requires':
+                        continue
                 piece = self._rewrite(elem)
                 if piece is not None:
                     out.write(piece)
@@ -986,12 +988,17 @@ class LmfCleaner:
             elem.set('members', ' '.join(kept))
         for rel in list(elem.iterchildren('SynsetRelation')):
             elem.remove(rel)
-        for n, example in enumerate(list(elem.iterchildren('Example'))):
+        n = 0   # counts the non-blank examples, as _index_synset() numbered them
+        for example in list(elem.iterchildren('Example')):
             text = normalise_text(example.text)
-            if not text or (sid, n) in self.moved_from_synset:
+            if not text:
+                elem.remove(example)
+                continue
+            if (sid, n) in self.moved_from_synset:
                 elem.remove(example)
             else:
                 example.text = text
+            n += 1
         remaining = [c for c in elem if c.tag == 'Example']
         for (_resolved, tgt), (rel_type, attrs) in self.final_synset_rels.get(sid, {}).items():
             rel = relation_element('SynsetRelation', rel_type, tgt, attrs=attrs)

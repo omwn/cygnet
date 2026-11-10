@@ -212,6 +212,17 @@ def plan_multilexicon(
     return options, skip
 
 
+def _is_concepts_file(options: CleanOptions | None) -> bool:
+    return options is not None and options.shared is not None and options.shared.role == "concepts"
+
+
+def _note_concept_version(output: Path, concept_versions: dict[str, str]) -> None:
+    """Record the version a cleaned concepts lexicon carries, for its members."""
+    header = read_lexicon_header(output)
+    if header.language == MUL_KEY and header.id and header.version:
+        concept_versions[header.id] = header.version
+
+
 def clean_all(
     cili_file,
     toml_path,
@@ -249,6 +260,11 @@ def clean_all(
         Path(toml_path), Path(raw_wns_dir), xml_files, all_languages
     )
     xml_files = [p for p in xml_files if p not in skip]
+    # A release's members Require its concepts lexicon at the version the
+    # cleaned concepts file carries (CHANGED_SUFFIX if it changed), so the
+    # concepts files go first and their members take the version they got.
+    xml_files.sort(key=lambda p: not _is_concepts_file(file_options.get(p)))
+    concept_versions: dict[str, str] = {}
     print(f"Found {len(xml_files)} files to clean")
 
     cleaner_hash = source_hash(CLEANER_SOURCES)
@@ -278,12 +294,16 @@ def clean_all(
             print(f"  Reusing {output_name}")
             counts["reused"] += 1
             planned.append(output_name)
+            _note_concept_version(output_path / output_name, concept_versions)
             continue
         options = dataclasses.replace(
             file_options.get(xml_file, CleanOptions()),
             direction_swaps=swaps.get(header.id, frozenset()),
             swap_stats=swap_stats.get(header.id, {}),
         )
+        if options.requires and options.requires[0] in concept_versions:
+            options = dataclasses.replace(
+                options, requires=(options.requires[0], concept_versions[options.requires[0]]))
         try:
             result = LmfCleaner(xml_file, cili, options).clean(output_path)
         except Exception as e:  # noqa: BLE001  (one bad source must not stop the batch)
@@ -291,6 +311,7 @@ def clean_all(
             counts["errors"] += 1
             continue
         planned.append(result.output.name)
+        _note_concept_version(result.output, concept_versions)
         if result.changed:
             changes = json.loads(result.log.read_text(encoding="utf-8"))["changes"]
             summary = ", ".join(f"{k} {v}" for k, v in sorted(changes.items())[:8])

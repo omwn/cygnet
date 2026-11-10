@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from cyg.clean import CleanOptions, CleanResult
+from cyg.clean import CHANGED_SUFFIX, CleanOptions, CleanResult
 from cyg.lmf import DIRECTION_SWAP_CONFIG_FILENAME
 from cyg.multilex import (
     build_concept_map,
@@ -299,6 +299,39 @@ def test_batch_applies_direction_swaps_from_output_dir(tmp_path, monkeypatch):
     assert seen["kin-ar-0.1.xml"].direction_swaps == frozenset({"hypernym", "hyponym"})
     assert set(seen["kin-ar-0.1.xml"].swap_stats) == {"hypernym"}
     assert seen["kin-0.1.xml"].direction_swaps == frozenset()
+
+
+def test_batch_members_require_the_cleaned_concepts_version(tmp_path, monkeypatch):
+    """The concepts file is cleaned first; a member then Requires the
+    version its cleaned output carries, suffix included."""
+    seen: dict[str, CleanOptions] = {}
+
+    class Suffixing(_FakeCleaner):
+        def __init__(self, source, cili, options=None):
+            super().__init__(source, cili, options)
+            seen[self.source.name] = options
+
+        def clean(self, out_dir):
+            h = read_lexicon_header(self.source)
+            version = h.version + CHANGED_SUFFIX if h.language == "mul" else h.version
+            out = Path(out_dir) / f"{h.id}-{h.version}.xml"
+            out.write_text(f'<LexicalResource><Lexicon id="{h.id}" version="{version}" '
+                           f'language="{h.language}"/></LexicalResource>')
+            log = out.with_name(out.stem + "_log.json")
+            log.write_text('{"changes": {}}')
+            return CleanResult(out, log, True)
+
+    raw, toml = _raw_release(tmp_path)
+    out = tmp_path / "presynth"
+    cili = _write(tmp_path / "cili.tsv",
+                  "ili_id\tstatus\tsuperseded_by\torigin\tdefinition\n"
+                  "i100\t1\t\tpwn-3.0:00000001-n\td\n")
+    monkeypatch.setattr(batch, "LmfCleaner", Suffixing)
+
+    batch.clean_all(cili_file=cili, toml_path=toml, raw_wns_dir=raw, output_dir=out)
+
+    assert list(seen)[0] == "kin-0.1.xml"
+    assert seen["kin-ar-0.1.xml"].requires == ("kin", "0.1" + CHANGED_SUFFIX)
 
 
 def test_batch_writes_manifest(tmp_path, monkeypatch):
