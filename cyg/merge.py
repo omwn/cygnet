@@ -427,7 +427,10 @@ def lmf_concept_index(xml_file: Path) -> tuple[list[dict], dict[str, tuple[str, 
         xml_file: The LMF file.
 
     Returns:
-        ([{'id', 'version', 'language', 'attrib'} per lexicon],
+        ([{'id', 'version', 'language', 'attrib', 'concepts_owner'} per
+          lexicon, concepts_owner being the lexicon whose concepts it shares
+          (itself for a "mul" lexicon, the required one for a member, else
+          None)],
          {synset id: (concept id, POS label, index into the lexicon list)}).
     """
     lexicons: list[dict] = []
@@ -436,13 +439,15 @@ def lmf_concept_index(xml_file: Path) -> tuple[list[dict], dict[str, tuple[str, 
     for event, elem in iter_lmf(xml_file, (*LEXICON_TAGS, 'Requires', 'Synset')):
         if event == 'start':
             if elem.tag in LEXICON_TAGS:
-                lexicons.append({'id': elem.get('id'), 'version': elem.get('version'),
-                                 'language': elem.get('language'), 'attrib': dict(elem.attrib)})
                 concepts_owner = elem.get('id') if elem.get('language') == 'mul' else None
+                lexicons.append({'id': elem.get('id'), 'version': elem.get('version'),
+                                 'language': elem.get('language'), 'attrib': dict(elem.attrib),
+                                 'concepts_owner': concepts_owner})
             continue
         if elem.tag == 'Requires':
             if concepts_owner is None:
                 concepts_owner = elem.get('ref')
+                lexicons[-1]['concepts_owner'] = concepts_owner
         elif elem.tag == 'Synset':
             lexicon = lexicons[-1]['id']
             index[elem.get('id')] = (synset_concept_id(elem, lexicon, concepts_owner),
@@ -453,14 +458,16 @@ def lmf_concept_index(xml_file: Path) -> tuple[list[dict], dict[str, tuple[str, 
 class _LmfFileState:
     """What process_lmf_file() carries through one file."""
 
-    def __init__(self, index: dict[str, tuple[str, str]]) -> None:
-        self.index = index                       # synset id -> (concept id, POS)
+    def __init__(self, index: dict[str, tuple[str, str, int]], mul_release: set[str]) -> None:
+        self.index = index                       # synset id -> (concept id, POS, lexicon index)
+        self.mul_release = mul_release           # lexicons whose lexicalized="false" senses are gaps
         self.lexicon = self.version = self.language = None
         self.sense_ids: dict[str, str] = {}      # source sense id -> merged sense id
         self.sense_relations: list[tuple] = []   # deferred until every sense exists
         self.skipped: dict[str, int] = {
             'entries of a concepts lexicon': 0,
             'entries without a lemma': 0,
+            'non-lexicalised senses of a multi-lexicon release': 0,
             'senses of an unknown synset': 0,
             'sense relations to an unknown sense': 0,
             'synset relations to an unknown synset': 0,
@@ -1377,14 +1384,16 @@ class MergeBuilder:
         spans in note="offsets=..."; Examples left under a Synset have no
         sense and are not merged.  A "mul" lexicon contributes concepts,
         not entries: its LexicalEntries (placeholders the DTD demands) are
-        skipped.  lexicalized="false" is not acted on: COW flags 19K
-        ordinary adjective senses with it.
+        skipped.  A lexicalized="false" Sense in such a release is a gap
+        marker (the English kin lexicon puts descriptions like "woman's
+        brother" on them) and is skipped; elsewhere the flag is not acted
+        on, since COW puts it on 19K ordinary adjective senses.
 
         Args:
             xml_file: The LMF file (.xml, .xml.gz or .xml.xz).
         """
-        index = self._index_lmf_synsets(xml_file)
-        state = _LmfFileState(index)
+        lexicons, index = self._index_lmf_synsets(xml_file)
+        state = _LmfFileState(index, {lx['id'] for lx in lexicons if lx['concepts_owner']})
         for event, elem in iter_lmf(xml_file, (*LEXICON_TAGS, 'LexicalEntry', 'Synset')):
             if event == 'start':
                 if elem.tag in LEXICON_TAGS:
@@ -1405,7 +1414,7 @@ class MergeBuilder:
             if n:
                 logger.info('  %s: %d %s', xml_file.name, n, what)
 
-    def _index_lmf_synsets(self, xml_file: Path) -> dict[str, tuple[str, str, int]]:
+    def _index_lmf_synsets(self, xml_file: Path) -> tuple[list[dict], dict[str, tuple[str, str, int]]]:
         """First pass over an LMF file: record each lexicon's header and
         create its concepts (see lmf_concept_index()).
 
@@ -1413,6 +1422,7 @@ class MergeBuilder:
             xml_file: The LMF file.
 
         Returns:
+            What lmf_concept_index() returns: the lexicon headers and
             {synset id: (concept id, POS label, lexicon index)} for every Synset.
         """
         lexicons, index = lmf_concept_index(xml_file)
@@ -1422,7 +1432,7 @@ class MergeBuilder:
         for sid, (cid, pos, i) in index.items():
             if cid not in self.synset_id_to_rowid:
                 self._add_concept(cid, pos, [(lexicons[i]['id'], lexicons[i]['version'], sid)])
-        return index
+        return lexicons, index
 
     def _lmf_entry(self, elem, state: '_LmfFileState') -> None:
         """Merge one LexicalEntry: its entry, senses and sense examples;
@@ -1450,7 +1460,11 @@ class MergeBuilder:
                     for merged in parse_note(elem.get('note')).get('merged', '').split())
         self._add_lexeme(lid, state.language, pos, [(f, prons.get(f, [])) for f in forms], prov)
 
+        gap_marker = state.lexicon in state.mul_release
         for sense in elem.iterchildren('Sense', 'ExternalSense'):
+            if gap_marker and sense.get('lexicalized') == 'false':
+                state.skipped['non-lexicalised senses of a multi-lexicon release'] += 1
+                continue
             old_sid = sense.get('id')
             concept = state.index.get(sense.get('synset'))
             if concept is None:

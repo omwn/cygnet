@@ -230,6 +230,7 @@ _MUL_MEMBER = _MUL_HEADER + """<Lexicon id="kin-fi" label="Kin Finnish" language
   <Requires ref="kin" version="0.2"/>
   <LexicalEntry id="kin-fi-isa"><Lemma writtenForm="isä" partOfSpeech="n"/><Sense id="kin-fi-isa-1" synset="kin-fi-Fa"/></LexicalEntry>
   <LexicalEntry id="kin-fi-aiti"><Lemma writtenForm="äiti" partOfSpeech="n"/><Sense id="kin-fi-aiti-1" synset="kin-fi-Mo"/></LexicalEntry>
+  <LexicalEntry id="kin-fi-gap"><Lemma writtenForm="isän veli" partOfSpeech="n"/><Sense id="kin-fi-gap-1" synset="kin-fi-Fa" lexicalized="false"/></LexicalEntry>
   <Synset id="kin-fi-Fa" ili="" partOfSpeech="n" dc:identifier="k:Fa"/>
   <Synset id="kin-fi-Mo" ili="" partOfSpeech="n" dc:identifier="k:Mo"/>
 </Lexicon>
@@ -262,9 +263,13 @@ class TestMulRelease:
         assert rows == [('isä', 'father'), ('äiti', 'mother')]
         assert mul_db.execute("SELECT COUNT(*) FROM synsets").fetchone()[0] == 2
 
-    def test_unlexicalized_concept_sense_is_skipped(self, mul_db):
-        assert mul_db.execute(
-            "SELECT COUNT(*) FROM forms WHERE form = 'x'").fetchone()[0] == 0
+    def test_unlexicalized_senses_of_the_release_are_skipped(self, mul_db):
+        """The concepts lexicon's placeholder entry and a member's
+        lexicalized="false" sense (a description standing in for a missing
+        word) both stay out of the DB."""
+        forms = {row[0] for row in mul_db.execute("SELECT form FROM forms")}
+        assert 'x' not in forms
+        assert 'isän veli' not in forms
 
     def test_concept_provenance_names_the_concepts_lexicon(self, mul_db):
         rows = _prov(mul_db, 'synsets', mul_db.execute(
