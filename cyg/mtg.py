@@ -14,6 +14,7 @@ from pathlib import Path
 
 from cyg.lmf import LEXICON_TAGS, collapse_whitespace, iter_lmf
 from cyg.merge import synset_concept_id
+from cyg.multilex import read_lexicon_header
 
 MTG_TSV_COLUMNS = ('concept', 'language', 'translated_from', 'definition')
 MTG_TSV_NAME = 'mtg.tsv'
@@ -29,13 +30,17 @@ def glosses_to_translate(presynth_dir: Path) -> list[dict]:
     Returns:
         The records, in file order.
     """
+    files = sorted(presynth_dir.glob('*.xml'))
+    # A member of a multi-lexicon release keys its concepts by the "mul"
+    # lexicon it Requires, so the merge and this step name them alike.
+    mul_lexicons = {header.id for header in map(read_lexicon_header, files) if header.language == 'mul'}
     glosses: list[dict] = []
-    for path in sorted(presynth_dir.glob('*.xml')):
-        glosses.extend(_lmf_glosses(path))
+    for path in files:
+        glosses.extend(_lmf_glosses(path, mul_lexicons))
     return glosses
 
 
-def _lmf_glosses(path: Path) -> list[dict]:
+def _lmf_glosses(path: Path, mul_lexicons: set[str]) -> list[dict]:
     out = []
     lexicon = language = concepts_owner = None
     for event, elem in iter_lmf(path, (*LEXICON_TAGS, 'Requires', 'Synset')):
@@ -45,7 +50,8 @@ def _lmf_glosses(path: Path) -> list[dict]:
                 concepts_owner = lexicon if language == 'mul' else None
             continue
         if elem.tag == 'Requires':
-            concepts_owner = concepts_owner or elem.get('ref')
+            if concepts_owner is None and elem.get('ref') in mul_lexicons:
+                concepts_owner = elem.get('ref')
             continue
         if elem.tag != 'Synset':
             continue

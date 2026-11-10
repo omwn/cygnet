@@ -12,6 +12,7 @@ import re
 import shutil
 import sqlite3
 import unicodedata
+from collections.abc import Collection
 from pathlib import Path
 
 import langcodes
@@ -413,18 +414,21 @@ def synset_concept_id(elem: ET._Element, lexicon: str, concepts_owner: str | Non
     return f'{lexicon}.{elem.get("id")}'
 
 
-def lmf_concept_index(xml_file: Path) -> tuple[list[dict], dict[str, tuple[str, str, int]]]:
+def lmf_concept_index(xml_file: Path, mul_lexicons: Collection[str] = ()
+                      ) -> tuple[list[dict], dict[str, tuple[str, str, int]]]:
     """The lexicon headers of a WN-LMF file and the concept each of its
     synsets names (synset_concept_id()); the merge and the MT-gloss step
     both use this, so their concept ids agree.
 
-    A "mul" lexicon keys its concepts by dc:identifier; a lexicon that
-    Requires another does the same with the required lexicon's id, which
-    only matters for a synset without an ILI that carries a dc:identifier,
-    i.e. a member of a multi-lexicon release.
+    A "mul" lexicon keys its concepts by dc:identifier, and so does a
+    lexicon that Requires a "mul" lexicon, with the required lexicon's id.
+    Many wordnets Require an ordinary lexicon (the OMW ones omw-en); that
+    makes no release, so only a Requires of a known "mul" lexicon counts.
 
     Args:
         xml_file: The LMF file.
+        mul_lexicons: Ids of the "mul" lexicons of files merged before this
+            one; those declared in the file itself are known anyway.
 
     Returns:
         ([{'id', 'version', 'language', 'attrib', 'concepts_owner'} per
@@ -435,17 +439,20 @@ def lmf_concept_index(xml_file: Path) -> tuple[list[dict], dict[str, tuple[str, 
     """
     lexicons: list[dict] = []
     index: dict[str, tuple[str, str, int]] = {}
+    known_mul = set(mul_lexicons)
     concepts_owner: str | None = None
     for event, elem in iter_lmf(xml_file, (*LEXICON_TAGS, 'Requires', 'Synset')):
         if event == 'start':
             if elem.tag in LEXICON_TAGS:
                 concepts_owner = elem.get('id') if elem.get('language') == 'mul' else None
+                if concepts_owner:
+                    known_mul.add(concepts_owner)
                 lexicons.append({'id': elem.get('id'), 'version': elem.get('version'),
                                  'language': elem.get('language'), 'attrib': dict(elem.attrib),
                                  'concepts_owner': concepts_owner})
             continue
         if elem.tag == 'Requires':
-            if concepts_owner is None:
+            if concepts_owner is None and elem.get('ref') in known_mul:
                 concepts_owner = elem.get('ref')
                 lexicons[-1]['concepts_owner'] = concepts_owner
         elif elem.tag == 'Synset':
@@ -1425,7 +1432,8 @@ class MergeBuilder:
             What lmf_concept_index() returns: the lexicon headers and
             {synset id: (concept id, POS label, lexicon index)} for every Synset.
         """
-        lexicons, index = lmf_concept_index(xml_file)
+        lexicons, index = lmf_concept_index(
+            xml_file, {rid for rid, attrib in self._resources.items() if attrib.get('language') == 'mul'})
         for lexicon in lexicons:
             if lexicon['id'] and lexicon['id'] not in self._resources:
                 self._resources[lexicon['id']] = lexicon['attrib']

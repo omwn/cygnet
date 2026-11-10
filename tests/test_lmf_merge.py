@@ -350,6 +350,39 @@ class TestSidecars:
         assert any(ili == 'i3' for ili, _t, _s in rows)
 
 
+_DEPENDENT = _MUL_HEADER + """<Lexicon id="dep" label="Depends on OEWN" language="xx" email="e" license="l" version="1.0" url="u">
+  <Requires ref="oewn" version="2025"/>
+  <LexicalEntry id="dep-e1"><Lemma writtenForm="vihreä" partOfSpeech="a"/><Sense id="dep-e1-1" synset="dep-s1" lexicalized="false"/></LexicalEntry>
+  <Synset id="dep-s1" ili="" partOfSpeech="a" dc:identifier="x:1">
+    <Definition language="xx">d</Definition>
+  </Synset>
+</Lexicon>
+</LexicalResource>
+"""
+
+
+class TestRequiresAnOrdinaryLexicon:
+    """A Requires of a lexicon that is not a "mul" concepts lexicon (the
+    OMW wordnets Require omw-en, COW too) makes no multi-lexicon release:
+    the synsets are local concepts and lexicalized="false" is left alone."""
+
+    def test_concepts_are_the_lexicons_own(self, tmp_path):
+        path = tmp_path / 'dep-1.0.xml'
+        path.write_text(_DEPENDENT, encoding='utf-8')
+        lexicons, index = lmf_concept_index(path)
+        assert lexicons[0]['concepts_owner'] is None
+        assert index['dep-s1'] == ('dep.dep-s1', 'ADJ', 0)
+        lexicons, index = lmf_concept_index(path, mul_lexicons={'oewn'})
+        assert index['dep-s1'][0].startswith('oewn.')   # keyed by the release, identifier encoded
+
+    def test_unlexicalized_sense_is_kept(self, tmp_path):
+        path = tmp_path / 'dep-1.0.xml'
+        path.write_text(_DEPENDENT, encoding='utf-8')
+        build_test_db(tmp_path / 'c.db', tmp_path / 'p.db', [path])
+        conn = sqlite3.connect(str(tmp_path / 'c.db'))
+        assert conn.execute("SELECT COUNT(*) FROM forms WHERE form = 'vihreä'").fetchone()[0] == 1
+
+
 class TestConceptIndex:
     def test_shared_helper_agrees_with_the_merge(self):
         lexicons, index = lmf_concept_index(_WORDNETS_DIR / 'lmf-xx.xml')
