@@ -12,7 +12,7 @@ import pytest
 
 _BUILD_SH = Path(__file__).parent.parent / "build.sh"
 _FUNCTIONS = ("raw_rename", "index_of", "get_wordnet_urls", "download_standalone",
-              "direct_xml_name", "fetch_wordnet", "all_present",
+              "direct_xml_name", "fetch_wordnet", "all_present", "extras_present",
               "download_wordnets")
 
 
@@ -29,8 +29,9 @@ def _lexicon(version: str) -> str:
     return f'<LexicalResource><Lexicon version="{version}"/></LexicalResource>\n'
 
 
-def _make_archive(work: Path, stem: str, version: str) -> str:
-    """Write a {stem}-{version}.tar.xz holding {stem}-{version}.xml.
+def _make_archive(work: Path, stem: str, version: str, extras: dict[str, str] | None = None) -> str:
+    """Write a {stem}-{version}.tar.xz holding {stem}-{version}.xml and any
+    *extras* ({name: text}) beside it.
 
     Returns:
         A file:// URL for the archive, relative to the work directory.
@@ -41,6 +42,10 @@ def _make_archive(work: Path, stem: str, version: str) -> str:
     name = f"{stem}-{version}.tar.xz"
     with tarfile.open(work / "src" / name, "w:xz") as tar:
         tar.add(src, arcname=f"{stem}/{src.name}")
+        for extra, text in (extras or {}).items():
+            path = work / "src" / extra
+            path.write_text(text)
+            tar.add(path, arcname=f"{stem}/{extra}")
     return f"file://src/{name}"
 
 
@@ -61,7 +66,7 @@ def _run(work: Path, urls: list[str]) -> subprocess.CompletedProcess:
 def _raw_names(work: Path) -> list[str]:
     """Wordnet files in bin/raw_wns (not the record)."""
     return sorted(p.name for p in (work / "bin" / "raw_wns").iterdir()
-                  if p.name != "sources.tsv")
+                  if p.name not in ("sources.tsv", "extras"))
 
 
 @pytest.fixture()
@@ -80,6 +85,37 @@ def test_archive_fetched_and_recorded(work):
     assert _raw_names(work) == ["wnb-xx-1.4.xml"]
     record = (work / "bin" / "raw_wns" / "sources.tsv").read_text()
     assert record == f"{url}\twnb-xx-1.4.xml\n"
+
+
+def test_supporting_files_kept_beside_the_xml(work):
+    """citation.bib, README and LICENSE from the archive land in
+    bin/raw_wns/extras/<stem>/, where Step 8 packages them; the raw XML
+    directory itself stays XML only."""
+    url = _make_archive(work, "wnb-xx", "1.4",
+                        {"citation.bib": "@misc{x}", "README.md": "# x", "LICENSE": "CC",
+                         "data.tsv": "not kept"})
+
+    _run(work, [url])
+
+    extras = work / "bin" / "raw_wns" / "extras" / "wnb-xx"
+    assert sorted(p.name for p in extras.iterdir()) == ["LICENSE", "README.md", "citation.bib"]
+    assert _raw_names(work) == ["wnb-xx-1.4.xml"]
+
+
+def test_archive_fetched_again_until_its_supporting_files_are_kept(work):
+    """A download made before extras were kept is refetched once; an
+    archive with nothing to keep leaves an empty directory and is not."""
+    url = _make_archive(work, "wnb-xx", "1.4")
+    _run(work, [url])
+    extras = work / "bin" / "raw_wns" / "extras" / "wnb-xx"
+    assert extras.is_dir() and not any(extras.iterdir())
+    assert "already present" in _run(work, [url]).stdout
+
+    extras.rmdir()
+    result = _run(work, [url])
+
+    assert "already present" not in result.stdout
+    assert extras.is_dir()
 
 
 def test_same_url_not_fetched_again(work):

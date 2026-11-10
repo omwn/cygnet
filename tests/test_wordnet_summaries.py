@@ -76,6 +76,19 @@ def _write_and_load(builder, out_dir: Path) -> dict:
 
 
 class TestWriteWordnetSummaries:
+    def test_source_url_and_archive_name_come_from_sources_json(self, builder_summaries, tmp_path):
+        sources = tmp_path / 'sources.json'
+        sources.write_text(json.dumps({'wn-a': {'file': 'wn-a-1.0.xml', 'url': 'https://x/wn-a-1.0.tar.xz',
+                                                'extras': 'wn-a', 'requires': None}}))
+        out_dir = tmp_path / 'summaries'
+        builder_summaries.write_wordnet_summaries(out_dir, sources_path=sources)
+        summary = json.loads((out_dir / 'wn-a.json').read_text())
+        assert summary['sourceUrl'] == 'https://x/wn-a-1.0.tar.xz'
+        assert summary['lmfFile'] == 'wn-a-1.0.tar.gz'
+
+        plain = _write_and_load(builder_summaries, tmp_path / 'plain')
+        assert 'sourceUrl' not in plain and 'lmfFile' not in plain
+
     def test_writes_one_file_per_resource(self, builder_summaries, tmp_path):
         out_dir = tmp_path / 'summaries'
         n = builder_summaries.write_wordnet_summaries(out_dir)

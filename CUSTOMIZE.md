@@ -205,6 +205,7 @@ The header has two sides that are independently customisable:
 | `databases.provenance.filename` | `"provenance.db.gz"` | Provenance DB filename; same directory as `index.html` |
 | `databases.provenance.url` | — | Download URL for the provenance DB (shown in About tab) |
 | `databases.provenance.description` | — | One-line description shown in About tab |
+| `lmf.url` | `"lmf/"` | Where the cleaned WN-LMF archives (`web/lmf/<id>-<version>.tar.gz`, one per wordnet) are served from; each wordnet's summary page links there. Attach them to the release and give its download URL, or copy `web/lmf/` next to `index.html` |
 | `databases.provenance.byResource` | — | Directory (relative to `index.html`) of per-resource provenance DBs, as `build.sh` writes them to `web/provenance/`. Links by original id (`#/search?id=<synset id>`) then fetch only that resource's DB instead of the whole provenance DB (see below) |
 | `logo` | OMW logo | Header logo object `{src, url, alt, name}`; `null` to hide right side |
 | `logo.src` | — | Image path (relative to `index.html`) or URL |
@@ -323,7 +324,12 @@ The pipeline's first product is a cleaned WN-LMF copy of your wordnet,
 cleaned file loads in the `wn` library and validates against the WN-LMF
 1.4 DTD, and `uv run python scripts/report.py --md <file>` (run in the
 cygnet directory) turns its log into a report of the issues found,
-phrased for the wordnet's maintainers — see `REPORT.md`.
+phrased for the wordnet's maintainers — see `REPORT.md`.  Step 8 packages
+each cleaned file with that log, the release's `citation.bib`, `README` and
+`LICENSE` (a `citation.bib` is made from the header when the release has
+none) as `$CYGNET_WORK/web/lmf/mywn-VERSION.tar.gz`, which the wordnet's
+summary page in the UI offers for download beside the original release
+(see `lmf.url` in the field reference).
 
 ### Links by original id, and per-resource provenance
 

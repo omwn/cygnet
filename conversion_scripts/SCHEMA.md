@@ -521,6 +521,7 @@ Step 6 (`6_synthesise.py`, `cyg/merge.py`):
 | `<lexicon id>-<version>.xml` | Step 2 | One source lexicon as WN-LMF 1.4, cleaned (see below).  Loads in the `wn` library and validates against the DTD |
 | `<stem>_log.json` | Step 2 | What the cleaner changed or dropped, and why; read by `scripts/report.py` and `scripts/log_summary.py` |
 | `manifest.txt` | Step 2 | The files this build planned, after a line naming the cleaner version that made them; Step 6 ignores any other `.xml` in the directory |
+| `sources.json` | Step 2 | Where each cleaned file came from, by lexicon id: the wordnets.toml URL, the stem of its supporting files in `bin/raw_wns/extras/`, and the concepts lexicon a release member Requires; Step 8 packages from it and Step 6 puts the URL in the summaries |
 | `relation_direction_swaps.json` | Step 1.5 | Relation types whose direction a source has systematically reversed, by lexicon id; the cleaner swaps them |
 | `cili.tsv` | Step 1 (a link to `bin/cili.tsv`) | The CILI release: ILI, status, PWN origin and English definition per concept |
 | `cili_glosstag.json` | Step 4 (`--with-glosstag`) | `{ili: [[start, end, OEWN sense id], …]}`, the GlossTag sense annotations of the CILI definitions |
@@ -584,6 +585,17 @@ recorded in `relation_conflicts.json` and skipped, and an edge that would
 close a hypernym cycle is removed.  Provenance takes the resource and
 version from the Lexicon header and the original id from the Synset,
 LexicalEntry and Sense ids, plus every id in a `merged=` note.
+
+### The download archives (`web/lmf/`)
+
+Step 8 (`8_package_lmf.py`, `cyg/package.py`) packages each cleaned file
+as `<id>-<version>.tar.gz`: the file, its `_log.json`, and the
+`citation.bib`, `README` and `LICENSE` its source archive came with (kept
+by the download step in `bin/raw_wns/extras/<url stem>/`); a release
+without a `citation.bib` gets one made from the Lexicon header, and a
+member of a multi-lexicon release also carries the concepts lexicon it
+Requires.  The release workflow attaches them to the GitHub release, and
+a wordnet's summary page links to its archive and to the original release.
 
 ### The export (`--with-xml`)
 

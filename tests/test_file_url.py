@@ -157,6 +157,7 @@ def test_archive_skips_appledouble_files(work):
     result = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
 
     assert result.returncode == 0, result.stderr
-    names = sorted(p.name for p in (work / "bin" / "raw_wns").iterdir())
-    assert names == ["own-pt-1.0.xml"]
+    names = sorted(p.name for p in (work / "bin" / "raw_wns").iterdir() if p.is_file())
+    assert names == ["own-pt-1.0.xml"]   # the extras/ directory holds no ._ files either
+    assert not any((work / "bin" / "raw_wns" / "extras" / "own-pt").iterdir())
     assert listing.read_text() == "own-pt-1.0.xml\n"

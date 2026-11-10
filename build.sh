@@ -146,7 +146,9 @@ index_of() {
 }
 
 # Download a wordnet archive and extract its XML files into bin/raw_wns/ (flat),
-# writing the names of the extracted files, one per line, to $3.
+# writing the names of the extracted files, one per line, to $3.  Its
+# supporting files (citation.bib, README, LICENSE) go to bin/raw_wns/extras/$1/
+# for Step 8 to package with the cleaned file.
 download_standalone() {
     local name="$1" url="$2" list="$3"
     (
@@ -189,7 +191,20 @@ download_standalone() {
             echo "  No XML files found in $url" >&2
             exit 1
         fi
+        local extras="$DATA_DIR/bin/raw_wns/extras/$name"
+        rm -rf "$extras" && mkdir -p "$extras" || exit 1
+        find "$tmpdir" -maxdepth 3 -type f ! -name '._*' \( -iname 'citation.bib' \
+            -o -iname 'readme*' -o -iname 'license*' -o -iname 'licence*' -o -iname 'copying*' \) -print0 |
+            while IFS= read -r -d '' f; do
+                cp -f "$f" "$extras/$(basename "$f")" || exit 1
+            done || exit 1
     )
+}
+
+# True if the supporting files of $2 (an archive URL with stem $1) have been
+# kept, or there are none to keep (a direct XML URL).
+extras_present() {
+    direct_xml_name "$2" > /dev/null 2>&1 || [[ -d "$DATA_DIR/bin/raw_wns/extras/$1" ]]
 }
 
 # The file name a direct-XML URL (possibly compressed) is saved as; fails for
@@ -269,7 +284,7 @@ download_wordnets() {
         order+=("$url")
         if i=$(index_of "$url" ${rec_urls[@]+"${rec_urls[@]}"}); then
             read -ra names <<< "${rec_files[i]}"
-            if all_present "$raw" ${names[@]+"${names[@]}"}; then
+            if all_present "$raw" ${names[@]+"${names[@]}"} && extras_present "$stem" "$url"; then
                 echo "  $stem already present, skipping."
                 cur_urls+=("$url")
                 cur_files+=("${rec_files[i]}")
@@ -500,6 +515,10 @@ if $DO_BUILD; then
     run_pipeline 6_synthesise.py
     echo
 
+    echo "=== Step 8: Package the cleaned WN-LMF files ==="
+    run_pipeline 8_package_lmf.py
+    echo
+
     echo "=== Step 9: Populate language names ==="
     run_pipeline 9_lang_codes.py
     echo
@@ -528,6 +547,7 @@ if $DO_BUILD; then
     echo "=== Build complete! ==="
     echo "Output:"
     echo "  $DATA_DIR/web/cygnet.db         - SQLite database for web interface"
+    echo "  $DATA_DIR/web/lmf/              - cleaned WN-LMF file of each wordnet, packaged for download"
     echo "  $DATA_DIR/web/cygnet.db.gz      - compressed"
     echo "  $DATA_DIR/web/provenance.db     - provenance database"
     echo "  $DATA_DIR/web/provenance.db.gz  - compressed"

@@ -15,6 +15,12 @@ from pathlib import Path
 # the cleaner version that made them; anything else in the directory is left over
 # from an earlier build.
 MANIFEST_NAME = "manifest.txt"
+# Where each cleaned file came from, by lexicon id: {"file", "url", "extras",
+# "requires"} -- the output name, the wordnets.toml URL, the stem of the
+# supporting files kept in bin/raw_wns/extras/, and the id of the concepts
+# lexicon a member of a multi-lexicon release depends on.  Step 8 packages
+# from it and Step 6 puts the URL in the wordnet summaries.
+SOURCES_NAME = "sources.json"
 _CONVERTER_PREFIX = "# converter "
 
 
@@ -112,3 +118,22 @@ def read_manifest_converter(presynth: Path) -> str | None:
         first = f.readline().rstrip("\n")
     return first.removeprefix(_CONVERTER_PREFIX) if first.startswith(
         _CONVERTER_PREFIX) else None
+
+
+def write_sources(presynth: Path, sources: dict[str, dict]) -> None:
+    """Record where the cleaned files came from (see SOURCES_NAME).
+
+    Args:
+        presynth: The output directory.
+        sources: {lexicon id: {"file", "url", "extras", "requires"}}.
+    """
+    import json
+    (presynth / SOURCES_NAME).write_text(
+        json.dumps(sources, indent=1, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def read_sources(presynth: Path) -> dict[str, dict]:
+    """The record write_sources() wrote, or {} when there is none."""
+    import json
+    path = presynth / SOURCES_NAME
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}

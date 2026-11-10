@@ -16,7 +16,7 @@ from pathlib import Path
 from cyg.lmf import DIRECTION_SWAP_CONFIG_FILENAME
 from cyg.merge import LOW_TRUST_RESOURCES, MergeBuilder
 from cyg.multilex import read_lexicon_header
-from cyg.presynth import MANIFEST_NAME, read_manifest, stem_resource
+from cyg.presynth import MANIFEST_NAME, SOURCES_NAME, read_manifest, stem_resource
 
 
 def select_files(input_dir: Path) -> list[Path]:
@@ -209,7 +209,8 @@ def main() -> None:
     print('\nPhase 8: Writing per-wordnet summaries...')
     summaries_dir = db_path.parent / 'summaries'
     direction_swaps_path = input_dir / DIRECTION_SWAP_CONFIG_FILENAME
-    n_summaries = builder.write_wordnet_summaries(summaries_dir, direction_swaps_path)
+    n_summaries = builder.write_wordnet_summaries(summaries_dir, direction_swaps_path,
+                                                  input_dir / SOURCES_NAME)
     print(f'  {n_summaries:,} summary file(s) written to {summaries_dir}')
 
     # One build version for everything this run produces -- generated here

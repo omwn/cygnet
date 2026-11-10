@@ -24,6 +24,7 @@ from cyg.multilex import (
     read_lexicon_header,
 )
 from cyg.presynth import (
+    SOURCES_NAME,
     read_manifest,
     read_manifest_converter,
     source_hash,
@@ -332,6 +333,21 @@ def test_batch_members_require_the_cleaned_concepts_version(tmp_path, monkeypatc
 
     assert list(seen)[0] == "kin-0.1.xml"
     assert seen["kin-ar-0.1.xml"].requires == ("kin", "0.1" + CHANGED_SUFFIX)
+
+
+def test_batch_records_where_each_file_came_from(tmp_path, monkeypatch):
+    """sources.json names, per lexicon, the cleaned file, its wordnets.toml
+    URL and supporting-files stem, and the concepts lexicon a member of a
+    release Requires."""
+    out = _run_batch(tmp_path, monkeypatch, {})
+
+    sources = json.loads((out / SOURCES_NAME).read_text(encoding="utf-8"))
+    assert sources["kin-ar"] == {"file": "kin-ar-0.1.xml", "url": "file:///somewhere/kin-0.1.tar.xz",
+                                 "extras": "kin", "requires": "kin"}
+    assert sources["kin"]["requires"] is None
+    assert sources["omw-arb"] == {"file": "omw-arb-0.1.xml", "url": "https://example.org/omw-arb-2.0.tar.xz",
+                                  "extras": "omw-arb", "requires": None}
+    assert "kin-xx" not in sources   # skipped: no other wordnet for the language
 
 
 def test_batch_writes_manifest(tmp_path, monkeypatch):

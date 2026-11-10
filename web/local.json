@@ -17,6 +17,10 @@
     }
   },
 
+  "lmf": {
+    "url": "https://github.com/omwn/cygnet/releases/latest/download/"
+  },
+
   "logo": {
     "src":  "img/omw-logo.svg",
     "url":  "https://omwn.org",

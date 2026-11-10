@@ -86,8 +86,9 @@ re-running is fast if the sources haven't changed.
 3. optionally adds GlossTag sense annotations (Steps 3–4) and machine
    translations of definitions (Step 5) as sidecar files;
 4. merges the cleaned files and sidecars into `web/cygnet.db` and
-   `web/provenance.db` (Step 6, `cyg/merge.py`), then adds language names
-   and ARASAAC pictogram ids;
+   `web/provenance.db` (Step 6, `cyg/merge.py`), packages each cleaned
+   file for download (Step 8), then adds language names and ARASAAC
+   pictogram ids;
 5. optionally exports the database back out as WN-LMF (Step 7,
    `--with-xml`).
 
@@ -101,6 +102,7 @@ the cleaner finds can be reported per wordnet with `scripts/report.py`
 | File | Size | Description |
 |---|---|---|
 | `bin/cygnets_presynth/` | ~1 GB | One cleaned WN-LMF file per source wordnet, with its log |
+| `web/lmf/` | ~200 MB | Each cleaned file packaged for download (`<id>-<version>.tar.gz` with log, citation and licence), attached to releases |
 | `web/cygnet.db` | ~219 MB | Main SQLite database |
 | `web/cygnet.db.gz` | ~89 MB | Compressed (released asset) |
 | `web/provenance.db` | ~201 MB | Per-row source attribution |

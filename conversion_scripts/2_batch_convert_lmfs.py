@@ -28,6 +28,7 @@ from cyg.presynth import (
     read_manifest_converter,
     source_hash,
     write_manifest,
+    write_sources,
 )
 
 # wordnets.toml key for multi-lexicon releases linked by a 'mul' concepts lexicon.
@@ -85,6 +86,26 @@ def collect_xml_files(toml_path: Path, raw_wns_dir: Path) -> list[Path]:
                     found.append(m)
 
     return sorted(found)
+
+
+def source_urls(toml_path: Path, raw_wns_dir: Path) -> dict[Path, str]:
+    """The wordnets.toml URL each raw XML file came from.
+
+    Args:
+        toml_path: Path to wordnets.toml.
+        raw_wns_dir: Directory containing downloaded wordnet XML files.
+
+    Returns:
+        {raw XML path: URL}; a file matched by two URLs keeps the first.
+    """
+    with open(toml_path, "rb") as f:
+        config = tomllib.load(f)
+    urls: dict[Path, str] = {}
+    for lang, lang_urls in config.items():
+        for url in lang_urls:
+            for m in _match_url(url, lang, raw_wns_dir):
+                urls.setdefault(m, url)
+    return urls
 
 
 def _match_url(url: str, lang: str, raw_wns_dir: Path) -> list[Path]:
@@ -267,6 +288,8 @@ def clean_all(
     concept_versions: dict[str, str] = {}
     print(f"Found {len(xml_files)} files to clean")
 
+    urls = source_urls(Path(toml_path), Path(raw_wns_dir))
+    sources: dict[str, dict] = {}
     cleaner_hash = source_hash(CLEANER_SOURCES)
     if read_manifest_converter(output_path) == cleaner_hash:
         reusable = set(read_manifest(output_path) or [])
@@ -290,6 +313,11 @@ def clean_all(
             continue
         version = header.version.removesuffix(CHANGED_SUFFIX)
         output_name = f"{header.id}-{version}.xml"
+        url = urls.get(xml_file)
+        requires = file_options.get(xml_file, CleanOptions()).requires
+        sources[header.id] = {"file": output_name, "url": url,
+                              "extras": url_stem(url) if url else None,
+                              "requires": requires[0] if requires else None}
         if output_name in reusable and (output_path / output_name).exists():
             print(f"  Reusing {output_name}")
             counts["reused"] += 1
@@ -331,6 +359,8 @@ def clean_all(
         print()
 
     write_manifest(output_path, planned, cleaner_hash)
+
+    write_sources(output_path, {k: v for k, v in sources.items() if v['file'] in planned})
     print("=" * 70)
     print("Cleaning complete!")
     for key, n in counts.items():

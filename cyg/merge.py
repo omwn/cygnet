@@ -37,6 +37,7 @@ from cyg.lmf import (
     relation_type,
 )
 from cyg.multilex import dc_identifier, encode_for_xml_id, open_xml
+from cyg.package import package_name
 
 logger = logging.getLogger(__name__)
 
@@ -2160,6 +2161,7 @@ class MergeBuilder:
 
     def write_wordnet_summaries(
         self, out_dir: Path, direction_swaps_path: Path | None = None,
+        sources_path: Path | None = None,
     ) -> int:
         """Precompute per-resource stats for the Wordnets-tab detail view.
 
@@ -2185,10 +2187,18 @@ class MergeBuilder:
                 summary gets a ``directionSwaps`` list disclosing which
                 relation types were auto-corrected before merging, and
                 why (reversed/comparable counts vs. OEWN).
+            sources_path: Optional sources.json written by Step 2 (see
+                cyg.presynth.SOURCES_NAME).  When given, a resource's
+                summary gets ``sourceUrl``, the release its project
+                published, and ``lmfFile``, the archive Step 8 packages
+                its cleaned file as, for the download links.
 
         Returns:
             Number of summary files written.
         """
+        sources: dict[str, dict] = {}
+        if sources_path is not None and sources_path.exists():
+            sources = json.loads(sources_path.read_text(encoding='utf-8'))
         direction_swaps_by_code: dict[str, list[dict]] = {}
         if direction_swaps_path is not None and direction_swaps_path.exists():
             swap_data = json.loads(direction_swaps_path.read_text(encoding='utf-8'))
@@ -2389,6 +2399,9 @@ class MergeBuilder:
                 'senseRelDist': sense_rel_dist,
                 'directionSwaps': direction_swaps_by_code.get(code, []),
             }
+            if code in sources:
+                summary['sourceUrl'] = sources[code].get('url')
+                summary['lmfFile'] = package_name(sources[code]['file'])
             (out_dir / f'{code}.json').write_text(
                 json.dumps(summary, ensure_ascii=False, separators=(',', ':')),
                 encoding='utf-8',

@@ -170,7 +170,12 @@ def build_test_db(db_path: Path, prov_path: Path,
             )
     b.conn.commit()
 
-    b.write_wordnet_summaries(db_path.parent / 'summaries')
+    # Where wn-en "came from", so the UI's download links can be tested.
+    sources = db_path.parent / 'sources.json'
+    sources.write_text(json.dumps({'wn-en': {
+        'file': 'wn-en-1.0.xml', 'url': 'https://example.org/releases/wn-en-1.0.tar.xz',
+        'extras': 'wn-en', 'requires': None}}))
+    b.write_wordnet_summaries(db_path.parent / 'summaries', sources_path=sources)
 
     build_version = '20260101000000'
     data_dir = db_path.parent / 'data'
