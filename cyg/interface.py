@@ -1,6 +1,7 @@
 from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import List, Tuple, Literal, Optional
+from typing import Literal
 
 POS = Literal["noun", "verb", "adj", "adv", "adp", "unk", "conj", "nref"]
 
@@ -9,40 +10,35 @@ class Cygnet(ABC):
 
     @abstractmethod
     def concepts(self,
-                form: Optional[str] = None,
-                langs: List[str] | str | None = None,
-                pos : Optional[POS] = None
-                ) -> List[Concept]:
+                form: str | None = None,
+                langs: list[str] | str | None = None,
+                pos : POS | None = None
+                ) -> list[Concept]:
         """Returns all concepts, optionally filtered by wordform, language(s), and/or part of speech."""
-        pass
 
     @abstractmethod
     def concept(self,
                 ili: str
-                ) -> Optional[Concept]:
+                ) -> Concept | None:
         """Returns the concept identified by the given ILI (Interlingual Index) string, or None if not found."""
-        pass
 
     @abstractmethod
     def senses(self,
-               form: Optional[str] = None,
-               langs: List[str] | str | None = None
-               ) -> List[Sense]:
+               form: str | None = None,
+               langs: list[str] | str | None = None
+               ) -> list[Sense]:
         """Returns all senses, optionally filtered by wordform and/or language(s)."""
-        pass
 
     @abstractmethod
     def lexemes(self,
-                form: Optional[str] = None,
-                langs: List[str] | str | None = None
-                ) -> List[Lexeme]:
+                form: str | None = None,
+                langs: list[str] | str | None = None
+                ) -> list[Lexeme]:
         """Returns all lexemes, optionally filtered by wordform and/or language(s)."""
-        pass
 
     @abstractmethod
-    def langs(self) -> List[str]:
+    def langs(self) -> list[str]:
         """Returns the list of language codes available in the database."""
-        pass
 
 class Concept(ABC):
     """A language-independent concept, corresponding to a synset in traditional Wordnet releases."""
@@ -50,53 +46,44 @@ class Concept(ABC):
     @abstractmethod
     def definition(self,
                    lang: str = "en"
-                   ) -> Optional[AnnotatedString]:
+                   ) -> AnnotatedString | None:
         """Returns the definition of this concept in the given language, or None if unavailable."""
-        pass
 
     @abstractmethod
     def pos(self) -> POS:
         """Returns the part of speech (ontological category) of this concept."""
-        pass
 
     @abstractmethod
     def index(self) -> str:
         """Returns the unique identifier (ILI) for this concept."""
-        pass
 
     @abstractmethod
     def senses(self,
-               lang: Optional[str] = None
-               ) -> List[Sense]:
+               lang: str | None = None
+               ) -> list[Sense]:
         """Returns all senses linked to this concept, optionally filtered by language."""
-        pass
 
     @abstractmethod
     def lexemes(self,
-                lang: Optional[str] = None
-                ) -> List[Lexeme]:
+                lang: str | None = None
+                ) -> list[Lexeme]:
         """Returns all lexemes linked to senses of this concept, optionally filtered by language."""
-        pass
 
     @abstractmethod
-    def hypernyms(self) -> List[Concept]:
+    def hypernyms(self) -> list[Concept]:
         """Returns concepts that are connected to this concept by a hypernym relation."""
-        pass
 
     @abstractmethod
-    def hyponyms(self) -> List[Concept]:
+    def hyponyms(self) -> list[Concept]:
         """Returns concepts that are connected to this concept by a hyponymy relation."""
-        pass
 
     @abstractmethod
-    def meronyms(self) -> List[Concept]:
+    def meronyms(self) -> list[Concept]:
         """Returns concepts that are connected to this concept by a meronymy relation."""
-        pass
 
     @abstractmethod
-    def holonyms(self) -> List[Concept]:
+    def holonyms(self) -> list[Concept]:
         """Returns concepts that are connected to this concept by a holonymy relation."""
-        pass
 
 class Sense(ABC):
     """A pairing of a lexeme with a concept, representing one meaning of a word."""
@@ -104,27 +91,22 @@ class Sense(ABC):
     @abstractmethod
     def index(self) -> str:
         """Returns the unique identifier for this sense."""
-        pass
 
     @abstractmethod
-    def examples(self) -> List[AnnotatedString]:
+    def examples(self) -> list[AnnotatedString]:
         """Returns usage examples illustrating this sense."""
-        pass
 
     @abstractmethod
     def concept(self) -> Concept:
         """Returns the concept associated with this sense (the signified)."""
-        pass
 
     @abstractmethod
     def lexeme(self) -> Lexeme:
         """Returns the lexeme associated with this sense (the signifier)."""
-        pass
 
     @abstractmethod
     def lang(self) -> str:
         """Returns the language code of this sense's lexeme."""
-        pass
 
 class Lexeme(ABC):
     """A wordform in a specific language, with all possible inflections."""
@@ -132,32 +114,26 @@ class Lexeme(ABC):
     @abstractmethod
     def index(self) -> str:
         """Returns the unique identifier for this lexeme."""
-        pass
 
     @abstractmethod
     def lang(self) -> str:
         """Returns the language code of this lexeme."""
-        pass
 
     @abstractmethod
     def lemma(self) -> str:
         """Returns the canonical form of this lexeme."""
-        pass
 
     @abstractmethod
-    def all_forms(self) -> List[str]:
+    def all_forms(self) -> list[str]:
         """Returns all inflected forms of this lexeme (including the lemma)."""
-        pass
 
     @abstractmethod
-    def senses(self) -> List[Sense]:
+    def senses(self) -> list[Sense]:
         """Returns every sense that references this lexeme."""
-        pass
 
     @abstractmethod
-    def concepts(self) -> List[Concept]:
+    def concepts(self) -> list[Concept]:
         """Returns every concept linked to this lexeme via a sense."""
-        pass
 
 class AnnotatedString(ABC):
     """A string of text with sense annotations."""
@@ -165,14 +141,11 @@ class AnnotatedString(ABC):
     @abstractmethod
     def text(self) -> str:
         """Return the plain text content of this string."""
-        pass
 
     @abstractmethod
     def lang(self) -> str:
         """Return the language code of the language this string is in."""
-        pass
 
     @abstractmethod
-    def sense_offsets(self) -> List[Tuple[Sense, int, int]]:
+    def sense_offsets(self) -> list[tuple[Sense, int, int]]:
         """Return a list of (sense, start, end) tuples marking annotated spans within the text."""
-        pass

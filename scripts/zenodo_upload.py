@@ -108,10 +108,10 @@ def main():
     # Publish
     print("Publishing...")
     result = api("POST", f"/deposit/depositions/{deposit_id}/actions/publish", token)
-    print(f"\nDone!")
+    print("\nDone!")
     print(f"  DOI:         {result['doi']}")
     print(f"  Concept DOI: {result['conceptdoi']}")
-    print(f"\nAdd to .zenodo.json for future versions:")
+    print("\nAdd to .zenodo.json for future versions:")
     print(f'  "conceptdoi": "{result["conceptdoi"]}"')
 
 

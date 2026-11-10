@@ -28,9 +28,8 @@ import os
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import Page, expect
-
 from cygnet_fixtures import cygnet_to_lmf
+from playwright.sync_api import Page, expect
 
 _DB_LOAD_TIMEOUT = 60_000   # ms — allow extra time on slower/loaded machines
 _SEARCH_TIMEOUT = 15_000    # ms

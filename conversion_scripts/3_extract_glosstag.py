@@ -4,7 +4,7 @@ import json
 import os
 import string
 import xml.etree.ElementTree as ET
-from collections import defaultdict
+
 from nltk.corpus import wordnet as wn
 from nltk.corpus.reader import WordNetError
 from simple_colors import green
@@ -196,9 +196,7 @@ def process_sentence(sentence_xml, collocation_dict=None):
             sense = collocation_dict[collocation]
 
             tokens.append((text, sense))
-        elif tag == 'aux':
-            tokens.extend(process_sentence(child, collocation_dict))
-        elif tag == 'mwf':
+        elif tag == 'aux' or tag == 'mwf':
             tokens.extend(process_sentence(child, collocation_dict))
         else:
             rendition = child.attrib['rend']
@@ -419,7 +417,7 @@ def main():
                 if code == 'Definition':
                     if no_def:
                         print(f'Definition assigned: {sentence_object.to_string()}')
-                    assert synset not in definitions.keys()
+                    assert synset not in definitions
                     definitions[synset] = sentence_object
 
             expected_synonyms = set([lemma.name().replace('_', ' ') for lemma in wn.synset(synset).lemmas()])
@@ -429,7 +427,7 @@ def main():
     print('Saving')
     for synset in wn.all_synsets():
         synset_id = synset.name()
-        assert synset_id in definitions.keys()
+        assert synset_id in definitions
 
     def save_json(filename, dict):
         """

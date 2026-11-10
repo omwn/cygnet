@@ -13,7 +13,6 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-
 from conftest import wn_xml
 
 _WN_A_BODY = """\

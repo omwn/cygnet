@@ -21,8 +21,7 @@ def stem(url: str) -> str:
         if name.endswith(ext):
             name = name[:-len(ext)]
             break
-    if name.endswith(".xml"):
-        name = name[:-4]
+    name = name.removesuffix(".xml")
     return re.sub(r"-\d[\d.]*$", "", name)
 
 

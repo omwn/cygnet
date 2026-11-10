@@ -6,9 +6,9 @@ run()/main() is exercised manually against real candidate files (see the
 plWordnet meronym-direction investigation this script grew out of).
 """
 
-from pathlib import Path
 import importlib.util
 import sys
+from pathlib import Path
 
 _SCRIPT_PATH = Path(__file__).parent.parent / "scripts" / "check_relation_directions.py"
 _spec = importlib.util.spec_from_file_location("check_relation_directions", _SCRIPT_PATH)
