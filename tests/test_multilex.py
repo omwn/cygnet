@@ -8,12 +8,14 @@ test_lmf_merge.py.
 """
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
 import pytest
 
-from cyg.clean import CleanResult
+from cyg.clean import CleanOptions, CleanResult
+from cyg.lmf import DIRECTION_SWAP_CONFIG_FILENAME
 from cyg.multilex import (
     build_concept_map,
     fix_language,
@@ -268,6 +270,35 @@ def _run_batch(tmp_path, monkeypatch, presynth_files: dict[str, str]) -> Path:
 
 def _current_converter() -> str:
     return source_hash(batch.CLEANER_SOURCES)
+
+
+def test_batch_applies_direction_swaps_from_output_dir(tmp_path, monkeypatch):
+    """The swap config Step 1.5 writes into the output directory reaches the
+    cleaner of the lexicon it names, and no other."""
+    seen: dict[str, CleanOptions] = {}
+
+    class Recording(_FakeCleaner):
+        def __init__(self, source, cili, options=None):
+            super().__init__(source, cili, options)
+            seen[self.source.name] = options
+
+    raw, toml = _raw_release(tmp_path)
+    out = tmp_path / "presynth"
+    out.mkdir()
+    measured = {"reversed": 5, "comparable": 5, "reversed_share": 1.0, "swapped": True}
+    paired = {"reversed": None, "comparable": None, "reversed_share": None, "swapped": True}
+    _write(out / DIRECTION_SWAP_CONFIG_FILENAME,
+           json.dumps({"kin-ar": {"hypernym": measured, "hyponym": paired}}))
+    cili = _write(tmp_path / "cili.tsv",
+                  "ili_id\tstatus\tsuperseded_by\torigin\tdefinition\n"
+                  "i100\t1\t\tpwn-3.0:00000001-n\td\n")
+    monkeypatch.setattr(batch, "LmfCleaner", Recording)
+
+    batch.clean_all(cili_file=cili, toml_path=toml, raw_wns_dir=raw, output_dir=out)
+
+    assert seen["kin-ar-0.1.xml"].direction_swaps == frozenset({"hypernym", "hyponym"})
+    assert set(seen["kin-ar-0.1.xml"].swap_stats) == {"hypernym"}
+    assert seen["kin-0.1.xml"].direction_swaps == frozenset()
 
 
 def test_batch_writes_manifest(tmp_path, monkeypatch):

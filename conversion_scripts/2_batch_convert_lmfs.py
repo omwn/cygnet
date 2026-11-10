@@ -224,7 +224,7 @@ def clean_all(
 
     An existing output is reused when the manifest says this cleaner made
     it; otherwise the source is cleaned again.  The direction-swap config
-    is read from beside the CILI file, where Step 1.5 writes it.
+    is read from the output directory, where Step 1.5 writes it.
 
     Args:
         cili_file: The CILI release file (bin/cili.tsv).
@@ -258,9 +258,9 @@ def clean_all(
         reusable = set()
         print(f"Cleaner {cleaner_hash} has not made these outputs: cleaning all")
     cili = CiliIndex.from_tsv(Path(cili_file))
-    swaps, swap_stats = load_direction_swap_config(
-        Path(cili_file).parent / DIRECTION_SWAP_CONFIG_FILENAME
-    )
+    swaps, swap_stats = load_direction_swap_config(output_path / DIRECTION_SWAP_CONFIG_FILENAME)
+    if swaps:
+        print(f"Direction swaps for {', '.join(sorted(swaps))}")
     print()
 
     counts = {"cleaned": 0, "unchanged": 0, "reused": 0, "errors": 0}
