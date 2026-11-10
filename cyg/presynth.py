@@ -1,8 +1,8 @@
 """File conventions of the Step 2 output directory (bin/cygnets_presynth).
 
-Step 2 (2_batch_convert_lmfs.py) writes one Cygnet XML file per lexicon, a
-``{stem}_log.json`` conversion log beside each, and a manifest of the files it
-planned.  Step 6 and the reporting scripts read them back.
+Step 2 (2_batch_convert_lmfs.py) writes one cleaned WN-LMF file per source
+lexicon, a ``{stem}_log.json`` cleaning log beside each, and a manifest of the
+files it planned.  Step 6 and the reporting scripts read them back.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 # Lists the outputs Step 2 planned, one per line, after a comment line naming
-# the converter that made them; anything else in the directory is left over
+# the cleaner version that made them; anything else in the directory is left over
 # from an earlier build.
 MANIFEST_NAME = "manifest.txt"
 _CONVERTER_PREFIX = "# converter "
@@ -51,7 +51,7 @@ def stem_resource(stem: str, codes: list[str] | tuple[str, ...]) -> str | None:
 
 
 def source_hash(paths: Iterable[Path | str]) -> str:
-    """A short hash of the contents of source files, identifying a converter.
+    """A short hash of the contents of source files, identifying a cleaner version.
 
     Args:
         paths: The source files, in a fixed order.
@@ -67,12 +67,12 @@ def source_hash(paths: Iterable[Path | str]) -> str:
 
 def write_manifest(presynth: Path, names: list[str],
                    converter: str | None = None) -> None:
-    """Record the files Step 2 planned, and the converter that made them.
+    """Record the files Step 2 planned, and the cleaner version that made them.
 
     Args:
         presynth: The pre-synth directory.
         names: The planned XML file names.
-        converter: The converter's source_hash(), if known.
+        converter: The cleaner's source_hash(), if known.
     """
     header = f"{_CONVERTER_PREFIX}{converter}\n" if converter else ""
     (presynth / MANIFEST_NAME).write_text(
@@ -97,7 +97,7 @@ def read_manifest(presynth: Path) -> list[str] | None:
 
 
 def read_manifest_converter(presynth: Path) -> str | None:
-    """The converter that made the files in the manifest.
+    """The cleaner version that made the files in the manifest.
 
     Args:
         presynth: The pre-synth directory.

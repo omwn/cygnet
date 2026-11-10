@@ -1,5 +1,6 @@
 """
-Core merge logic for synthesising pre-converted Cygnet XML files into SQLite.
+Core merge logic for synthesising the cleaned WN-LMF files and TSV sidecars
+of bin/cygnets_presynth into SQLite.
 """
 
 import csv

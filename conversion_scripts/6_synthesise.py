@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Stream all pre-synthesised Cygnet XML files directly into SQLite.
+Stream the cleaned WN-LMF files and TSV sidecars directly into SQLite.
 
 Each source file is parsed, merged into the databases, and freed before
 the next is loaded — so peak memory is one file at a time plus the

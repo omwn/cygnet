@@ -454,8 +454,8 @@ if $DO_BUILD; then
     # any relation type with source/target systematically reversed (e.g.
     # plWordnet's mero_part/mero_member, own-pt's hypernym), and writes
     # bin/cygnets_presynth/relation_direction_swaps.json, which Step 2
-    # reads to auto-correct the direction during conversion (see
-    # cyg.converters.load_direction_swap_config). The per-file cache
+    # reads to auto-correct the direction during cleaning (see
+    # cyg.lmf.load_direction_swap_config). The per-file cache
     # (.direction_check_cache.json) means only new/changed raw_wns files
     # get re-run through this on subsequent builds. Only the files
     # wordnets.toml selects are checked: the swap config is keyed by

@@ -317,6 +317,14 @@ intermediate files instead of cygnet's own `bin/` and `web/`.  Cygnet also
 seeds the work directory's `wordnets.toml` from the provided one and skips
 running the test suite (tests are cygnet-internal).
 
+The pipeline's first product is a cleaned WN-LMF copy of your wordnet,
+`$CYGNET_WORK/bin/cygnets_presynth/mywn-VERSION.xml`, with
+`mywn-VERSION_log.json` beside it listing what was changed or dropped.  The
+cleaned file loads in the `wn` library and validates against the WN-LMF
+1.4 DTD, and `uv run python scripts/report.py --md <file>` (run in the
+cygnet directory) turns its log into a report of the issues found,
+phrased for the wordnet's maintainers — see `REPORT.md`.
+
 ### Links by original id, and per-resource provenance
 
 `#/search?id=<synset id>` opens the synset that its source wordnet gave that

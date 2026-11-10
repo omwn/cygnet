@@ -22,7 +22,6 @@ check_unglossed_concepts = _mod.check_unglossed_concepts
 check_hypernym_cycles = _mod.check_hypernym_cycles
 check_self_loops = _mod.check_self_loops
 check_internal_reversed_relations = _mod.check_internal_reversed_relations
-check_dangling_senses = _mod.check_dangling_senses
 check_unmatched_examples = _mod.check_unmatched_examples
 check_non_standard_relations = _mod.check_non_standard_relations
 check_duplicate_ids = _mod.check_duplicate_ids
@@ -423,22 +422,6 @@ class TestCheckInternalReversedRelations:
 """
         data = _parse(tmp_path, body)
         assert check_internal_reversed_relations(data) is None
-
-
-# ---------------------------------------------------------------------------
-# check_dangling_senses
-# ---------------------------------------------------------------------------
-
-class TestCheckDanglingSenses:
-    def test_no_issue_for_clean_file(self, tmp_path):
-        data = _parse(tmp_path, _GOOD)
-        assert check_dangling_senses(data) is None
-
-    def test_cross_file_concept_ok(self, tmp_path):
-        """signified references to cili. IDs that aren't in this file are expected — no issue."""
-        data = _parse(tmp_path, _GOOD)
-        # The sense in _GOOD references cili.i1 which IS in this file; ensure no dangling
-        assert check_dangling_senses(data) is None
 
 
 # ---------------------------------------------------------------------------
@@ -1362,4 +1345,4 @@ class TestParseLmf:
     def test_checks_run_on_lmf_data(self, data):
         issues = _mod.run_checks(data)
         titles = {i.title for i in issues}
-        assert titles  # the fixture has dangling senses and self-contained checks run
+        assert titles  # the fixture has an unmatched example, so a check fires

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Aggregate converter log files and print a cross-wordnet summary table.
+"""Aggregate the cleaner's log files and print a cross-wordnet summary table.
 
 For every numeric metric stored in the per-wordnet ``*_log.json`` files this
 script shows: the total across all wordnets, the number of wordnets that have
@@ -143,7 +143,7 @@ def print_summary(logs: dict[str, dict], top_n: int, log_dir: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Summarise converter log files across all wordnets.",
+        description="Summarise the cleaner's log files across all wordnets.",
     )
     parser.add_argument(
         "log_dir", nargs="?", type=Path, default=PRESYNTH_DIR,

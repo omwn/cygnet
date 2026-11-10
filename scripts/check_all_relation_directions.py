@@ -22,7 +22,7 @@ Unlike the single-file script, this:
     that declares a reversed mero_part typically declares the equally
     reversed holo_part too, and swapping only one side lets per-file
     inverse-generation regenerate the original bugged direction from the
-    untouched other side. cyg/converters.py reads this file to decide
+    untouched other side. The cleaner (cyg/clean.py) reads this file to decide
     which relation types to swap, per resource, instead of a hand-curated
     dict.
 
@@ -237,7 +237,7 @@ def main() -> int:
                          help='Cache per-file stats here, keyed by (path, mtime, size); '
                               'skips recomputing unchanged files on the next run')
     parser.add_argument('--write-swap-config', type=Path, default=None,
-                         help='Write a direction-swap config for cyg/converters.py to read')
+                         help='Write a direction-swap config for the cleaner (cyg/clean.py) to read')
     args = parser.parse_args()
 
     if not args.raw_wns_dir.exists():

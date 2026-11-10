@@ -609,7 +609,7 @@ def load_direction_swap_config(
 
     Args:
         path: Path to the swap config JSON. Missing is not an error (e.g.
-            running the converter standalone, without the pre-check step)
+            running the cleaner standalone, without the pre-check step)
             -- it just means nothing gets swapped.
 
     Returns:

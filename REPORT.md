@@ -1,7 +1,7 @@
 # Wordnet Quality Reports
 
-`scripts/report.py` scans one or more pre-synthesised Cygnet XML files and
-produces a human-readable summary of every issue that would cause Cygnet to
+`scripts/report.py` scans one or more cleaned WN-LMF files (Step 2's output
+in `bin/cygnets_presynth/`) and produces a human-readable summary of every issue that would cause Cygnet to
 silently drop or modify data — phrased for upstream wordnet maintainers who
 may not be familiar with Cygnet's internals.
 
@@ -54,9 +54,7 @@ done
 ```
 
 This produces `reports/own-pt-1.0.0.md`, `reports/wordnet_lv-1.0.md`, etc. —
-one file per resource. `cili-1.0.xml` (the interlingual index, not a
-wordnet) produces an empty file, since `report_file()` intentionally prints
-nothing for it — delete or ignore `reports/cili-1.0.md`.
+one file per resource.
 
 Each `uv run` invocation re-resolves the environment, so looping like this
 over all ~78 wordnets takes a couple of minutes.
@@ -117,8 +115,8 @@ The script combines three sources, using whichever are available:
 
 | Source | When available |
 |---|---|
-| The pre-synth XML file itself | Always |
-| `bin/cygnets_presynth/{name}_log.json` | After running conversion scripts 1–5 |
+| The cleaned WN-LMF file itself | Always |
+| `bin/cygnets_presynth/{name}_log.json` | After Step 2 (`2_batch_convert_lmfs.py`), which writes it beside the file |
 | `bin/relation_conflicts.json` | After running the full build (`build.sh`) |
 
 ---
@@ -127,27 +125,26 @@ The script combines three sources, using whichever are available:
 
 | Issue | Cause | What Cygnet does |
 |---|---|---|
-| **Concepts without definitions** | `<Concept>` in this file has no matching `<Gloss>` | Concept and all its senses are deleted |
-| **Word entries with no wordforms** | `<Lexeme>` has no `<Wordform>` children | Entry and all its senses are silently skipped |
+| **Concepts without definitions** | `<Synset>` in this file has no `<Definition>` | Synset and all its senses are deleted |
+| **Word entries with no wordforms** | `<LexicalEntry>` whose `<Lemma>` has no `writtenForm` | Entry and all its senses are dropped |
 | **Hypernym loops (within this file)** | A set of `hypernym`/`instance_hypernym` relations forms a cycle internally | The relation that closes the loop is removed |
 | **Hypernym cycles spanning multiple wordnets** | A relation from this file creates a cycle when combined with relations already merged from other wordnets, caught immediately after this file is merged | The offending relation is removed; the existing cross-wordnet chain is shown. Wordnets merged earlier win, so wordnets in `cyg.merge.LOW_TRUST_RESOURCES` are merged last |
 | **Relations reversed relative to another wordnet** | This file asserts `A hypernym B` but another wordnet already established `B hypernym A` | The conflicting relation is skipped |
-| **Duplicate IDs** | A concept, entry, or sense ID appears more than once | Duplicate concepts crash the build; duplicate entries/senses are merged or skipped |
-| **Unrecognised part-of-speech code** | A `<Synset>` or `<Lemma>` uses a `partOfSpeech` value Cygnet doesn't recognise (valid: `n`, `v`, `a`, `r`, `s`, `c`, `p`, `x`, `u`) — including a missing/empty attribute | Coerced to `UNK`; the concept's real part of speech is lost |
+| **Duplicate IDs** | A synset, entry, or sense ID appears more than once | Duplicate concepts crash the build; duplicate entries/senses are merged or skipped |
+| **Unrecognised part-of-speech code** | A `<Synset>` or `<Lemma>` uses a `partOfSpeech` value Cygnet doesn't recognise (valid: `n`, `v`, `a`, `r`, `s`, `c`, `p`, `x`, `u`) — including a missing/empty attribute | Written as `u` in the cleaned file and stored as `UNK`; the real part of speech is lost |
 
 ### WARNING issues — possible errors
 
 | Issue | Cause | What Cygnet does |
 |---|---|---|
 | **Contradictory relations within this file** | Same directed relation asserted in both directions (e.g. `A hypernym B` and `B hypernym A`) | First accepted; second skipped. Concept IDs are shown with their wordforms (e.g. `dog hypernym animal`) |
-| **Senses referencing undeclared entries** | `<Sense signifier="…">` points to an entry ID not in this file | Sense silently skipped |
-| **Example sentences with no matching sense annotations** | `<Example>` has no `<AnnotatedToken sense="…">` whose sense ID is in this file | Example silently discarded |
-| **Self-referential relations** | `source == target` in a `<ConceptRelation>` or `<SenseRelation>` | Silently skipped |
+| **Example sentences with no matching sense annotations** | `<Example>` is still under its `<Synset>`: the cleaner found no sense's word in it to move it under | Not merged |
+| **Self-referential relations** | A `<SynsetRelation>` or `<SenseRelation>` targets the element it sits in | Dropped by the cleaner |
 | **POS mismatches: synset vs CILI concept** | Synset's declared POS differs from CILI's record for the same concept | CILI's POS is used; synset's is ignored |
 | **POS mismatches: lexeme vs its concept** | Lexeme's POS differs from its linked concept's POS | Stored as-is; may indicate a wrong sense link |
 | **Relations with incompatible POS categories** | Source and target have POS categories that are incompatible for the relation type | Relation skipped |
-| **Senses with unresolvable synset (conversion time)** | At conversion, the synset ID in the source LMF could not be found | Sense absent from the pre-synth file |
-| **Example sentences not matched to a sense (conversion time)** | Two sub-cases: (1) the concept had no senses so no wordforms could be identified — marked `no senses/wordforms found`; (2) the target lemma could not be matched in the sentence after morphological analysis | Example absent from the pre-synth file |
+| **Senses with unresolvable synset (cleaning time)** | `<Sense synset="…">` named a synset not in the source file | Sense absent from the cleaned file |
+| **Example sentences not matched to a sense (cleaning time)** | Two sub-cases: (1) the synset had no senses so no wordforms could be identified — marked `no senses/wordforms found`; (2) the target lemma could not be matched in the sentence after morphological analysis | Example left under its `<Synset>` in the cleaned file; not merged |
 
 ### INFO issues — for awareness
 
