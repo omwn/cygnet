@@ -3,6 +3,7 @@
 Batch convert GlobalWordNet XML files to Cygnet XML format.
 """
 
+import hashlib
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -139,7 +140,7 @@ def drop_unusable_languages(xml_files: list[Path]) -> list[Path]:
 
 @dataclass(frozen=True)
 class FileOptions:
-    """Per-file converter options for lexicons of multi-lexicon releases."""
+    """Per-file converter options for lexicons that share concepts."""
 
     shared: SharedConcepts
     language: str | None = None
@@ -156,6 +157,11 @@ def plan_multilexicon(
     already has another wordnet in the build, unless all_languages is set;
     a kept member takes the code that wordnet uses (e.g. ar -> arb).
 
+    Every other wordnet in the build is 'linked' to the concepts of all the
+    releases: a synset of it whose dc:identifier names a concept joins that
+    concept.  So a release may hold the concepts alone, with the words in
+    each language's own wordnet.
+
     Args:
         toml_path: Path to wordnets.toml
         raw_wns_dir: Directory containing downloaded wordnet XML files
@@ -163,7 +169,7 @@ def plan_multilexicon(
         all_languages: Keep members in every language
 
     Returns:
-        (options for each concepts or member file, files to skip)
+        (options for each file that shares concepts, files to skip)
     """
     with open(toml_path, "rb") as f:
         mul_urls = tomllib.load(f).get(MUL_KEY, [])
@@ -179,6 +185,7 @@ def plan_multilexicon(
 
     options: dict[Path, FileOptions] = {}
     skip: set[Path] = set()
+    every: dict[str, tuple[str | None, str]] = {}  # the concepts of all releases
     for url, group in zip(mul_urls, groups):
         headers = {p: read_lexicon_header(p) for p in group}
         concept_files = [p for p, h in headers.items() if h.language == MUL_KEY]
@@ -188,6 +195,8 @@ def plan_multilexicon(
             skip.update(group)
             continue
         concepts = build_concept_map(concept_files[0])
+        for ident, concept in concepts.items():
+            every.setdefault(ident, concept)  # the release listed first wins
         options[concept_files[0]] = FileOptions(SharedConcepts(concepts, "concepts"))
         kept, dropped = [], []
         for p, h in sorted(headers.items()):
@@ -206,7 +215,33 @@ def plan_multilexicon(
               "(no other wordnet for the language)")
         if kept and not all_languages:
             print(f"    kept: {' '.join(kept)}")
+    if every:
+        linked = FileOptions(SharedConcepts(every, "linked"))
+        for p in xml_files:
+            if p not in mul_files:
+                options[p] = linked
     return options, skip
+
+
+def conversion_key(converter: str, options: dict[Path, FileOptions]) -> str:
+    """Identify what an output depends on: the converter and the shared concepts.
+
+    A wordnet linked to shared concepts is converted differently when the
+    concepts change, though its own file and the converter do not.
+
+    Args:
+        converter: source_hash() of the converter's source files
+        options: The per-file options from plan_multilexicon()
+
+    Returns:
+        The converter hash, with a hash of the linked concepts if there are any
+    """
+    concepts = next((o.shared.concepts for o in options.values()
+                     if o.shared.role == "linked"), None)
+    if not concepts:
+        return converter
+    digest = hashlib.sha256(repr(sorted(concepts.items())).encode("utf-8"))
+    return f"{converter}+{digest.hexdigest()[:8]}"
 
 
 def batch_convert(cili_file, toml_path, raw_wns_dir="raw_wns", output_dir="cygnets_presynth",
@@ -238,7 +273,7 @@ def batch_convert(cili_file, toml_path, raw_wns_dir="raw_wns", output_dir="cygne
     xml_files = [p for p in xml_files if p not in skip]
 
     print(f"Found {len(xml_files)} files to process")
-    converter_hash = source_hash(CONVERTER_SOURCES)
+    converter_hash = conversion_key(source_hash(CONVERTER_SOURCES), file_options)
     if read_manifest_converter(output_path) == converter_hash:
         reusable = set(read_manifest(output_path) or [])
     else:

@@ -7,6 +7,7 @@ shared-concept mode, and the planning step in 2_batch_convert_lmfs.py
 
 import importlib.util
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -209,6 +210,69 @@ def test_member_lexicon_points_at_shared_concepts(tmp_path):
     assert root.get("language") == "arb"
 
 
+# A wordnet outside the release: it names 'Fa' (with a definition of its
+# own) and 'Pa' (which has an ILI); 'Mo' it has under its own ILI; and one
+# synset's dc:identifier is not a concept's.
+_LINKED = _LMF_HEAD.format(id="wn-cs", lang="cs") + """\
+    <LexicalEntry id="wn-cs-e1">
+      <Lemma writtenForm="otec" partOfSpeech="n"/>
+      <Sense id="wn-cs-e1-1" synset="wn-cs-Fa"/>
+    </LexicalEntry>
+    <LexicalEntry id="wn-cs-e2">
+      <Lemma writtenForm="rodič" partOfSpeech="n"/>
+      <Sense id="wn-cs-e2-1" synset="wn-cs-Pa"/>
+    </LexicalEntry>
+    <LexicalEntry id="wn-cs-e3">
+      <Lemma writtenForm="matka" partOfSpeech="n"/>
+      <Sense id="wn-cs-e3-1" synset="wn-cs-Mo"/>
+    </LexicalEntry>
+    <LexicalEntry id="wn-cs-e4">
+      <Lemma writtenForm="pes" partOfSpeech="n"/>
+      <Sense id="wn-cs-e4-1" synset="wn-cs-dog"/>
+    </LexicalEntry>
+    <Synset id="wn-cs-Fa" ili="" partOfSpeech="n" dc:identifier="K:Fa">
+      <Definition>mužský rodič</Definition>
+    </Synset>
+    <Synset id="wn-cs-Pa" ili="" partOfSpeech="n" dc:identifier="K:Pa"/>
+    <Synset id="wn-cs-Mo" ili="i100" partOfSpeech="n" dc:identifier="K:Mo"/>
+    <Synset id="wn-cs-dog" ili="" partOfSpeech="n" dc:identifier="other:dog">
+      <Definition>psovitá šelma</Definition>
+    </Synset>
+""" + _LMF_TAIL
+
+
+def test_linked_wordnet_joins_shared_concepts(tmp_path):
+    concepts = build_concept_map(_write(tmp_path / "kin.xml", _CONCEPTS))
+    root, converter = _run(tmp_path, _LINKED, SharedConcepts(concepts, "linked"))
+    signified = [s.get("signified") for s in root.iter("Sense")]
+    # The word joins the release's concept, or its CILI concept if it has one
+    assert "kin.Fa" in signified
+    assert signified.count("cili.i100") == 2  # 'Pa' by the release, 'Mo' by its ILI
+    # Only the synset that names no concept makes a concept of its own
+    own = [c.get("id") for c in root.iter("Concept")]
+    assert len(own) == 1 and own[0].startswith("wn-cs.")
+    assert signified.count(own[0]) == 1
+    # Its own definition of a shared concept is kept
+    glosses = {(g.get("definiendum"), g.get("language")) for g in root.iter("Gloss")}
+    assert ("kin.Fa", "cs") in glosses
+    assert converter.log["linked_shared_concepts"]["count"] == 1
+    # A dc:identifier that is not a concept's is not an error in a wordnet
+    assert converter.log["shared_concept_not_found"]["count"] == 0
+
+
+def test_linked_wordnet_own_ili_wins(tmp_path):
+    concepts = build_concept_map(_write(tmp_path / "kin.xml", _CONCEPTS))
+    root = _convert(tmp_path, _LINKED, SharedConcepts(concepts, "linked"))
+    # 'Mo' has no ILI in the release, but the wordnet gives i100: that wins
+    assert "kin.Mo" not in {s.get("signified") for s in root.iter("Sense")}
+
+
+def test_wordnet_without_shared_concepts_is_unchanged(tmp_path):
+    root = _convert(tmp_path, _LINKED)
+    # With no release in the build every synset without an ILI is its own concept
+    assert len(list(root.iter("Concept"))) == 3
+
+
 # --- Planning which lexicons to convert -----------------------------------------
 
 def _raw_release(tmp_path: Path) -> tuple[Path, Path]:
@@ -233,6 +297,15 @@ def test_plan_keeps_only_languages_with_a_wordnet(tmp_path):
     assert options[raw / "kin-ar-0.1.xml"].shared.role == "member"
     assert options[raw / "kin-ar-0.1.xml"].language == "arb"
     assert skip == {raw / "kin-xx-0.1.xml"}
+
+
+def test_plan_links_the_other_wordnets_to_the_concepts(tmp_path):
+    raw, toml = _raw_release(tmp_path)
+    files = batch.collect_xml_files(toml, raw)
+    options, _ = batch.plan_multilexicon(toml, raw, files, all_languages=False)
+    linked = options[raw / "omw-arb.xml"]
+    assert linked.shared.role == "linked" and linked.language is None
+    assert set(linked.shared.concepts) == {"K:Pa", "K:Fa", "K:Mo"}
 
 
 def test_plan_all_languages(tmp_path):
@@ -554,7 +627,27 @@ def _run_batch(tmp_path, monkeypatch, presynth_files: dict[str, str]) -> Path:
 
 
 def _current_converter() -> str:
-    return source_hash(batch.CONVERTER_SOURCES)
+    """The key Step 2 records for the test release of _raw_release()."""
+    concepts = build_concept_map_from_text(_CONCEPTS)
+    options = {Path("w.xml"): batch.FileOptions(SharedConcepts(concepts, "linked"))}
+    return batch.conversion_key(source_hash(batch.CONVERTER_SOURCES), options)
+
+
+def build_concept_map_from_text(text: str) -> dict:
+    with tempfile.TemporaryDirectory() as d:
+        return build_concept_map(_write(Path(d) / "concepts.xml", text))
+
+
+def test_conversion_key_changes_with_the_concepts():
+    converter = source_hash(batch.CONVERTER_SOURCES)
+    concepts = build_concept_map_from_text(_CONCEPTS)
+    linked = {Path("w.xml"): batch.FileOptions(SharedConcepts(concepts, "linked"))}
+    fewer = {Path("w.xml"): batch.FileOptions(
+        SharedConcepts({"K:Pa": concepts["K:Pa"]}, "linked"))}
+    assert batch.conversion_key(converter, {}) == converter
+    assert batch.conversion_key(converter, linked) != converter
+    assert (batch.conversion_key(converter, linked)
+            != batch.conversion_key(converter, fewer))
 
 
 def test_batch_writes_manifest(tmp_path, monkeypatch):
