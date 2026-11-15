@@ -6,6 +6,11 @@ hierarchy — and one lexicon per language.  Each synset's dc:identifier links
 it to its concept, since most concepts have no ILI yet.  They are listed in
 wordnets.toml under the key 'mul'.
 
+A wordnet outside such a release can name the same concepts: a synset of
+any other wordnet in the build whose dc:identifier is that of a concept
+joins it ('linked').  So a release may hold the concepts alone (e.g.
+omw-ntumc), with the words in each language's own wordnet.
+
 This module also holds the language-code fix-ups shared by all sources.
 """
 import gzip
@@ -39,11 +44,14 @@ LANGUAGE_ALIASES: dict[str, str] = {
 
 @dataclass(frozen=True)
 class SharedConcepts:
-    """Concept identity shared across the lexicons of one release.
+    """Concept identity shared across lexicons.
 
     Attributes:
         concepts: dc:identifier -> (ILI or None, local concept id)
-        role: 'concepts' for the mul lexicon, 'member' for a language lexicon
+        role: 'concepts' for the mul lexicon; 'member' for a language
+            lexicon of the same release, all of whose synsets name a
+            concept; 'linked' for a wordnet outside the release, some of
+            whose synsets may name a concept of any release
     """
 
     concepts: dict[str, tuple[str | None, str]]

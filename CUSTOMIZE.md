@@ -113,6 +113,14 @@ Cygnet then:
   `--all-languages` to `build.sh` to keep every language — for a site built
   just for the release.
 
+A release may also hold the concepts lexicon alone, with the words in each
+language's own wordnet (e.g. omw-ntumc, whose concepts the Japanese, Chinese
+and Czech wordnets name).  Every other wordnet in the build is linked to the
+concepts of the `mul` releases: a synset whose `dc:identifier` is that of a
+concept joins it, so its words appear on the shared concept and it needs no
+definition of its own.  If the synset has an ILI, the ILI decides instead; a
+definition the wordnet gives itself is kept.
+
 ---
 
 ## Step 3 — Configure `etc/local.json`

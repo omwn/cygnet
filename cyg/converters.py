@@ -490,6 +490,9 @@ class WordNetToCygnetConverter:
             'shared_concept_not_found': {
                 'count': 0
             },
+            'linked_shared_concepts': {
+                'count': 0
+            },
             'sense_missing_synset': {
                 'count': 0
             },
@@ -1153,18 +1156,20 @@ class WordNetToCygnetConverter:
             self.existing_concept_relations)
 
     def _shared_concept_id(self, synset: etree.Element) -> str | None:
-        """Concept id for a synset of a multi-lexicon release, else None.
+        """Concept id for a synset that names a shared concept, else None.
 
         The concept is the CILI concept if its ILI is in CILI, otherwise the
-        release's stable local id.  Every lexicon of the release resolves the
-        same dc:identifier to the same id.
+        release's stable local id.  Every lexicon resolves the same
+        dc:identifier to the same id.  In a wordnet outside the release
+        ('linked') a dc:identifier may name something else, so one that is
+        not a concept's is not counted as missing.
         """
         if self.shared is None:
             return None
         ident = dc_identifier(synset)
         entry = self.shared.concepts.get(ident) if ident else None
         if entry is None:
-            if ident:
+            if ident and self.shared.role != 'linked':
                 self.log['shared_concept_not_found']['count'] += 1
             return None
         ili, local = entry
@@ -1183,7 +1188,7 @@ class WordNetToCygnetConverter:
         # An ILI identifies one synset.  If several synsets share one we
         # cannot tell which is right, so none of them is linked to it.
         repeated = self.log['repeated_ili']['synsets']
-        if self.shared is None:
+        if self.shared is None or self.shared.role == 'linked':
             by_ili: dict[str, list[str]] = {}
             for lexicon in lexicons:
                 for synset in lexicon.findall('Synset'):
@@ -1235,10 +1240,20 @@ class WordNetToCygnetConverter:
                 if ili in repeated:
                     is_valid_ili = False
 
+                linked = self.shared is not None and self.shared.role == 'linked'
+                if linked and is_valid_ili:
+                    shared_id = None  # the wordnet's own ILI says which concept
+
                 if shared_id is not None and not shared_id.startswith('cili.'):
-                    # Concepts lexicon: a stable id shared with its members.
                     concept_id = shared_id
-                    self._new_concept(concept_id, pos, synset_id)
+                    if linked:
+                        # A wordnet outside the release: its words join the
+                        # concept, which the concepts lexicon defines; any
+                        # definition it has of its own is kept below.
+                        self.log['linked_shared_concepts']['count'] += 1
+                    else:
+                        # Concepts lexicon: a stable id shared with its members.
+                        self._new_concept(concept_id, pos, synset_id)
                 elif is_valid_ili or shared_id is not None:
                     if shared_id is not None:
                         ili = shared_id.removeprefix('cili.')
