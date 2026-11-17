@@ -3,8 +3,6 @@
 import logging
 from pathlib import Path
 
-import pytest
-
 from conftest import (
     BASE_CONCEPTS,
     BASE_CONCEPTS_SENSE_REL,

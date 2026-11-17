@@ -22,7 +22,7 @@ Unlike the single-file script, this:
     that declares a reversed mero_part typically declares the equally
     reversed holo_part too, and swapping only one side lets per-file
     inverse-generation regenerate the original bugged direction from the
-    untouched other side. cyg/converters.py reads this file to decide
+    untouched other side. The cleaner (cyg/clean.py) reads this file to decide
     which relation types to swap, per resource, instead of a hand-curated
     dict.
 
@@ -44,7 +44,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import check_relation_directions as crd  # noqa: E402
+import check_relation_directions as crd
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 LMF_SUFFIXES = ('.xml', '.xml.gz', '.xml.xz')
@@ -193,7 +193,7 @@ def build_swap_config(
 ) -> dict[str, dict[str, dict]]:
     """For every flagged (lexicon_spec, file, stats), mark both the
     relation type and its GWA inverse as swapped for that lexicon's bare
-    id (no version -- matches cyg.converters's self.lexicon_id).
+    id (no version -- the id cyg.clean keys its swap options by).
 
     The directly-measured side carries its stats; a paired inverse added
     only because its forward type was flagged carries null stats, unless
@@ -237,7 +237,7 @@ def main() -> int:
                          help='Cache per-file stats here, keyed by (path, mtime, size); '
                               'skips recomputing unchanged files on the next run')
     parser.add_argument('--write-swap-config', type=Path, default=None,
-                         help='Write a direction-swap config for cyg/converters.py to read')
+                         help='Write a direction-swap config for the cleaner (cyg/clean.py) to read')
     args = parser.parse_args()
 
     if not args.raw_wns_dir.exists():

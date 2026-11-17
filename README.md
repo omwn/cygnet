@@ -69,12 +69,40 @@ re-running is fast if the sources haven't changed.
 | `--skip-tests` | Skip the test suite |
 | `--with-glosstag` | Add Princeton GlossTag sense annotations (requires WordNet 3.0 GlossTag corpus in `bin/WordNet-3.0/`) |
 | `--with-translate` | Machine-translate non-English glosses to English (requires argostranslate; very slow) |
-| `--with-xml` | Also generate and validate `cygnet.xml` / `cygnet_small.xml` (~678 MB) |
+| `--with-xml` | Also export the database as WN-LMF 1.4 and validate it: `cygnet.xml` with provenance in `dc:source` (~680 MB) and `cygnet_small.xml` without |
+
+### Pipeline
+
+`build.sh` downloads the wordnets listed in `wordnets.toml` into
+`bin/raw_wns/`, then:
+
+1. links the CILI release (`bin/cili.tsv`) into `bin/cygnets_presynth/`
+   and checks every wordnet's relation directions against OEWN (Step 1.5);
+2. cleans each source into the best WN-LMF 1.4 file it can make of it,
+   `bin/cygnets_presynth/<id>-<version>.xml`, with a `_log.json` beside it
+   listing every change (Step 2, `cyg/clean.py`).  A cleaned file loads
+   in the `wn` library, validates, and can be sent upstream as the
+   wordnet with the fixes applied;
+3. optionally adds GlossTag sense annotations (Steps 3–4) and machine
+   translations of definitions (Step 5) as sidecar files;
+4. merges the cleaned files and sidecars into `web/cygnet.db` and
+   `web/provenance.db` (Step 6, `cyg/merge.py`), packages each cleaned
+   file for download (Step 8), then adds language names and ARASAAC
+   pictogram ids;
+5. optionally exports the database back out as WN-LMF (Step 7,
+   `--with-xml`).
+
+The intermediate files and their conventions are described in
+[`conversion_scripts/SCHEMA.md`](conversion_scripts/SCHEMA.md); the issues
+the cleaner finds can be reported per wordnet with `scripts/report.py`
+([`REPORT.md`](REPORT.md)).
 
 ### Outputs
 
 | File | Size | Description |
 |---|---|---|
+| `bin/cygnets_presynth/` | ~1 GB | One cleaned WN-LMF file per source wordnet, with its log |
+| `web/lmf/` | ~200 MB | Each cleaned file packaged for download (`<id>-<version>.tar.gz` with log, citation and licence), attached to releases |
 | `web/cygnet.db` | ~219 MB | Main SQLite database |
 | `web/cygnet.db.gz` | ~89 MB | Compressed (released asset) |
 | `web/provenance.db` | ~201 MB | Per-row source attribution |

@@ -22,6 +22,10 @@
     }
   },
 
+  "lmf": {
+    "url": "https://github.com/example/mywordnet/releases/latest/download/"
+  },
+
   "logo": {
     "src": "mylogo.svg",
     "url": "https://myproject.org",

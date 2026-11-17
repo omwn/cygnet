@@ -20,14 +20,14 @@
 #                      (requires WordNet 3.0 GlossTag corpus in bin/WordNet-3.0/)
 #   --with-translate   Machine-translate non-English glosses to English
 #                      (requires argostranslate; very slow)
-#   --with-xml         Also generate and validate cygnet.xml and cygnet_small.xml
+#   --with-xml         Also export and validate cygnet.xml and cygnet_small.xml (WN-LMF)
 #                      (requires xmlstarlet; slow — 678 MB output)
 #   --download-only    Download data without running the build
 #   --build-only       Run the build without downloading (assumes data exists)
 #   --translate-only   Run only through Step 5 (translate definitions) and
 #                      stop — implies --with-translate. Used by
 #                      scripts/upload_translations.sh to produce
-#                      bin/cygnets_presynth/mtg-1.0.xml for local, manual
+#                      bin/cygnets_presynth/mtg.tsv for local, manual
 #                      publishing (translation takes hours, so it isn't run
 #                      in CI — see .github/workflows/check-wordnets.yml).
 #   --skip-tests       Skip the test suite
@@ -97,8 +97,6 @@ if [[ -n "$WORK_DIR" ]]; then
     if [[ ! -f "$DATA_DIR/wordnets.toml" ]]; then
         cp "$PROJECT_DIR/wordnets.toml" "$DATA_DIR/wordnets.toml"
     fi
-    # 7_validate_and_export.py reads cygnet.xsd from cwd; copy it into DATA_DIR.
-    cp "$PROJECT_DIR/cyg/cygnet.xsd" "$DATA_DIR/cygnet.xsd"
     # 11_add_arasaac.py uses the pre-built ILI mapping from the cygnet repo
     # rather than re-downloading and re-building it from scratch.
     if [[ -f "$PROJECT_DIR/data/araasac-ili.json" ]]; then
@@ -148,7 +146,9 @@ index_of() {
 }
 
 # Download a wordnet archive and extract its XML files into bin/raw_wns/ (flat),
-# writing the names of the extracted files, one per line, to $3.
+# writing the names of the extracted files, one per line, to $3.  Its
+# supporting files (citation.bib, README, LICENSE) go to bin/raw_wns/extras/$1/
+# for Step 8 to package with the cleaned file.
 download_standalone() {
     local name="$1" url="$2" list="$3"
     (
@@ -191,7 +191,20 @@ download_standalone() {
             echo "  No XML files found in $url" >&2
             exit 1
         fi
+        local extras="$DATA_DIR/bin/raw_wns/extras/$name"
+        rm -rf "$extras" && mkdir -p "$extras" || exit 1
+        find "$tmpdir" -maxdepth 3 -type f ! -name '._*' \( -iname 'citation.bib' \
+            -o -iname 'readme*' -o -iname 'license*' -o -iname 'licence*' -o -iname 'copying*' \) -print0 |
+            while IFS= read -r -d '' f; do
+                cp -f "$f" "$extras/$(basename "$f")" || exit 1
+            done || exit 1
     )
+}
+
+# True if the supporting files of $2 (an archive URL with stem $1) have been
+# kept, or there are none to keep (a direct XML URL).
+extras_present() {
+    direct_xml_name "$2" > /dev/null 2>&1 || [[ -d "$DATA_DIR/bin/raw_wns/extras/$1" ]]
 }
 
 # The file name a direct-XML URL (possibly compressed) is saved as; fails for
@@ -271,7 +284,7 @@ download_wordnets() {
         order+=("$url")
         if i=$(index_of "$url" ${rec_urls[@]+"${rec_urls[@]}"}); then
             read -ra names <<< "${rec_files[i]}"
-            if all_present "$raw" ${names[@]+"${names[@]}"}; then
+            if all_present "$raw" ${names[@]+"${names[@]}"} && extras_present "$stem" "$url"; then
                 echo "  $stem already present, skipping."
                 cur_urls+=("$url")
                 cur_files+=("${rec_files[i]}")
@@ -444,8 +457,11 @@ fi
 # ============================================================
 if $DO_BUILD; then
 
-    echo "=== Step 1: Extract CILI ==="
-    run_pipeline 1_extract_cili.py
+    echo "=== Step 1: CILI ==="
+    # The merge reads the CILI release file (downloaded above) directly.
+    mkdir -p "$DATA_DIR/bin/cygnets_presynth"
+    ln -sfn "../cili.tsv" "$DATA_DIR/bin/cygnets_presynth/cili.tsv"
+    echo "  $DATA_DIR/bin/cili.tsv linked into bin/cygnets_presynth/"
     echo
 
     echo "=== Step 1.5: Check relation directions ==="
@@ -453,8 +469,8 @@ if $DO_BUILD; then
     # any relation type with source/target systematically reversed (e.g.
     # plWordnet's mero_part/mero_member, own-pt's hypernym), and writes
     # bin/cygnets_presynth/relation_direction_swaps.json, which Step 2
-    # reads to auto-correct the direction during conversion (see
-    # cyg.converters.load_direction_swap_config). The per-file cache
+    # reads to auto-correct the direction during cleaning (see
+    # cyg.lmf.load_direction_swap_config). The per-file cache
     # (.direction_check_cache.json) means only new/changed raw_wns files
     # get re-run through this on subsequent builds. Only the files
     # wordnets.toml selects are checked: the swap config is keyed by
@@ -467,7 +483,7 @@ if $DO_BUILD; then
         --cache bin/cygnets_presynth/.direction_check_cache.json
     echo
 
-    echo "=== Step 2: Convert wordnets ==="
+    echo "=== Step 2: Clean wordnets into WN-LMF ==="
     STEP2_ARGS=()
     if $ALL_LANGUAGES; then STEP2_ARGS+=(--all-languages); fi
     run_pipeline 2_batch_convert_lmfs.py ${STEP2_ARGS[@]+"${STEP2_ARGS[@]}"}
@@ -478,7 +494,7 @@ if $DO_BUILD; then
         run_pipeline 3_extract_glosstag.py
         echo
 
-        echo "=== Step 4: Add GlossTag to CILI ==="
+        echo "=== Step 4: GlossTag annotations for the CILI definitions ==="
         run_pipeline 4_add_glosstag_to_cili.py
         echo
     fi
@@ -491,12 +507,16 @@ if $DO_BUILD; then
 
     if $TRANSLATE_ONLY; then
         echo "=== Translate-only mode: stopping after Step 5 ==="
-        echo "Output: $DATA_DIR/bin/cygnets_presynth/mtg-1.0.xml"
+        echo "Output: $DATA_DIR/bin/cygnets_presynth/mtg.tsv"
         exit 0
     fi
 
     echo "=== Step 6: Synthesise ==="
     run_pipeline 6_synthesise.py
+    echo
+
+    echo "=== Step 8: Package the cleaned WN-LMF files ==="
+    run_pipeline 8_package_lmf.py
     echo
 
     echo "=== Step 9: Populate language names ==="
@@ -527,6 +547,7 @@ if $DO_BUILD; then
     echo "=== Build complete! ==="
     echo "Output:"
     echo "  $DATA_DIR/web/cygnet.db         - SQLite database for web interface"
+    echo "  $DATA_DIR/web/lmf/              - cleaned WN-LMF file of each wordnet, packaged for download"
     echo "  $DATA_DIR/web/cygnet.db.gz      - compressed"
     echo "  $DATA_DIR/web/provenance.db     - provenance database"
     echo "  $DATA_DIR/web/provenance.db.gz  - compressed"

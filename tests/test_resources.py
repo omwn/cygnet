@@ -7,7 +7,6 @@ import pytest
 
 from cyg.merge import SCHEMA
 
-
 SAMPLE_DATA = [
     # (lang_code, code, version, label, url, citation, licence, extra)
     ('en', 'ewn', '2.0', 'English WordNet', 'https://ewn.example.org', 'Vossen 2022', 'CC BY 4.0', None),

@@ -28,6 +28,7 @@ import os
 from pathlib import Path
 
 import pytest
+from cygnet_fixtures import cygnet_to_lmf
 from playwright.sync_api import Page, expect
 
 _DB_LOAD_TIMEOUT = 60_000   # ms — allow extra time on slower/loaded machines
@@ -1339,6 +1340,24 @@ class TestViewTypeLabels:
         page_ready.wait_for_selector(_CONCEPT_LOADED, timeout=10_000)
         expect(page_ready.locator('p.uppercase', has_text='Concept')).to_be_visible()
 
+    def test_download_links_for_original_and_cleaned_lmf(self, page_ready: Page):
+        """The summary offers the release the project published (its
+        wordnets.toml URL) and the cleaned archive Step 8 packages, served
+        from lmf/ next to index.html unless local.json says otherwise."""
+        _open_wordnet_summary(page_ready)
+        downloads = page_ready.locator('[data-testid="wordnet-downloads"]')
+        expect(downloads).to_be_visible(timeout=10_000)
+        expect(downloads.locator('[data-testid="download-original"]')).to_have_attribute(
+            'href', 'https://example.org/releases/wn-en-1.0.tar.xz')
+        expect(downloads.locator('[data-testid="download-cleaned"]')).to_have_attribute(
+            'href', 'lmf/wn-en-1.0.tar.gz')
+        expect(downloads).to_contain_text('example.org')
+
+    def test_no_download_block_without_a_source_record(self, page_ready: Page):
+        _open_wordnet_summary(page_ready, 'Test French WordNet')
+        expect(page_ready.locator('[data-testid="wordnet-summary"]')).to_be_visible()
+        expect(page_ready.locator('[data-testid="wordnet-downloads"]')).to_have_count(0)
+
     def test_sense_view_shows_sense_label(self, page_ready: Page):
         """Clicking a Sense-relations example link (Wordnets tab) opens the
         standalone sense view, which must say 'Sense'."""
@@ -1811,7 +1830,7 @@ def variant_server(tmp_path_factory):
 
     build_dir = tmp_path_factory.mktemp('variant_build')
     fr_xml = build_dir / 'wn-fr.xml'
-    fr_xml.write_text(_FR_CASE_VARIANTS)
+    fr_xml.write_text(cygnet_to_lmf(_FR_CASE_VARIANTS))
     db_path, prov_path = build_dir / 'cygnet.db', build_dir / 'provenance.db'
     build_test_db(db_path, prov_path, [_WORDNETS_DIR / 'wn-en.xml', fr_xml])
 

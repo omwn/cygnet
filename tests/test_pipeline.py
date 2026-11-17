@@ -8,8 +8,8 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+from conftest import build_test_db, wn_xml
 
-from conftest import MergeBuilder, build_test_db, wn_xml
 from cyg.merge import fold_lemma, reading_clusters
 
 _WORDNETS_DIR = Path(__file__).parent / 'wordnets'

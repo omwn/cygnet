@@ -1,7 +1,9 @@
 """
-Core merge logic for synthesising pre-converted Cygnet XML files into SQLite.
+Core merge logic for synthesising the cleaned WN-LMF files and TSV sidecars
+of bin/cygnets_presynth into SQLite.
 """
 
+import csv
 import gzip
 import itertools
 import json
@@ -10,12 +12,32 @@ import re
 import shutil
 import sqlite3
 import unicodedata
+from collections.abc import Collection
 from pathlib import Path
 
 import langcodes
 from lxml import etree as ET
 
-from cyg.converters import CONCEPT_REVERSE_RELATIONS, SENSE_REVERSE_RELATIONS
+from cyg.cili import read_cili_tsv
+from cyg.lmf import (
+    CONCEPT_FORWARD_OF_INVERSE,
+    INVERSE_CONCEPT_RELATIONS,
+    INVERSE_SENSE_RELATIONS,
+    LEXICON_TAGS,
+    PARSER_OPTIONS,
+    SENSE_FORWARD_OF_INVERSE,
+    canonical_relation,
+    entry_written_forms,
+    iter_lmf,
+    lexeme_id,
+    note_offsets,
+    parse_note,
+    pos_label,
+    relation_subtype,
+    relation_type,
+)
+from cyg.multilex import dc_identifier, encode_for_xml_id, open_xml
+from cyg.package import package_name
 
 logger = logging.getLogger(__name__)
 
@@ -220,13 +242,9 @@ CILI_RESOURCE = {
     ),
 }
 
-INVERSE_SENSE_RELATIONS: dict[str, str] = {
-    rel: inv for rel, inv in SENSE_REVERSE_RELATIONS.items() if inv is not None
-}
-
 # Resources with a documented, systematic hypernym-direction bug in their
 # source data, ordered WORST FIRST, that ISN'T corrected automatically by
-# cyg.converters.load_direction_swap_config() (e.g. a resource whose
+# cyg.lmf.load_direction_swap_config() (e.g. a resource whose
 # reversal rate falls short of that mechanism's threshold, or some other
 # low-trust reason unrelated to a clean directional swap). Per-file cycle
 # removal already catches most direction bugs when the reversed edge
@@ -253,10 +271,6 @@ INVERSE_SENSE_RELATIONS: dict[str, str] = {
 # aggregate rate table alone -- and check first whether the automatic
 # swap (above) should fix it at the source instead.
 LOW_TRUST_RESOURCES: tuple[str, ...] = ()
-
-INVERSE_CONCEPT_RELATIONS: dict[str, str] = {
-    rel: inv for rel, inv in CONCEPT_REVERSE_RELATIONS.items() if inv is not None
-}
 
 BATCH_SIZE = 50_000
 
@@ -358,63 +372,121 @@ def reading_clusters(signatures: dict[int, frozenset]) -> list[list[int]]:
     return sorted(clusters.values())
 
 
-def build_annotated_sentence(parent, text: str, annotations: list[tuple]) -> None:
-    """Add an AnnotatedSentence child to *parent* with inline AnnotatedToken elements.
+def root_tag(xml_file: Path) -> str | None:
+    """The local name of an XML file's root element, read without parsing
+    the rest.
 
     Args:
-        parent: lxml element to append to.
-        text: plain text of the sentence.
-        annotations: list of (start_offset, end_offset, sense_id_str) tuples,
-                     sorted by start_offset.
+        xml_file: An XML file (.xml, .xml.gz or .xml.xz).
+
+    Returns:
+        The tag, or None for an empty file.
     """
-    el = ET.SubElement(parent, 'AnnotatedSentence')
-    pos = 0
-    prev = None
-    for start, end, sense_id in annotations:
-        preceding = text[pos:start]
-        if prev is None:
-            el.text = preceding
-        else:
-            prev.tail = preceding
-        tok = ET.SubElement(el, 'AnnotatedToken', sense=sense_id)
-        tok.text = text[start:end]
-        prev = tok
-        pos = end
-    trailing = text[pos:]
-    if prev is None:
-        el.text = trailing
-    else:
-        prev.tail = trailing
+    with open_xml(xml_file) as f:
+        for _event, elem in ET.iterparse(f, events=('start',), **PARSER_OPTIONS):
+            return ET.QName(elem).localname
+    return None
 
 
-def parse_annotated_sentence(elem) -> tuple[str, list[dict]]:
-    """Return (plain_text, annotations) from an AnnotatedSentence element."""
-    if not len(elem):
-        return (elem.text or ''), []
+def synset_concept_id(elem: ET._Element, lexicon: str, concepts_owner: str | None) -> str:
+    """The concept a Synset names.
 
-    parts: list[str] = []
-    annotations: list[dict] = []
-    offset = 0
+    Its ILI names it ('cili.<ili>'); without one it is a local concept
+    '<lexicon id>.<synset id>', except in a multi-lexicon release, where
+    the concepts lexicon (language "mul") and the members that Require it
+    share a concept per dc:identifier: '<concepts lexicon>.<identifier>'.
 
-    if elem.text:
-        parts.append(elem.text)
-        offset += len(elem.text)
+    Args:
+        elem: The Synset.
+        lexicon: Its lexicon's id.
+        concepts_owner: The lexicon whose dc:identifiers key the release's
+            concepts (itself for a "mul" lexicon, the required lexicon for a
+            member), or None.
 
-    for child in elem:
-        token = child.text or ''
-        sense_id = child.get('sense')
-        if sense_id:
-            end = offset + len(token)
-            annotations.append({'sense': sense_id, 'start': offset, 'end': end})
-            offset = end
-        else:
-            offset += len(token)
-        parts.append(token)
-        if child.tail:
-            parts.append(child.tail)
-            offset += len(child.tail)
+    Returns:
+        The concept id.
+    """
+    ili = elem.get('ili')
+    if ili and ili != 'in':
+        return f'cili.{ili}'
+    identifier = dc_identifier(elem) if concepts_owner else None
+    if identifier:
+        return f'{concepts_owner}.{encode_for_xml_id(identifier)}'
+    return f'{lexicon}.{elem.get("id")}'
 
-    return ''.join(parts), annotations
+
+def lmf_concept_index(xml_file: Path, mul_lexicons: Collection[str] = ()
+                      ) -> tuple[list[dict], dict[str, tuple[str, str, int]]]:
+    """The lexicon headers of a WN-LMF file and the concept each of its
+    synsets names (synset_concept_id()); the merge and the MT-gloss step
+    both use this, so their concept ids agree.
+
+    A "mul" lexicon keys its concepts by dc:identifier, and so does a
+    lexicon that Requires a "mul" lexicon, with the required lexicon's id.
+    Many wordnets Require an ordinary lexicon (the OMW ones omw-en); that
+    makes no release, so only a Requires of a known "mul" lexicon counts.
+
+    Args:
+        xml_file: The LMF file.
+        mul_lexicons: Ids of the "mul" lexicons of files merged before this
+            one; those declared in the file itself are known anyway.
+
+    Returns:
+        ([{'id', 'version', 'language', 'attrib', 'concepts_owner'} per
+          lexicon, concepts_owner being the lexicon whose concepts it shares
+          (itself for a "mul" lexicon, the required one for a member, else
+          None)],
+         {synset id: (concept id, POS label, index into the lexicon list)}).
+    """
+    lexicons: list[dict] = []
+    index: dict[str, tuple[str, str, int]] = {}
+    known_mul = set(mul_lexicons)
+    concepts_owner: str | None = None
+    for event, elem in iter_lmf(xml_file, (*LEXICON_TAGS, 'Requires', 'Synset')):
+        if event == 'start':
+            if elem.tag in LEXICON_TAGS:
+                concepts_owner = elem.get('id') if elem.get('language') == 'mul' else None
+                if concepts_owner:
+                    known_mul.add(concepts_owner)
+                lexicons.append({'id': elem.get('id'), 'version': elem.get('version'),
+                                 'language': elem.get('language'), 'attrib': dict(elem.attrib),
+                                 'concepts_owner': concepts_owner})
+            continue
+        if elem.tag == 'Requires':
+            if concepts_owner is None and elem.get('ref') in known_mul:
+                concepts_owner = elem.get('ref')
+                lexicons[-1]['concepts_owner'] = concepts_owner
+        elif elem.tag == 'Synset':
+            lexicon = lexicons[-1]['id']
+            index[elem.get('id')] = (synset_concept_id(elem, lexicon, concepts_owner),
+                                     pos_label(elem.get('partOfSpeech')), len(lexicons) - 1)
+    return lexicons, index
+
+
+class _LmfFileState:
+    """What process_lmf_file() carries through one file."""
+
+    def __init__(self, index: dict[str, tuple[str, str, int]], mul_release: set[str]) -> None:
+        self.index = index                       # synset id -> (concept id, POS, lexicon index)
+        self.mul_release = mul_release           # lexicons whose lexicalized="false" senses are gaps
+        self.lexicon = self.version = self.language = None
+        self.sense_ids: dict[str, str] = {}      # source sense id -> merged sense id
+        self.sense_relations: list[tuple] = []   # deferred until every sense exists
+        self.skipped: dict[str, int] = {
+            'entries of a concepts lexicon': 0,
+            'entries without a lemma': 0,
+            'non-lexicalised senses of a multi-lexicon release': 0,
+            'senses of an unknown synset': 0,
+            'sense relations to an unknown sense': 0,
+            'synset relations to an unknown synset': 0,
+            'synset-level examples (no sense)': 0,
+        }
+
+    def enter_lexicon(self, elem) -> None:
+        """Note the Lexicon (or LexiconExtension) the next elements belong to."""
+        self.lexicon = elem.get('id')
+        self.version = elem.get('version')
+        self.language = elem.get('language')
 
 
 # ---------------------------------------------------------------------------
@@ -423,8 +495,8 @@ def parse_annotated_sentence(elem) -> tuple[str, list[dict]]:
 
 class MergeBuilder:
     """
-    Accumulates multiple pre-synth Cygnet XML files into a single SQLite DB.
-    Each file is parsed, inserted, and freed before the next is loaded.
+    Accumulates the pre-synth WN-LMF files and TSV sidecars into a single
+    SQLite DB.  Each file is streamed, inserted, and freed before the next.
     """
 
     def __init__(self, db_path: Path, prov_db_path: Path) -> None:
@@ -529,6 +601,9 @@ class MergeBuilder:
             'cycles': [],
         }
 
+        # Definition annotations waiting for their senses (see process_cili_tsv)
+        self._pending_def_annotations: list[tuple[int, int, int, str]] = []
+
         # Folded English definitions of each synset, and the number of
         # non-English definitions dropped as copies of them, by resource.
         self._english_glosses: dict[int, set[str]] = {}
@@ -593,56 +668,87 @@ class MergeBuilder:
             self._prov_table_cache, self.prov_cur, 'prov_tables', 'name', name,
         )
 
-    def _insert_prov(self, table_name: str, item_rowid: int, prov_elems) -> int:
+    def _insert_prov(
+        self, table_name: str, item_rowid: int,
+        prov: list[tuple[str, str | None, str | None]],
+    ) -> int:
+        """Record where an item came from.
+
+        Args:
+            table_name: The item's table ('synsets', 'senses', ...).
+            item_rowid: Its rowid.
+            prov: (resource code, version, original id) per contributing
+                source; version and original id may be None.
+
+        Returns:
+            The number of rows recorded.
+        """
         # Called once per item (~10M times), so look the caches up directly.
         table_rowid = (self._prov_table_cache.get(table_name)
                        or self._prov_table_rowid(table_name))
         resources = self._prov_resource_cache
         append = self._prov_buf.append
-        count = 0
-        for p in prov_elems:
-            resource = p.get('resource')
-            if resource:
-                append((
-                    table_rowid, item_rowid,
-                    resources.get(resource) or self._prov_resource_rowid(resource),
-                    p.get('version'), p.get('original_id'),
-                ))
-                count += 1
+        for resource, version, original_id in prov:
+            append((
+                table_rowid, item_rowid,
+                resources.get(resource) or self._prov_resource_rowid(resource),
+                version, original_id,
+            ))
         if len(self._prov_buf) >= BATCH_SIZE:
             self._flush_prov()
-        return count
+        return len(prov)
 
-    # --- Element processors ---
+    # --- Element workers (called by process_lmf_file and the sidecar readers) ---
 
-    def _do_concept(self, elem) -> None:
-        cid = elem.get('id')
+    def _add_concept(self, cid: str, pos: str | None, prov: list[tuple]) -> None:
+        """Create a concept.
+
+        Args:
+            cid: Its id: 'cili.<ili>' for an ILI concept, else a local id.
+            pos: Its part of speech label.
+            prov: Provenance rows (see _insert_prov).
+
+        Raises:
+            ValueError: If the id was already created.
+        """
         if cid in self.synset_id_to_rowid:
             raise ValueError(f'Duplicate concept id: {cid}')
         ili = cid.removeprefix('cili.') if cid.startswith('cili.') else None
         rowid = self._next_synset_id
         self._next_synset_id += 1
-        self._synsets_buf.append((rowid, ili, elem.get('ontological_category')))
+        self._synsets_buf.append((rowid, ili, pos))
         self.synset_id_to_rowid[cid] = rowid
         self._synset_rowid_to_ili[rowid] = cid
-        self.n_prov += self._insert_prov('synsets', rowid, elem.findall('Provenance'))
+        self.n_prov += self._insert_prov('synsets', rowid, prov)
         self.n_synsets += 1
 
-    def _do_lexeme(self, elem) -> None:
-        lid = elem.get('id')
+    def _add_lexeme(
+        self, lid: str, language: str, pos: str | None,
+        forms: list[tuple[str, list[tuple[str | None, str, str | None]]]],
+        prov: list[tuple],
+    ) -> None:
+        """Create a lexical entry, or merge into the one with the same id.
+
+        Args:
+            lid: The id entries are unified by (see cyg.lmf.lexeme_id).
+            language: Language code.
+            pos: Part of speech label.
+            forms: (written form, [(variety, pronunciation, audio), ...]) in
+                rank order; a form seen twice keeps its first occurrence.
+            prov: Provenance rows (see _insert_prov).
+        """
         if lid in self.entry_id_to_rowid:
-            # Merge: same lexeme in a second wordnet — add new wordforms and
+            # Merge: same lexeme in a second wordnet -- add new wordforms and
             # any new pronunciations (including audio) for existing wordforms.
             entry_rowid = self.entry_id_to_rowid[lid]
+            # The first entry's forms may still be buffered (same file).
+            self._flush_forms()
             existing_rows = self.cur.execute(
                 'SELECT rowid, form, rank FROM forms WHERE entry_rowid = ?', (entry_rowid,)
             ).fetchall()
             existing = {form: rowid for rowid, form, _rank in existing_rows}
             new_rank = (max(r for _, _, r in existing_rows) + 1) if existing_rows else 0
-            for wf in elem.findall('Wordform'):
-                form = wf.get('form')
-                if not form:
-                    continue
+            for form, prons in forms:
                 form = normalize_form(form)
                 if form not in existing:
                     fid = self._next_form_id
@@ -653,17 +759,13 @@ class MergeBuilder:
                     existing[form] = fid
                     new_rank += 1
                     self.n_forms += 1
-                    for p in wf.findall('Pronunciation'):
-                        audio = p.get('audio')
-                        if p.text or audio:
-                            pid = self._next_pronunciation_id
-                            self._next_pronunciation_id += 1
-                            self._pronunciations_buf.append(
-                                (pid, fid, p.get('variety'), p.text or '', audio)
-                            )
-                            self.n_pronunciations += 1
+                    for variety, ptext, audio in prons:
+                        pid = self._next_pronunciation_id
+                        self._next_pronunciation_id += 1
+                        self._pronunciations_buf.append((pid, fid, variety, ptext, audio))
+                        self.n_pronunciations += 1
                 else:
-                    # Form exists — add any pronunciations not already present.
+                    # Form exists -- add any pronunciations not already present.
                     # Audio-only records attach to the single existing IPA entry
                     # when unambiguous, rather than adding a redundant record.
                     fid = existing[form]
@@ -672,14 +774,9 @@ class MergeBuilder:
                         'SELECT variety, pronunciation, audio FROM pronunciations'
                         ' WHERE form_rowid = ?', (fid,)
                     ).fetchall()
-                    for p in wf.findall('Pronunciation'):
-                        audio = p.get('audio')
-                        ptext = p.text or ''
-                        variety = p.get('variety')
-                        # Skip if exact record already exists
+                    for variety, ptext, audio in prons:
                         if any(ev == variety and ep == ptext for ev, ep, _ in existing_prons):
                             continue
-                        # Audio-only: attach to the single existing entry without audio
                         if audio and not ptext:
                             without_audio = [(ev, ep, ea) for ev, ep, ea in existing_prons
                                              if not ea]
@@ -689,55 +786,43 @@ class MergeBuilder:
                                     ' WHERE form_rowid = ? AND variety IS ? AND pronunciation = ?',
                                     (audio, fid, without_audio[0][0], without_audio[0][1])
                                 )
-                                # Reflect the update in local cache
                                 ev, ep, _ = without_audio[0]
                                 existing_prons = [(v, t, a if (v != ev or t != ep) else audio)
                                                   for v, t, a in existing_prons]
                                 continue
-                        if ptext or audio:
-                            pid = self._next_pronunciation_id
-                            self._next_pronunciation_id += 1
-                            self._pronunciations_buf.append((pid, fid, variety, ptext, audio))
-                            existing_prons.append((variety, ptext, audio))
-                            self.n_pronunciations += 1
-            self.n_prov += self._insert_prov(
-                'entries', entry_rowid, elem.findall('Provenance')
-            )
+                        pid = self._next_pronunciation_id
+                        self._next_pronunciation_id += 1
+                        self._pronunciations_buf.append((pid, fid, variety, ptext, audio))
+                        existing_prons.append((variety, ptext, audio))
+                        self.n_pronunciations += 1
+            self.n_prov += self._insert_prov('entries', entry_rowid, prov)
             return
 
-        # Build form rows first; skip entry entirely if no valid forms
+        # Build form rows first; skip the entry entirely if it has no form.
         seen: set[str] = set()
         form_rows: list[tuple] = []
         pron_rows: list[tuple] = []  # (fid, variety, text, audio)
-        for wf in elem.findall('Wordform'):
-            form = wf.get('form')
-            if form:
-                form = normalize_form(form)
-            if form and form not in seen:
-                seen.add(form)
-                fid = self._next_form_id
-                self._next_form_id += 1
-                form_rows.append(
-                    (fid, 0, form, remove_accents(form.lower()), len(form_rows))
-                )
-                for p in wf.findall('Pronunciation'):
-                    audio = p.get('audio')
-                    if p.text or audio:
-                        pron_rows.append((fid, p.get('variety'), p.text or '', audio))
+        for form, prons in forms:
+            form = normalize_form(form)
+            if form in seen:
+                continue
+            seen.add(form)
+            fid = self._next_form_id
+            self._next_form_id += 1
+            form_rows.append((fid, form, remove_accents(form.lower()), len(form_rows)))
+            pron_rows.extend((fid, variety, ptext, audio) for variety, ptext, audio in prons)
         if not form_rows:
             return
 
-        lang_rowid = self._lang_rowid(elem.get('language'))
+        lang_rowid = self._lang_rowid(language)
         entry_rowid = self._next_entry_id
         self._next_entry_id += 1
-        self._entries_buf.append((entry_rowid, lang_rowid, elem.get('grammatical_category')))
+        self._entries_buf.append((entry_rowid, lang_rowid, pos))
         self.entry_id_to_rowid[lid] = entry_rowid
-        self.n_prov += self._insert_prov(
-            'entries', entry_rowid, elem.findall('Provenance')
-        )
+        self.n_prov += self._insert_prov('entries', entry_rowid, prov)
         self.n_entries += 1
 
-        for fid, _, form, norm, rank in form_rows:
+        for fid, form, norm, rank in form_rows:
             self._forms_buf.append((fid, entry_rowid, form, norm, rank))
         self.n_forms += len(form_rows)
         if len(self._forms_buf) >= BATCH_SIZE:
@@ -749,9 +834,18 @@ class MergeBuilder:
             self._pronunciations_buf.append((pid, fid, variety, text, audio))
         self.n_pronunciations += len(pron_rows)
 
-    def _do_sense(self, elem) -> None:
-        entry_rowid = self.entry_id_to_rowid.get(elem.get('signifier'))
-        synset_rowid = self.synset_id_to_rowid.get(elem.get('signified'))
+    def _add_sense(self, sid: str, lexeme: str, concept: str, prov: list[tuple]) -> None:
+        """Create a sense, unless its entry or concept is unknown or the pair
+        already has one.
+
+        Args:
+            sid: The sense id later relations and examples refer to.
+            lexeme: The entry's id (see _add_lexeme).
+            concept: The concept's id (see _add_concept).
+            prov: Provenance rows (see _insert_prov).
+        """
+        entry_rowid = self.entry_id_to_rowid.get(lexeme)
+        synset_rowid = self.synset_id_to_rowid.get(concept)
         if not entry_rowid or not synset_rowid:
             return
         key = (entry_rowid, synset_rowid)
@@ -761,46 +855,50 @@ class MergeBuilder:
         sense_rowid = self._next_sense_id
         self._next_sense_id += 1
         self._senses_buf.append((sense_rowid, entry_rowid, synset_rowid))
-        sid = elem.get('id')
         self.sense_id_to_rowid[sid] = sense_rowid
         self._sense_rowid_to_id[sense_rowid] = sid
-        self.n_prov += self._insert_prov(
-            'senses', sense_rowid, elem.findall('Provenance')
-        )
+        self.n_prov += self._insert_prov('senses', sense_rowid, prov)
         self.n_senses += 1
         if len(self._senses_buf) >= BATCH_SIZE:
             self._flush_senses()
 
-    def _do_gloss(self, elem) -> None:
-        synset_rowid = self.synset_id_to_rowid.get(elem.get('definiendum'))
+    def _add_gloss(
+        self, concept: str, language: str | None, text: str, annotations: list[dict],
+        translated_from: str | None, prov: list[tuple],
+    ) -> None:
+        """Add a definition: the first per (concept, language) is kept, a
+        later one only adds its provenance, and a non-English copy of an
+        English one is dropped.
+
+        Args:
+            concept: The defined concept's id.
+            language: The definition's language code.
+            text: The definition.
+            annotations: {'sense', 'start', 'end'} per annotated span.
+            translated_from: Source language of a machine translation, if any.
+            prov: Provenance rows (see _insert_prov).
+        """
+        synset_rowid = self.synset_id_to_rowid.get(concept)
         if not synset_rowid:
             return
-        language = elem.get('language')
-        text, annotations = parse_annotated_sentence(elem.find('AnnotatedSentence'))
         if self._is_english_copy(synset_rowid, language, text):
-            prov = elem.find('Provenance')
-            resource = prov.get('resource', '') if prov is not None else ''
+            resource = prov[0][0] if prov else ''
             self.english_glosses_dropped[resource] = (
                 self.english_glosses_dropped.get(resource, 0) + 1)
             return
         lang_rowid = self._lang_rowid(language)
         key = (synset_rowid, lang_rowid)
         if key in self._gloss_keys:
-            self.n_prov += self._insert_prov(
-                'definitions', self._gloss_keys[key], elem.findall('Provenance')
-            )
+            self.n_prov += self._insert_prov('definitions', self._gloss_keys[key], prov)
             return
         def_rowid = self._next_def_id
         self._next_def_id += 1
         self._gloss_keys[key] = def_rowid
-        translated_from = elem.get('translated_from')
         translated_from_rowid = self._lang_rowid(translated_from) if translated_from else None
         self._defs_buf.append(
             (def_rowid, synset_rowid, text, lang_rowid, translated_from_rowid)
         )
-        self.n_prov += self._insert_prov(
-            'definitions', def_rowid, elem.findall('Provenance')
-        )
+        self.n_prov += self._insert_prov('definitions', def_rowid, prov)
         self.n_defs += 1
 
         for ann in annotations:
@@ -835,14 +933,24 @@ class MergeBuilder:
         return (len(folded.split()) >= MIN_ENGLISH_COPY_WORDS
                 and folded in self._english_glosses.get(synset_rowid, ()))
 
-    def _do_example(self, elem) -> None:
-        sentence = elem.find('AnnotatedSentence')
-        text, annotations = parse_annotated_sentence(sentence)
+    def _add_example(
+        self, text: str, annotations: list[dict], owners: set[str], prov: list[tuple],
+    ) -> None:
+        """Add an example sentence to the senses it illustrates.
 
+        Args:
+            text: The sentence.
+            annotations: {'sense', 'start', 'end'} per span marking a sense's
+                word; each annotated sense is an owner too.
+            owners: Ids of further senses the example belongs to (an LMF
+                Example sits under its Sense whether or not a word in it
+                could be located).
+            prov: Provenance rows (see _insert_prov).
+        """
         referenced = {
-            self.sense_id_to_rowid[a['sense']]
-            for a in annotations
-            if a['sense'] in self.sense_id_to_rowid
+            self.sense_id_to_rowid[sid]
+            for sid in owners | {a['sense'] for a in annotations}
+            if sid in self.sense_id_to_rowid
         }
         if not referenced:
             return
@@ -850,9 +958,7 @@ class MergeBuilder:
         ex_rowid = self._next_example_id
         self._next_example_id += 1
         self._examples_buf.append((ex_rowid, text))
-        self.n_prov += self._insert_prov(
-            'examples', ex_rowid, elem.findall('Provenance')
-        )
+        self.n_prov += self._insert_prov('examples', ex_rowid, prov)
         self.n_examples += 1
 
         for sense_rowid in referenced:
@@ -864,17 +970,32 @@ class MergeBuilder:
                     (ex_rowid, ann['start'], ann['end'], sense_rowid)
                 )
 
-    def _do_sense_relation(self, elem) -> None:
-        rel_type = elem.get('relation_type')
-        source = self.sense_id_to_rowid.get(elem.get('source'))
-        target = self.sense_id_to_rowid.get(elem.get('target'))
+    def _add_sense_relation(
+        self, rel_type: str, source_id: str, target_id: str,
+        subtype: str | None, subtype_label: str | None, prov: list[tuple],
+    ) -> None:
+        """Add a sense relation and its inverse, unless the reversed relation
+        is already there (a conflict, recorded) or either sense is unknown.
+        A relation given as its inverse-only type ('has_feminine') is
+        stored the forward way round.
+
+        Args:
+            rel_type: The relation type.
+            source_id: The source sense's id.
+            target_id: The target sense's id.
+            subtype: A finer sub-relation code, if the source gives one.
+            subtype_label: Its label.
+            prov: Provenance rows (see _insert_prov); the first names the
+                resource the relation is attributed to.
+        """
+        rel_type, source_id, target_id = canonical_relation(
+            rel_type, source_id, target_id, SENSE_FORWARD_OF_INVERSE)
+        source = self.sense_id_to_rowid.get(source_id)
+        target = self.sense_id_to_rowid.get(target_id)
         if not source or not target:
             return
 
-        subtype = elem.get('subtype')
-        subtype_label = elem.get('subtype_label')
-        prov_elems = elem.findall('Provenance')
-        current_resource = prov_elems[0].get('resource') if prov_elems else ''
+        current_resource = prov[0][0] if prov else ''
         type_rowid = self._rel_type_rowid(rel_type)
         # Unknown types (e.g. a resource's own relType="other" + dc:type
         # subtype, like plWordnet's "fuzzynimia"/"bliskoznaczność") default
@@ -916,7 +1037,7 @@ class MergeBuilder:
             self._next_sense_rel_id += 1
             self._sense_rels_buf.append(
                 (sr_rowid, source, target, type_rowid, subtype, subtype_label))
-            self.n_prov += self._insert_prov('sense_relations', sr_rowid, prov_elems)
+            self.n_prov += self._insert_prov('sense_relations', sr_rowid, prov)
             self.n_sense_rels += 1
 
         if inv:
@@ -930,19 +1051,31 @@ class MergeBuilder:
                     (inv_rowid, target, source, inv_type, None, None))
                 self.n_sense_rels += 1
 
-    def _do_concept_relation(self, elem) -> None:
-        rel_type = elem.get('relation_type')
-        source = self.synset_id_to_rowid.get(elem.get('source'))
-        target = self.synset_id_to_rowid.get(elem.get('target'))
+    def _add_concept_relation(
+        self, rel_type: str, source_id: str, target_id: str,
+        subtype: str | None, subtype_label: str | None, prov: list[tuple],
+    ) -> None:
+        """Add a concept relation and its inverse; see _add_sense_relation.
+
+        Args:
+            rel_type: The relation type.
+            source_id: The source concept's id.
+            target_id: The target concept's id.
+            subtype: A finer sub-relation code, if the source gives one.
+            subtype_label: Its label.
+            prov: Provenance rows (see _insert_prov); the first names the
+                resource the relation is attributed to.
+        """
+        rel_type, source_id, target_id = canonical_relation(
+            rel_type, source_id, target_id, CONCEPT_FORWARD_OF_INVERSE)
+        source = self.synset_id_to_rowid.get(source_id)
+        target = self.synset_id_to_rowid.get(target_id)
         if not source or not target:
             return
 
-        subtype = elem.get('subtype')
-        subtype_label = elem.get('subtype_label')
-        prov_elems = elem.findall('Provenance')
-        current_resource = prov_elems[0].get('resource') if prov_elems else ''
+        current_resource = prov[0][0] if prov else ''
         type_rowid = self._rel_type_rowid(rel_type)
-        # See the matching comment in _do_sense_relation: unknown types
+        # See the matching comment in _add_sense_relation: unknown types
         # default to symmetric rather than directional.
         inv = INVERSE_CONCEPT_RELATIONS.get(rel_type, rel_type)
 
@@ -976,7 +1109,7 @@ class MergeBuilder:
             self._next_synset_rel_id += 1
             self._synset_rels_buf.append(
                 (cr_rowid, source, target, type_rowid, subtype, subtype_label))
-            self.n_prov += self._insert_prov('synset_relations', cr_rowid, prov_elems)
+            self.n_prov += self._insert_prov('synset_relations', cr_rowid, prov)
             self.n_synset_rels += 1
             if rel_type in HYPERNYM_TYPES:
                 self._track_hypernym(cr_rowid, source, target, type_rowid, rel_type)
@@ -1137,31 +1270,255 @@ class MergeBuilder:
     # --- File processing ---
 
     def process_file(self, xml_file: Path) -> None:
-        """Stream one pre-synth XML file into the DB using iterparse."""
-        tag_to_handler = {
-            'Concept':         self._do_concept,
-            'Lexeme':          self._do_lexeme,
-            'Sense':           self._do_sense,
-            'Gloss':           self._do_gloss,
-            'Example':         self._do_example,
-            'SenseRelation':   self._do_sense_relation,
-            'ConceptRelation': self._do_concept_relation,
-        }
-        root_seen = False
-        for event, elem in ET.iterparse(str(xml_file), events=('start', 'end')):
-            if event == 'start' and not root_seen:
-                root_seen = True
-                res_id = elem.get('id')
-                if res_id and res_id not in self._resources:
-                    self._resources[res_id] = dict(elem.attrib)
-            elif event == 'end':
-                handler = tag_to_handler.get(elem.tag)
-                if handler is not None:
-                    handler(elem)
-                    elem.clear()
-                    while elem.getprevious() is not None:
-                        del elem.getparent()[0]
+        """Stream one pre-synth file into the DB: a WN-LMF file, or one of
+        the TSV sidecars (cili.tsv, mtg.tsv).
+
+        Args:
+            xml_file: The file to merge.
+
+        Raises:
+            ValueError: If the file is neither.
+        """
+        if xml_file.suffix == '.tsv':
+            if xml_file.stem.startswith('cili'):
+                self.process_cili_tsv(xml_file)
+            elif xml_file.stem.startswith('mtg'):
+                self.process_mtg_tsv(xml_file)
+            else:
+                raise ValueError(f'unknown sidecar {xml_file.name}')
+            return
+        if root_tag(xml_file) != 'LexicalResource':
+            raise ValueError(f'{xml_file.name}: not a WN-LMF file')
+        self.process_lmf_file(xml_file)
+
+    # --- Sidecars ---
+
+    def process_cili_tsv(self, tsv_file: Path) -> None:
+        """Merge the CILI release file: one concept per ILI, with its English
+        definition, both attributed to PWN 3.0 as the CILI XML was.
+
+        A ``cili_glosstag.json`` beside it ({ili: [[start, end, sense id],
+        ...]}, sense ids as the annotating wordnet writes them) annotates
+        the definitions; those senses only exist once that wordnet is
+        merged, so the annotations wait for resolve_pending_annotations().
+
+        Args:
+            tsv_file: bin/cili.tsv.
+        """
+        glosstag_path = tsv_file.with_name('cili_glosstag.json')
+        glosstag = json.loads(glosstag_path.read_text(encoding='utf-8')) \
+            if glosstag_path.exists() else {}
+        self._resources.setdefault(CILI_RESOURCE['code'], {
+            'id': CILI_RESOURCE['code'], 'version': CILI_RESOURCE['version'],
+            'label': CILI_RESOURCE['label']})
+        for row in read_cili_tsv(tsv_file):
+            cid = f'cili.{row.ili}'
+            prov = [(row.resource, row.version, row.original_id)]
+            self._add_concept(cid, row.pos, prov)
+            if not row.definition:
+                continue
+            self._add_gloss(cid, 'en', row.definition, [], None, prov)
+            def_rowid = self._gloss_keys.get((self.synset_id_to_rowid[cid], self._lang_rowid('en')))
+            for start, end, sense_id in glosstag.get(row.ili, ()):
+                self._pending_def_annotations.append((def_rowid, start, end, sense_id))
         self._flush_all()
+
+    def process_mtg_tsv(self, tsv_file: Path) -> None:
+        """Merge the machine-translated glosses (columns concept, language,
+        translated_from, definition), attributed to the 'mtg' resource.
+
+        Args:
+            tsv_file: The mtg.tsv Step 5 wrote.
+        """
+        prov = [('mtg', '1.0', None)]
+        with open(tsv_file, encoding='utf-8', newline='') as f:
+            reader = csv.DictReader(f, delimiter='\t')
+            for row in reader:
+                text = (row.get('definition') or '').strip()
+                if text:
+                    self._add_gloss(row['concept'], row['language'], text, [],
+                                    row.get('translated_from') or None, prov)
+        self._flush_all()
+
+    def resolve_pending_annotations(self) -> int:
+        """Write the definition annotations whose senses were not merged yet
+        when their definitions were: the senses are looked up by their
+        original ids in the provenance written since.
+
+        Returns:
+            The number of annotations written.
+        """
+        if not self._pending_def_annotations:
+            return 0
+        self._flush_prov()
+        wanted = {sense_id for _d, _s, _e, sense_id in self._pending_def_annotations}
+        self.prov_cur.execute('CREATE TEMP TABLE wanted_senses (original_id TEXT PRIMARY KEY)')
+        self.prov_cur.executemany('INSERT OR IGNORE INTO wanted_senses VALUES (?)',
+                                  [(w,) for w in wanted])
+        rowids = dict(self.prov_cur.execute(
+            'SELECT p.original_id, p.item_rowid FROM provenance p '
+            'JOIN wanted_senses w ON w.original_id = p.original_id '
+            'WHERE p.table_rowid = ?', (self._prov_table_rowid('senses'),)))
+        self.prov_cur.execute('DROP TABLE wanted_senses')
+        n = 0
+        for def_rowid, start, end, sense_id in self._pending_def_annotations:
+            rowid = rowids.get(sense_id)
+            if def_rowid and rowid:
+                self._def_ann_buf.append((def_rowid, start, end, rowid))
+                n += 1
+        self._pending_def_annotations.clear()
+        self._flush_def_ann()
+        return n
+
+    # --- WN-LMF input ---
+
+    def process_lmf_file(self, xml_file: Path) -> None:
+        """Stream one WN-LMF 1.4 file into the DB.
+
+        The file is a cleaned source (TODO.md, "Replace the Cygnet XML schema
+        with GWA WN-LMF") and is trusted: no confidence filtering, within-file
+        dedup or direction swapping happens here, only the cross-wordnet work.
+
+        An LMF file lists LexicalEntries before the Synsets their Senses
+        point at, so a first pass indexes every Synset and the concepts are
+        created from that index; a second pass streams entries and synsets.
+        Sense relations may point at a sense declared later, so they are
+        added after the second pass.  A Synset's ILI names its concept; a
+        synset without one is a local concept '<lexicon id>.<synset id>',
+        except in a multi-lexicon release: there the concepts lexicon
+        (language "mul") and the member lexicons that Require it share a
+        concept per dc:identifier, '<concepts lexicon id>.<identifier>'.
+        Examples under a Sense belong to it, with the sense's word at the
+        spans in note="offsets=..."; Examples left under a Synset have no
+        sense and are not merged.  A "mul" lexicon contributes concepts,
+        not entries: its LexicalEntries (placeholders the DTD demands) are
+        skipped.  A lexicalized="false" Sense in such a release is a gap
+        marker (the English kin lexicon puts descriptions like "woman's
+        brother" on them) and is skipped; elsewhere the flag is not acted
+        on, since COW puts it on 19K ordinary adjective senses.
+
+        Args:
+            xml_file: The LMF file (.xml, .xml.gz or .xml.xz).
+        """
+        lexicons, index = self._index_lmf_synsets(xml_file)
+        state = _LmfFileState(index, {lx['id'] for lx in lexicons if lx['concepts_owner']})
+        for event, elem in iter_lmf(xml_file, (*LEXICON_TAGS, 'LexicalEntry', 'Synset')):
+            if event == 'start':
+                if elem.tag in LEXICON_TAGS:
+                    state.enter_lexicon(elem)
+            elif elem.tag == 'LexicalEntry':
+                self._lmf_entry(elem, state)
+            elif elem.tag == 'Synset':
+                self._lmf_synset(elem, state)
+        for old_source, target, rel_type, subtype, label, prov in state.sense_relations:
+            source_id = state.sense_ids.get(old_source)
+            target_id = state.sense_ids.get(target)
+            if source_id and target_id:
+                self._add_sense_relation(rel_type, source_id, target_id, subtype, label, prov)
+            else:
+                state.skipped['sense relations to an unknown sense'] += 1
+        self._flush_all()
+        for what, n in sorted(state.skipped.items()):
+            if n:
+                logger.info('  %s: %d %s', xml_file.name, n, what)
+
+    def _index_lmf_synsets(self, xml_file: Path) -> tuple[list[dict], dict[str, tuple[str, str, int]]]:
+        """First pass over an LMF file: record each lexicon's header and
+        create its concepts (see lmf_concept_index()).
+
+        Args:
+            xml_file: The LMF file.
+
+        Returns:
+            What lmf_concept_index() returns: the lexicon headers and
+            {synset id: (concept id, POS label, lexicon index)} for every Synset.
+        """
+        lexicons, index = lmf_concept_index(
+            xml_file, {rid for rid, attrib in self._resources.items() if attrib.get('language') == 'mul'})
+        for lexicon in lexicons:
+            if lexicon['id'] and lexicon['id'] not in self._resources:
+                self._resources[lexicon['id']] = lexicon['attrib']
+        for sid, (cid, pos, i) in index.items():
+            if cid not in self.synset_id_to_rowid:
+                self._add_concept(cid, pos, [(lexicons[i]['id'], lexicons[i]['version'], sid)])
+        return lexicons, index
+
+    def _lmf_entry(self, elem, state: '_LmfFileState') -> None:
+        """Merge one LexicalEntry: its entry, senses and sense examples;
+        its sense relations are deferred to the end of the file."""
+        if state.language == 'mul':
+            state.skipped['entries of a concepts lexicon'] += 1
+            return
+        forms = entry_written_forms(elem)
+        if not forms:
+            state.skipped['entries without a lemma'] += 1
+            return
+        lemma = elem.find('Lemma')
+        pos = pos_label(lemma.get('partOfSpeech'))
+        lid = lexeme_id(state.language, pos, forms)
+        prons: dict[str, list] = {}
+        for form_elem in elem.iterchildren('Lemma', 'Form', 'ExternalForm'):
+            written = form_elem.get('writtenForm')
+            if written:
+                prons.setdefault(written, []).extend(
+                    (p.get('variety'), p.text or '', p.get('audio'))
+                    for p in form_elem.iterchildren('Pronunciation')
+                    if p.text or p.get('audio'))
+        prov = [(state.lexicon, state.version, elem.get('id'))]
+        prov.extend((state.lexicon, state.version, merged)
+                    for merged in parse_note(elem.get('note')).get('merged', '').split())
+        self._add_lexeme(lid, state.language, pos, [(f, prons.get(f, [])) for f in forms], prov)
+
+        gap_marker = state.lexicon in state.mul_release
+        for sense in elem.iterchildren('Sense', 'ExternalSense'):
+            if gap_marker and sense.get('lexicalized') == 'false':
+                state.skipped['non-lexicalised senses of a multi-lexicon release'] += 1
+                continue
+            old_sid = sense.get('id')
+            concept = state.index.get(sense.get('synset'))
+            if concept is None:
+                state.skipped['senses of an unknown synset'] += 1
+                continue
+            cid = concept[0]
+            sid = f'{lid}.{cid}'
+            state.sense_ids[old_sid] = sid
+            self._add_sense(sid, lid, cid, [(state.lexicon, state.version, old_sid)])
+            rel_prov = [(state.lexicon, state.version, None)]
+            for example in sense.iterchildren('Example'):
+                text = example.text or ''
+                if not text.strip():
+                    continue
+                spans = note_offsets(example.get('note'), text)
+                annotations = [{'sense': sid, 'start': a, 'end': b} for a, b in spans]
+                self._add_example(text, annotations, {sid}, rel_prov)
+            for rel in sense.iterchildren('SenseRelation'):
+                rel_type = relation_type(rel)
+                subtype, label = relation_subtype(rel, rel_type)
+                state.sense_relations.append(
+                    (old_sid, rel.get('target'), rel_type, subtype, label, rel_prov))
+
+    def _lmf_synset(self, elem, state: '_LmfFileState') -> None:
+        """Merge one Synset's definitions and relations (its concept was
+        created in the first pass)."""
+        cid, _pos, _lexicon = state.index[elem.get('id')]
+        prov = [(state.lexicon, state.version, None)]
+        for definition in elem.iterchildren('Definition'):
+            text = definition.text or ''
+            if not text.strip():
+                continue
+            language = definition.get('language') or state.language
+            translated_from = parse_note(definition.get('note')).get('translated_from')
+            self._add_gloss(cid, language, text, [], translated_from, prov)
+        for rel in elem.iterchildren('SynsetRelation'):
+            target = state.index.get(rel.get('target'))
+            if target is None:
+                state.skipped['synset relations to an unknown synset'] += 1
+                continue
+            rel_type = relation_type(rel)
+            subtype, label = relation_subtype(rel, rel_type)
+            self._add_concept_relation(rel_type, cid, target[0], subtype, label, prov)
+        state.skipped['synset-level examples (no sense)'] += sum(
+            1 for _ in elem.iterchildren('Example'))
 
     # --- Post-processing (run after all files are loaded) ---
 
@@ -1804,6 +2161,7 @@ class MergeBuilder:
 
     def write_wordnet_summaries(
         self, out_dir: Path, direction_swaps_path: Path | None = None,
+        sources_path: Path | None = None,
     ) -> int:
         """Precompute per-resource stats for the Wordnets-tab detail view.
 
@@ -1824,15 +2182,23 @@ class MergeBuilder:
             out_dir: Directory to write ``<resource_code>.json`` files into.
             direction_swaps_path: Optional path to the swap config written
                 by scripts/check_all_relation_directions.py
-                --write-swap-config (see cyg.converters.
+                --write-swap-config (see cyg.lmf.
                 load_direction_swap_config). When given, each resource's
                 summary gets a ``directionSwaps`` list disclosing which
                 relation types were auto-corrected before merging, and
                 why (reversed/comparable counts vs. OEWN).
+            sources_path: Optional sources.json written by Step 2 (see
+                cyg.presynth.SOURCES_NAME).  When given, a resource's
+                summary gets ``sourceUrl``, the release its project
+                published, and ``lmfFile``, the archive Step 8 packages
+                its cleaned file as, for the download links.
 
         Returns:
             Number of summary files written.
         """
+        sources: dict[str, dict] = {}
+        if sources_path is not None and sources_path.exists():
+            sources = json.loads(sources_path.read_text(encoding='utf-8'))
         direction_swaps_by_code: dict[str, list[dict]] = {}
         if direction_swaps_path is not None and direction_swaps_path.exists():
             swap_data = json.loads(direction_swaps_path.read_text(encoding='utf-8'))
@@ -2033,6 +2399,9 @@ class MergeBuilder:
                 'senseRelDist': sense_rel_dist,
                 'directionSwaps': direction_swaps_by_code.get(code, []),
             }
+            if code in sources:
+                summary['sourceUrl'] = sources[code].get('url')
+                summary['lmfFile'] = package_name(sources[code]['file'])
             (out_dir / f'{code}.json').write_text(
                 json.dumps(summary, ensure_ascii=False, separators=(',', ':')),
                 encoding='utf-8',

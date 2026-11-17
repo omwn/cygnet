@@ -95,8 +95,7 @@ Each entry maps a **DB relation name** to its display metadata:
 A relation can carry a finer-grained sub-relation code beyond its catalogued
 type — e.g. plWordnet tags a `diminutive` relation with its own
 `dc:type="plwn:56"`, which `has_diminutive`/`diminutive` alone doesn't
-capture (see `WordNetToCygnetConverter._relation_subtype()` in
-`cyg/converters.py`). When present, `cr`/`sr` relation entries carry
+capture (see `relation_subtype()` in `cyg/lmf.py`). When present, `cr`/`sr` relation entries carry
 `subtype` (the raw sub-code) and `subtypeLabel` (a human-readable label,
 usually `dc:description`, in the source's own language — not translated).
 Both are `undefined`/absent, not empty strings, for the vast majority of

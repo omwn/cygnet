@@ -1,31 +1,34 @@
 """Tests for multi-lexicon releases linked by a 'mul' concepts lexicon.
 
-Covers cyg/multilex.py (language matching, concept map), the converter's
-shared-concept mode, and the planning step in 2_batch_convert_lmfs.py
-(which member lexicons to keep, and under which language code).
+Covers cyg/multilex.py (language matching, concept map) and the planning
+and manifest steps in 2_batch_convert_lmfs.py (which member lexicons to
+keep, under which language code, and which outputs to reuse).  The
+cleaner's handling of a release is tested in test_clean.py, the merge's in
+test_lmf_merge.py.
 """
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
 import pytest
-from lxml import etree
 
-from cyg.converters import WordNetToCygnetConverter
-from cyg.presynth import (
-    read_manifest,
-    read_manifest_converter,
-    source_hash,
-    write_manifest,
-)
+from cyg.clean import CHANGED_SUFFIX, CleanOptions, CleanResult
+from cyg.lmf import DIRECTION_SWAP_CONFIG_FILENAME
 from cyg.multilex import (
-    SharedConcepts,
     build_concept_map,
     fix_language,
     language_problem,
     match_language,
     read_lexicon_header,
+)
+from cyg.presynth import (
+    SOURCES_NAME,
+    read_manifest,
+    read_manifest_converter,
+    source_hash,
+    write_manifest,
 )
 
 _SCRIPTS = Path(__file__).parent.parent / "conversion_scripts"
@@ -41,15 +44,6 @@ def _load_script(name: str):
 
 batch = _load_script("2_batch_convert_lmfs")
 synth = _load_script("6_synthesise")
-
-_CILI = """\
-<?xml version='1.0' encoding='UTF-8'?>
-<CygnetResource id="cili" version="1.0">
-  <ConceptLayer>
-    <Concept id="cili.i100" ontological_category="NOUN" status="1"/>
-  </ConceptLayer>
-</CygnetResource>
-"""
 
 _LMF_HEAD = """\
 <?xml version='1.0' encoding='UTF-8'?>
@@ -111,20 +105,6 @@ def _write(path: Path, text: str) -> Path:
     return path
 
 
-def _run(tmp_path: Path, lmf: str, shared=None, language=None):
-    """Convert an LMF string; return (Cygnet root, converter)."""
-    cili = _write(tmp_path / "cili.xml", _CILI)
-    src = _write(tmp_path / f"src-{len(list(tmp_path.iterdir()))}.xml", lmf)
-    converter = WordNetToCygnetConverter(
-        cili_path=str(cili), shared=shared, language=language
-    )
-    return converter.convert(str(src)).getroot(), converter
-
-
-def _convert(tmp_path: Path, lmf: str, shared=None, language=None) -> etree._Element:
-    return _run(tmp_path, lmf, shared, language)[0]
-
-
 # --- Language codes ---------------------------------------------------------
 
 @pytest.mark.parametrize("code, known, expected", [
@@ -151,25 +131,10 @@ def test_fix_language():
     assert fix_language(None) is None
 
 
-def test_ukrainian_code_fixed_on_conversion(tmp_path):
-    lmf = _LMF_HEAD.format(id="ukr", lang="ua") + """\
-    <LexicalEntry id="ukr-e1">
-      <Lemma writtenForm="батько" partOfSpeech="n"/>
-      <Sense id="ukr-e1-1" synset="ukr-s1"/>
-    </LexicalEntry>
-    <Synset id="ukr-s1" ili="i100" partOfSpeech="n"/>
-""" + _LMF_TAIL
-    root = _convert(tmp_path, lmf)
-    assert root.get("language") == "uk"
-    assert {lx.get("language") for lx in root.iter("Lexeme")} == {"uk"}
-
-
-# --- Concept map --------------------------------------------------------------
-
 def test_build_concept_map(tmp_path):
     concepts = build_concept_map(_write(tmp_path / "kin.xml", _CONCEPTS))
-    assert concepts["K:Pa"] == ("i100", "kin.Pa")
-    assert concepts["K:Fa"] == (None, "kin.Fa")
+    assert concepts["K:Pa"] == "i100"
+    assert concepts["K:Fa"] is None
 
 
 def test_read_lexicon_header(tmp_path):
@@ -178,38 +143,6 @@ def test_read_lexicon_header(tmp_path):
 
 
 # --- Converter in shared-concept mode ----------------------------------------
-
-def test_concepts_lexicon_keeps_hierarchy_and_lemmas(tmp_path):
-    concepts = build_concept_map(_write(tmp_path / "kin.xml", _CONCEPTS))
-    root = _convert(tmp_path, _CONCEPTS, SharedConcepts(concepts, "concepts"))
-    # Concepts without an ILI get the stable shared id; ILI ones map to CILI
-    assert {c.get("id") for c in root.iter("Concept")} == {"kin.Fa", "kin.Mo"}
-    senses = {s.get("signified") for s in root.iter("Sense")}
-    assert senses == {"cili.i100", "kin.Fa"}
-    # The unlexicalized 'mul' lemmas are kept, under language 'mul'
-    assert {lx.get("language") for lx in root.iter("Lexeme")} == {"mul"}
-    rels = {(r.get("source"), r.get("target"))
-            for r in root.iter("ConceptRelation")
-            if r.get("relation_type") in ("class_hypernym", "hypernym")}
-    assert ("kin.Fa", "cili.i100") in rels
-
-
-def test_member_lexicon_points_at_shared_concepts(tmp_path):
-    concepts = build_concept_map(_write(tmp_path / "kin.xml", _CONCEPTS))
-    root, converter = _run(tmp_path, _MEMBER, SharedConcepts(concepts, "member"), "arb")
-    # No concepts or glosses of its own: they come from the concepts lexicon
-    assert list(root.iter("Concept")) == []
-    assert list(root.iter("Gloss")) == []
-    # The word links to the shared concept; the recorded gap is dropped
-    senses = [(s.get("signifier"), s.get("signified")) for s in root.iter("Sense")]
-    assert len(senses) == 1 and senses[0][1] == "kin.Fa"
-    assert converter.log["unlexicalized_skipped"] == {"synsets": 1, "senses": 1}
-    # The language override puts the lexeme under the existing wordnet's code
-    assert {lx.get("language") for lx in root.iter("Lexeme")} == {"arb"}
-    assert root.get("language") == "arb"
-
-
-# --- Planning which lexicons to convert -----------------------------------------
 
 def _raw_release(tmp_path: Path) -> tuple[Path, Path]:
     raw = tmp_path / "raw_wns"
@@ -253,225 +186,11 @@ def test_plan_without_mul_key(tmp_path):
 
 def test_synthesise_detects_concepts_lexicon(tmp_path):
     mul = _write(tmp_path / "kin-0.1.xml",
-                 '<CygnetResource id="kin" language="mul"/>')
+                 '<LexicalResource><Lexicon id="kin" language="mul"/></LexicalResource>')
     ar = _write(tmp_path / "kin-ar-0.1.xml",
-                '<CygnetResource id="kin-ar" language="arb"/>')
+                '<LexicalResource><Lexicon id="kin-ar" language="arb"/></LexicalResource>')
     assert synth.is_concepts_lexicon(mul)
     assert not synth.is_concepts_lexicon(ar)
-
-
-def test_other_relation_uses_dc_type(tmp_path):
-    """relType="other" + dc:type keeps the real type, so inverse pairs survive."""
-    lmf = _LMF_HEAD.format(id="pr", lang="mul") + """\
-    <Synset id="pr-1" ili="in" partOfSpeech="n" dc:identifier="P:1">
-      <Definition language="en">first person</Definition>
-      <SynsetRelation relType="other" dc:type="possessive" target="pr-1-Poss"/>
-    </Synset>
-    <Synset id="pr-1-Poss" ili="in" partOfSpeech="a" dc:identifier="P:1;Poss">
-      <Definition language="en">first person possessive</Definition>
-      <SynsetRelation relType="other" dc:type="possessor" target="pr-1"/>
-    </Synset>
-""" + _LMF_TAIL
-    concepts = build_concept_map(_write(tmp_path / "pr.xml", lmf))
-    root = _convert(tmp_path, lmf, SharedConcepts(concepts, "concepts"))
-    rels = {(r.get("source"), r.get("relation_type"), r.get("target"))
-            for r in root.iter("ConceptRelation")}
-    assert ("pr.1", "possessive", "pr.1x002DPoss") in rels
-    assert all(t != "other" for _, t, _ in rels)
-
-
-def test_uri_dc_type_is_shortened_and_not_a_subtype(tmp_path):
-    """A URI-shaped dc:type (own-pt's own ontology) names the relation
-    itself -- shortened to its local name, not kept as a subtype, since it
-    carries no extra information beyond that name.
-    """
-    lmf = _LMF_HEAD.format(id="pr", lang="mul") + """\
-    <Synset id="pr-1" ili="in" partOfSpeech="n" dc:identifier="P:1">
-      <Definition language="en">first person</Definition>
-      <SynsetRelation relType="other"
-          dc:type="https://w3id.org/own/schema/agent" target="pr-1-Poss"/>
-    </Synset>
-    <Synset id="pr-1-Poss" ili="in" partOfSpeech="a" dc:identifier="P:1;Poss">
-      <Definition language="en">first person possessive</Definition>
-      <SynsetRelation relType="other"
-          dc:type="https://w3id.org/own/schema/agent" target="pr-1"/>
-    </Synset>
-""" + _LMF_TAIL
-    concepts = build_concept_map(_write(tmp_path / "pr.xml", lmf))
-    root = _convert(tmp_path, lmf, SharedConcepts(concepts, "concepts"))
-    rels = list(root.iter("ConceptRelation"))
-    assert any(r.get("relation_type") == "agent" for r in rels)
-    assert all(r.get("subtype") is None for r in rels)
-
-
-def test_subtype_on_a_standard_relation_type_is_kept(tmp_path):
-    """A dc:type that refines a *recognized* relType (not just "other"),
-    like plWordnet's relType="diminutive" dc:type="plwn:56", is real extra
-    information _relation_type() alone drops -- it must survive as subtype,
-    with dc:description as its human-readable label.
-    """
-    lmf = _LMF_HEAD.format(id="pr", lang="mul") + """\
-    <Synset id="pr-1" ili="in" partOfSpeech="n" dc:identifier="P:1">
-      <Definition language="en">dog</Definition>
-      <SynsetRelation relType="diminutive" dc:type="plwn:56"
-          dc:description="deminutywność" target="pr-1-Dim"/>
-    </Synset>
-    <Synset id="pr-1-Dim" ili="in" partOfSpeech="n" dc:identifier="P:1;Dim">
-      <Definition language="en">doggie</Definition>
-      <SynsetRelation relType="has_diminutive" dc:type="plwn:56"
-          dc:description="deminutywność" target="pr-1"/>
-    </Synset>
-""" + _LMF_TAIL
-    concepts = build_concept_map(_write(tmp_path / "pr.xml", lmf))
-    root = _convert(tmp_path, lmf, SharedConcepts(concepts, "concepts"))
-    rels = {r.get("relation_type"): r for r in root.iter("ConceptRelation")}
-    assert rels["diminutive"].get("subtype") == "plwn:56"
-    assert rels["diminutive"].get("subtype_label") == "deminutywność"
-
-
-def test_other_relation_dc_description_kept_as_label_without_subtype(tmp_path):
-    """relType="other" + dc:type="plwn:19" + dc:description="fuzzynimia":
-    dc:type already became the relation_type itself (via _relation_type()),
-    so it is not a *further* subtype of relation_type -- but the
-    human-readable dc:description is still worth keeping as a label.
-    """
-    lmf = _LMF_HEAD.format(id="pr", lang="mul") + """\
-    <Synset id="pr-1" ili="in" partOfSpeech="n" dc:identifier="P:1">
-      <Definition language="en">one</Definition>
-      <SynsetRelation relType="other" dc:type="plwn:19"
-          dc:description="fuzzynimia" target="pr-1-B"/>
-    </Synset>
-    <Synset id="pr-1-B" ili="in" partOfSpeech="n" dc:identifier="P:1;B">
-      <Definition language="en">two</Definition>
-      <SynsetRelation relType="other" dc:type="plwn:19"
-          dc:description="fuzzynimia" target="pr-1"/>
-    </Synset>
-""" + _LMF_TAIL
-    concepts = build_concept_map(_write(tmp_path / "pr.xml", lmf))
-    root = _convert(tmp_path, lmf, SharedConcepts(concepts, "concepts"))
-    rels = [r for r in root.iter("ConceptRelation") if r.get("relation_type") == "plwn:19"]
-    assert rels
-    assert all(r.get("subtype") is None for r in rels)
-    assert all(r.get("subtype_label") == "fuzzynimia" for r in rels)
-
-
-def test_low_confidence_synset_dropped(tmp_path):
-    """A Synset below CONFIDENCE_THRESHOLD is dropped entirely -- no
-    Concept is created for it, and nothing can reference it."""
-    lmf = _LMF_HEAD.format(id="pr", lang="mul") + """\
-    <Synset id="pr-1" ili="in" partOfSpeech="n" dc:identifier="P:1" confidenceScore="0.5">
-      <Definition language="en">one</Definition>
-    </Synset>
-    <Synset id="pr-2" ili="in" partOfSpeech="n" dc:identifier="P:2" confidenceScore="1.0">
-      <Definition language="en">two</Definition>
-    </Synset>
-""" + _LMF_TAIL
-    concepts = build_concept_map(_write(tmp_path / "pr.xml", lmf))
-    root = _convert(tmp_path, lmf, SharedConcepts(concepts, "concepts"))
-    ids = {c.find("Provenance").get("original_id") for c in root.iter("Concept")}
-    assert "pr-1" not in ids
-    assert "pr-2" in ids
-
-
-def test_low_confidence_sense_dropped(tmp_path):
-    """A Sense below CONFIDENCE_THRESHOLD is dropped; its Synset (and any
-    other sense of it) is unaffected."""
-    lmf = _LMF_HEAD.format(id="pr", lang="en") + """\
-    <Synset id="pr-1" ili="in" partOfSpeech="n">
-      <Definition language="en">one</Definition>
-    </Synset>
-    <LexicalEntry id="pr-e-lo">
-      <Lemma writtenForm="lowconf" partOfSpeech="n"/>
-      <Sense id="pr-e-lo-1" synset="pr-1" confidenceScore="0.5"/>
-    </LexicalEntry>
-    <LexicalEntry id="pr-e-hi">
-      <Lemma writtenForm="highconf" partOfSpeech="n"/>
-      <Sense id="pr-e-hi-1" synset="pr-1" confidenceScore="1.0"/>
-    </LexicalEntry>
-""" + _LMF_TAIL
-    root = _convert(tmp_path, lmf)
-    senses = list(root.iter("Sense"))
-    assert len(senses) == 1
-    assert senses[0].find("Provenance").get("original_id") == "pr-e-hi-1"
-
-
-def test_low_confidence_relation_dropped(tmp_path):
-    """A relation below CONFIDENCE_THRESHOLD is dropped; both synsets it
-    would have connected are unaffected."""
-    lmf = _LMF_HEAD.format(id="pr", lang="mul") + """\
-    <Synset id="pr-1" ili="in" partOfSpeech="n" dc:identifier="P:1">
-      <Definition language="en">one</Definition>
-      <SynsetRelation relType="hypernym" target="pr-2" confidenceScore="0.5"/>
-    </Synset>
-    <Synset id="pr-2" ili="in" partOfSpeech="n" dc:identifier="P:2">
-      <Definition language="en">two</Definition>
-    </Synset>
-""" + _LMF_TAIL
-    concepts = build_concept_map(_write(tmp_path / "pr.xml", lmf))
-    root = _convert(tmp_path, lmf, SharedConcepts(concepts, "concepts"))
-    assert list(root.iter("ConceptRelation")) == []
-    ids = {c.find("Provenance").get("original_id") for c in root.iter("Concept")}
-    assert ids == {"pr-1", "pr-2"}
-
-
-def test_low_confidence_definition_dropped(tmp_path):
-    """A Definition below CONFIDENCE_THRESHOLD is dropped, but its Synset is
-    kept -- e.g. an untranslated placeholder gloss flagged with a low score
-    shouldn't block the rest of the synset."""
-    lmf = _LMF_HEAD.format(id="pr", lang="mul") + """\
-    <Synset id="pr-1" ili="in" partOfSpeech="n" dc:identifier="P:1">
-      <Definition language="en" confidenceScore="0.0">placeholder</Definition>
-      <Definition language="ga" confidenceScore="1.0">real</Definition>
-    </Synset>
-""" + _LMF_TAIL
-    concepts = build_concept_map(_write(tmp_path / "pr.xml", lmf))
-    root = _convert(tmp_path, lmf, SharedConcepts(concepts, "concepts"))
-    ids = {c.find("Provenance").get("original_id") for c in root.iter("Concept")}
-    assert "pr-1" in ids
-    glosses = [g.find("AnnotatedSentence").text for g in root.iter("Gloss")]
-    assert "real" in glosses
-    assert "placeholder" not in glosses
-
-
-def test_low_confidence_only_definition_leaves_synset_glossless(tmp_path):
-    """If every Definition on a Synset is below threshold, the Synset is
-    still kept (it just ends up with no gloss) -- confidence filtering never
-    cascades into dropping the synset itself."""
-    lmf = _LMF_HEAD.format(id="pr", lang="mul") + """\
-    <Synset id="pr-1" ili="in" partOfSpeech="n" dc:identifier="P:1">
-      <Definition language="en" confidenceScore="0.5">placeholder</Definition>
-    </Synset>
-""" + _LMF_TAIL
-    concepts = build_concept_map(_write(tmp_path / "pr.xml", lmf))
-    root = _convert(tmp_path, lmf, SharedConcepts(concepts, "concepts"))
-    ids = {c.find("Provenance").get("original_id") for c in root.iter("Concept")}
-    assert "pr-1" in ids
-    assert list(root.iter("Gloss")) == []
-
-
-def test_confidence_at_threshold_is_kept(tmp_path):
-    """Exactly CONFIDENCE_THRESHOLD (0.6) is kept -- the cutoff is strictly
-    less-than, not less-than-or-equal."""
-    lmf = _LMF_HEAD.format(id="pr", lang="mul") + """\
-    <Synset id="pr-1" ili="in" partOfSpeech="n" dc:identifier="P:1" confidenceScore="0.6">
-      <Definition language="en">one</Definition>
-    </Synset>
-""" + _LMF_TAIL
-    concepts = build_concept_map(_write(tmp_path / "pr.xml", lmf))
-    root = _convert(tmp_path, lmf, SharedConcepts(concepts, "concepts"))
-    assert "pr-1" in {c.find("Provenance").get("original_id") for c in root.iter("Concept")}
-
-
-def test_missing_confidence_defaults_to_kept(tmp_path):
-    """No confidenceScore at all defaults to 1.0 -- never dropped."""
-    lmf = _LMF_HEAD.format(id="pr", lang="mul") + """\
-    <Synset id="pr-1" ili="in" partOfSpeech="n" dc:identifier="P:1">
-      <Definition language="en">one</Definition>
-    </Synset>
-""" + _LMF_TAIL
-    concepts = build_concept_map(_write(tmp_path / "pr.xml", lmf))
-    root = _convert(tmp_path, lmf, SharedConcepts(concepts, "concepts"))
-    assert "pr-1" in {c.find("Provenance").get("original_id") for c in root.iter("Concept")}
 
 
 @pytest.mark.parametrize("code, problem", [
@@ -494,7 +213,7 @@ def test_unusable_languages_are_skipped(tmp_path, capsys):
 def test_synthesise_merges_only_planned_files(tmp_path, capsys):
     for name in ("cili-1.0.xml", "oewn-2025+.xml", "oewn-2025.xml",
                  "kin-0.1.xml", "mtg-1.0.xml"):
-        _write(tmp_path / name, "<CygnetResource/>")
+        _write(tmp_path / name, "<LexicalResource/>")
     _write(tmp_path / "manifest.txt", "oewn-2025+.xml\nkin-0.1.xml\n")
     names = [f.name for f in synth.select_files(tmp_path)]
     # CILI and mtg are always merged; the stale base edition is not
@@ -504,7 +223,7 @@ def test_synthesise_merges_only_planned_files(tmp_path, capsys):
 
 def test_synthesise_without_manifest_merges_everything(tmp_path):
     for name in ("cili-1.0.xml", "a-1.xml", "b-1.xml"):
-        _write(tmp_path / name, "<CygnetResource/>")
+        _write(tmp_path / name, "<LexicalResource/>")
     assert len(synth.select_files(tmp_path)) == 3
 
 
@@ -514,28 +233,25 @@ def test_merge_order_puts_low_trust_last_worst_last(tmp_path, monkeypatch):
     names = ("Uz-uz-1.0.xml", "bad-xx-2.xml", "cili-1.0.xml", "fr-1.xml",
              "mtg-1.0.xml", "oewn-2025.xml", "zz-1.xml")
     for name in names:
-        _write(tmp_path / name, "<CygnetResource/>")
+        _write(tmp_path / name, "<LexicalResource/>")
     order = [f.name for f in synth.merge_order(sorted(tmp_path.glob("*.xml")))]
     assert order == ["cili-1.0.xml", "oewn-2025.xml", "fr-1.xml", "zz-1.xml",
                      "bad-xx-2.xml", "Uz-uz-1.0.xml", "mtg-1.0.xml"]
 
 
-class _FakeConverter:
-    """Stands in for WordNetToCygnetConverter: reads IDs, writes a stub."""
+class _FakeCleaner:
+    """Stands in for LmfCleaner: reads the header, writes a stub."""
 
-    def __init__(self, **kwargs):
-        pass
+    def __init__(self, source, cili, options=None):
+        self.source = Path(source)
 
-    def read_metadata(self, path):
-        h = read_lexicon_header(Path(path))
-        self.lexicon_id, self.lexicon_version = h.id, h.version
-        return None, None
-
-    def convert_from_tree(self, root):
-        pass
-
-    def save(self, path):
-        Path(path).write_text("<CygnetResource/>")
+    def clean(self, out_dir):
+        h = read_lexicon_header(self.source)
+        out = Path(out_dir) / f"{h.id}-{h.version}.xml"
+        out.write_text("<LexicalResource/>")
+        log = out.with_name(out.stem + "_log.json")
+        log.write_text('{"changes": {}}')
+        return CleanResult(out, log, False)
 
 
 def _run_batch(tmp_path, monkeypatch, presynth_files: dict[str, str]) -> Path:
@@ -545,25 +261,102 @@ def _run_batch(tmp_path, monkeypatch, presynth_files: dict[str, str]) -> Path:
     out.mkdir(exist_ok=True)
     for name, text in presynth_files.items():
         _write(out / name, text)
-    monkeypatch.setattr(batch, "WordNetToCygnetConverter", _FakeConverter)
-    monkeypatch.setattr(batch, "_EN_BASE_IDS", frozenset({"omw-arb"}))
-    monkeypatch.setattr(batch, "_EN_BASE_FILENAME_PATTERNS", ("omw-arb",))
-    batch.batch_convert(cili_file="cili.xml", toml_path=toml, raw_wns_dir=raw,
-                        output_dir=out)
+    cili = _write(tmp_path / "cili.tsv",
+                  "ili_id\tstatus\tsuperseded_by\torigin\tdefinition\n"
+                  "i100\t1\t\tpwn-3.0:00000001-n\td\n")
+    monkeypatch.setattr(batch, "LmfCleaner", _FakeCleaner)
+    batch.clean_all(cili_file=cili, toml_path=toml, raw_wns_dir=raw, output_dir=out)
     return out
 
 
 def _current_converter() -> str:
-    return source_hash(batch.CONVERTER_SOURCES)
+    return source_hash(batch.CLEANER_SOURCES)
+
+
+def test_batch_applies_direction_swaps_from_output_dir(tmp_path, monkeypatch):
+    """The swap config Step 1.5 writes into the output directory reaches the
+    cleaner of the lexicon it names, and no other."""
+    seen: dict[str, CleanOptions] = {}
+
+    class Recording(_FakeCleaner):
+        def __init__(self, source, cili, options=None):
+            super().__init__(source, cili, options)
+            seen[self.source.name] = options
+
+    raw, toml = _raw_release(tmp_path)
+    out = tmp_path / "presynth"
+    out.mkdir()
+    measured = {"reversed": 5, "comparable": 5, "reversed_share": 1.0, "swapped": True}
+    paired = {"reversed": None, "comparable": None, "reversed_share": None, "swapped": True}
+    _write(out / DIRECTION_SWAP_CONFIG_FILENAME,
+           json.dumps({"kin-ar": {"hypernym": measured, "hyponym": paired}}))
+    cili = _write(tmp_path / "cili.tsv",
+                  "ili_id\tstatus\tsuperseded_by\torigin\tdefinition\n"
+                  "i100\t1\t\tpwn-3.0:00000001-n\td\n")
+    monkeypatch.setattr(batch, "LmfCleaner", Recording)
+
+    batch.clean_all(cili_file=cili, toml_path=toml, raw_wns_dir=raw, output_dir=out)
+
+    assert seen["kin-ar-0.1.xml"].direction_swaps == frozenset({"hypernym", "hyponym"})
+    assert set(seen["kin-ar-0.1.xml"].swap_stats) == {"hypernym"}
+    assert seen["kin-0.1.xml"].direction_swaps == frozenset()
+
+
+def test_batch_members_require_the_cleaned_concepts_version(tmp_path, monkeypatch):
+    """The concepts file is cleaned first; a member then Requires the
+    version its cleaned output carries, suffix included."""
+    seen: dict[str, CleanOptions] = {}
+
+    class Suffixing(_FakeCleaner):
+        def __init__(self, source, cili, options=None):
+            super().__init__(source, cili, options)
+            seen[self.source.name] = options
+
+        def clean(self, out_dir):
+            h = read_lexicon_header(self.source)
+            version = h.version + CHANGED_SUFFIX if h.language == "mul" else h.version
+            out = Path(out_dir) / f"{h.id}-{h.version}.xml"
+            out.write_text(f'<LexicalResource><Lexicon id="{h.id}" version="{version}" '
+                           f'language="{h.language}"/></LexicalResource>')
+            log = out.with_name(out.stem + "_log.json")
+            log.write_text('{"changes": {}}')
+            return CleanResult(out, log, True)
+
+    raw, toml = _raw_release(tmp_path)
+    out = tmp_path / "presynth"
+    cili = _write(tmp_path / "cili.tsv",
+                  "ili_id\tstatus\tsuperseded_by\torigin\tdefinition\n"
+                  "i100\t1\t\tpwn-3.0:00000001-n\td\n")
+    monkeypatch.setattr(batch, "LmfCleaner", Suffixing)
+
+    batch.clean_all(cili_file=cili, toml_path=toml, raw_wns_dir=raw, output_dir=out)
+
+    assert list(seen)[0] == "kin-0.1.xml"
+    assert seen["kin-ar-0.1.xml"].requires == ("kin", "0.1" + CHANGED_SUFFIX)
+
+
+def test_batch_records_where_each_file_came_from(tmp_path, monkeypatch):
+    """sources.json names, per lexicon, the cleaned file, its wordnets.toml
+    URL and supporting-files stem, and the concepts lexicon a member of a
+    release Requires."""
+    out = _run_batch(tmp_path, monkeypatch, {})
+
+    sources = json.loads((out / SOURCES_NAME).read_text(encoding="utf-8"))
+    assert sources["kin-ar"] == {"file": "kin-ar-0.1.xml", "url": "file:///somewhere/kin-0.1.tar.xz",
+                                 "extras": "kin", "requires": "kin"}
+    assert sources["kin"]["requires"] is None
+    assert sources["omw-arb"] == {"file": "omw-arb-0.1.xml", "url": "https://example.org/omw-arb-2.0.tar.xz",
+                                  "extras": "omw-arb", "requires": None}
+    assert "kin-xx" not in sources   # skipped: no other wordnet for the language
 
 
 def test_batch_writes_manifest(tmp_path, monkeypatch):
-    """Step 2 lists both converted and reused outputs in the manifest."""
+    """Step 2 lists both cleaned and reused outputs in the manifest."""
     manifest = f"# converter {_current_converter()}\nkin-ar-0.1.xml\n"
     out = _run_batch(tmp_path, monkeypatch, {
         "manifest.txt": manifest,
         "kin-ar-0.1.xml": "<old/>",           # reused
-        "stale-9.xml": "<CygnetResource/>",   # not planned
+        "stale-9.xml": "<LexicalResource/>",  # not planned
     })
     assert sorted(read_manifest(out)) == [
         "kin-0.1.xml", "kin-ar-0.1.xml", "omw-arb-0.1.xml"]
@@ -571,7 +364,7 @@ def test_batch_writes_manifest(tmp_path, monkeypatch):
 
 
 def test_batch_reuses_output_of_same_converter(tmp_path, monkeypatch):
-    """An output the same converter made is not converted again."""
+    """An output the same cleaner made is not cleaned again."""
     manifest = f"# converter {_current_converter()}\nkin-ar-0.1.xml\n"
     out = _run_batch(tmp_path, monkeypatch, {
         "manifest.txt": manifest, "kin-ar-0.1.xml": "<old/>"})
@@ -579,25 +372,25 @@ def test_batch_reuses_output_of_same_converter(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("manifest", [
-    "# converter 0123456789abcdef\nkin-ar-0.1.xml\n",  # another converter
+    "# converter 0123456789abcdef\nkin-ar-0.1.xml\n",  # another cleaner
     "kin-ar-0.1.xml\n",                                 # made before hashes
     None,                                               # no manifest
 ])
 def test_batch_reconverts_output_of_other_converter(tmp_path, monkeypatch, manifest):
-    """An output from another or unknown converter is converted again."""
+    """An output from another or unknown cleaner is cleaned again."""
     files = {"kin-ar-0.1.xml": "<old/>"}
     if manifest is not None:
         files["manifest.txt"] = manifest
     out = _run_batch(tmp_path, monkeypatch, files)
-    assert (out / "kin-ar-0.1.xml").read_text() == "<CygnetResource/>"
+    assert (out / "kin-ar-0.1.xml").read_text() == "<LexicalResource/>"
 
 
 def test_batch_reconverts_output_not_in_manifest(tmp_path, monkeypatch):
-    """An output the manifest does not list is converted again."""
+    """An output the manifest does not list is cleaned again."""
     manifest = f"# converter {_current_converter()}\nomw-arb-0.1.xml\n"
     out = _run_batch(tmp_path, monkeypatch, {
         "manifest.txt": manifest, "kin-ar-0.1.xml": "<old/>"})
-    assert (out / "kin-ar-0.1.xml").read_text() == "<CygnetResource/>"
+    assert (out / "kin-ar-0.1.xml").read_text() == "<LexicalResource/>"
 
 
 def test_source_hash_changes_with_content(tmp_path):

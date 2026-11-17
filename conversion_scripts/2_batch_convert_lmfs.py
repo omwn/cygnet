@@ -1,23 +1,19 @@
 #!/usr/bin/env python3
 """
-Batch convert GlobalWordNet XML files to Cygnet XML format.
+Step 2: clean every source wordnet listed in wordnets.toml into a WN-LMF
+pre-synth file (cyg.clean), one per source, in bin/cygnets_presynth.
 """
 
+import dataclasses
+import json
 import sys
-from dataclasses import dataclass
+import tomllib
 from pathlib import Path
 
-import tomllib
-
-import cyg.converters
-import cyg.multilex
-from cyg.converters import WordNetToCygnetConverter
-from cyg.presynth import (
-    read_manifest,
-    read_manifest_converter,
-    source_hash,
-    write_manifest,
-)
+from cyg import cili, clean, linker, lmf, multilex
+from cyg.cili import CiliIndex
+from cyg.clean import CHANGED_SUFFIX, CleanOptions, LmfCleaner, validate_lmf
+from cyg.lmf import DIRECTION_SWAP_CONFIG_FILENAME, load_direction_swap_config
 from cyg.multilex import (
     SharedConcepts,
     build_concept_map,
@@ -27,25 +23,28 @@ from cyg.multilex import (
     read_lexicon_header,
     url_stem,
 )
+from cyg.presynth import (
+    read_manifest,
+    read_manifest_converter,
+    source_hash,
+    write_manifest,
+    write_sources,
+)
 
 # wordnets.toml key for multi-lexicon releases linked by a 'mul' concepts lexicon.
 MUL_KEY = "mul"
 
-# Written to the output directory: the outputs this build planned (converted
-# now or reused).  6_synthesise.py merges only these, so outputs left over
-# from earlier builds (a dropped or replaced wordnet) are not merged.
-
 # The code that determines the outputs. An existing output is reused only if
 # the last manifest lists it with the same hash of these files; otherwise it
-# is converted again, so a converter change reaches every wordnet.
-CONVERTER_SOURCES = (cyg.converters.__file__, cyg.multilex.__file__, __file__)
-
-# Lexicon IDs that are valid as the English base (first wordnet processed).
-# Both OEWN and the OMW English wordnet provide the synset backbone.
-_EN_BASE_IDS: frozenset[str] = frozenset({"oewn", "omw-en"})
-# Filename substrings used to detect the English base before reading the file.
-_EN_BASE_FILENAME_PATTERNS: tuple[str, ...] = ("english-wordnet", "omw-en")
-
+# is cleaned again, so a cleaner change reaches every wordnet.
+CLEANER_SOURCES = (
+    clean.__file__,
+    cili.__file__,
+    lmf.__file__,
+    linker.__file__,
+    multilex.__file__,
+    __file__,
+)
 
 # Some hosts (e.g. SADiLaR's DSpace bitstream URLs) put no filename in the
 # URL at all — it's just ".../download" — so the extracted content's actual
@@ -87,6 +86,26 @@ def collect_xml_files(toml_path: Path, raw_wns_dir: Path) -> list[Path]:
                     found.append(m)
 
     return sorted(found)
+
+
+def source_urls(toml_path: Path, raw_wns_dir: Path) -> dict[Path, str]:
+    """The wordnets.toml URL each raw XML file came from.
+
+    Args:
+        toml_path: Path to wordnets.toml.
+        raw_wns_dir: Directory containing downloaded wordnet XML files.
+
+    Returns:
+        {raw XML path: URL}; a file matched by two URLs keeps the first.
+    """
+    with open(toml_path, "rb") as f:
+        config = tomllib.load(f)
+    urls: dict[Path, str] = {}
+    for lang, lang_urls in config.items():
+        for url in lang_urls:
+            for m in _match_url(url, lang, raw_wns_dir):
+                urls.setdefault(m, url)
+    return urls
 
 
 def _match_url(url: str, lang: str, raw_wns_dir: Path) -> list[Path]:
@@ -137,17 +156,9 @@ def drop_unusable_languages(xml_files: list[Path]) -> list[Path]:
     return kept
 
 
-@dataclass(frozen=True)
-class FileOptions:
-    """Per-file converter options for lexicons of multi-lexicon releases."""
-
-    shared: SharedConcepts
-    language: str | None = None
-
-
 def plan_multilexicon(
     toml_path: Path, raw_wns_dir: Path, xml_files: list[Path], all_languages: bool
-) -> tuple[dict[Path, FileOptions], set[Path]]:
+) -> tuple[dict[Path, CleanOptions], set[Path]]:
     """Decide how to convert each lexicon of the 'mul' releases.
 
     Each release listed under the 'mul' key must contain exactly one
@@ -174,21 +185,28 @@ def plan_multilexicon(
     mul_files = {p for g in groups for p in g}
     known = {
         fix_language(read_lexicon_header(p).language)
-        for p in xml_files if p not in mul_files
+        for p in xml_files
+        if p not in mul_files
     } - {None}
 
-    options: dict[Path, FileOptions] = {}
+    options: dict[Path, CleanOptions] = {}
     skip: set[Path] = set()
     for url, group in zip(mul_urls, groups):
         headers = {p: read_lexicon_header(p) for p in group}
         concept_files = [p for p, h in headers.items() if h.language == MUL_KEY]
         if len(concept_files) != 1:
-            print(f"  Warning: {url} has {len(concept_files)} 'mul' concepts "
-                  "lexicons (need exactly 1); skipping the release")
+            print(
+                f"  Warning: {url} has {len(concept_files)} 'mul' concepts "
+                "lexicons (need exactly 1); skipping the release"
+            )
             skip.update(group)
             continue
         concepts = build_concept_map(concept_files[0])
-        options[concept_files[0]] = FileOptions(SharedConcepts(concepts, "concepts"))
+        options[concept_files[0]] = CleanOptions(
+            shared=SharedConcepts(concepts, "concepts")
+        )
+        concepts_header = headers[concept_files[0]]
+        requires = (concepts_header.id, concepts_header.version)
         kept, dropped = [], []
         for p, h in sorted(headers.items()):
             if p == concept_files[0]:
@@ -199,153 +217,158 @@ def plan_multilexicon(
                 skip.add(p)
                 dropped.append(lang)
                 continue
-            options[p] = FileOptions(SharedConcepts(concepts, "member"), target or lang)
+            options[p] = CleanOptions(
+                language=target or lang,
+                shared=SharedConcepts(concepts, "member"),
+                requires=requires,
+            )
             kept.append(lang if target in (None, lang) else f"{lang}->{target}")
-        print(f"  {concept_files[0].name}: {len(concepts)} concepts, "
-              f"{len(kept)} member lexicons kept, {len(dropped)} skipped "
-              "(no other wordnet for the language)")
+        print(
+            f"  {concept_files[0].name}: {len(concepts)} concepts, "
+            f"{len(kept)} member lexicons kept, {len(dropped)} skipped "
+            "(no other wordnet for the language)"
+        )
         if kept and not all_languages:
             print(f"    kept: {' '.join(kept)}")
     return options, skip
 
 
-def batch_convert(cili_file, toml_path, raw_wns_dir="raw_wns", output_dir="cygnets_presynth",
-                  all_languages=False):
-    """Batch convert all GWN XML files listed in wordnets.toml to Cygnet format.
+def _is_concepts_file(options: CleanOptions | None) -> bool:
+    return options is not None and options.shared is not None and options.shared.role == "concepts"
+
+
+def _note_concept_version(output: Path, concept_versions: dict[str, str]) -> None:
+    """Record the version a cleaned concepts lexicon carries, for its members."""
+    header = read_lexicon_header(output)
+    if header.language == MUL_KEY and header.id and header.version:
+        concept_versions[header.id] = header.version
+
+
+def clean_all(
+    cili_file,
+    toml_path,
+    raw_wns_dir="bin/raw_wns",
+    output_dir="bin/cygnets_presynth",
+    all_languages=False,
+    validate=False,
+) -> int:
+    """Clean every source listed in wordnets.toml into WN-LMF (cyg.clean).
+
+    An existing output is reused when the manifest says this cleaner made
+    it; otherwise the source is cleaned again.  The direction-swap config
+    is read from the output directory, where Step 1.5 writes it.
 
     Args:
-        cili_file: Path to the CILI XML file.
+        cili_file: The CILI release file (bin/cili.tsv).
         toml_path: Path to wordnets.toml.
-        raw_wns_dir: Directory containing raw WordNet XML files.
-        output_dir: Directory to save converted Cygnet XML files.
-        all_languages: Keep member lexicons of 'mul' releases in every
-            language, not only languages that already have a wordnet.
+        raw_wns_dir: Directory of downloaded source files.
+        output_dir: Where the cleaned files, logs and manifest go.
+        all_languages: Keep 'mul' members in every language.
+        validate: Check each cleaned file with wn (slow for big files).
+
+    Returns:
+        The number of sources that failed.
     """
     output_path = Path(output_dir)
-    output_path.mkdir(exist_ok=True)
-
+    output_path.mkdir(parents=True, exist_ok=True)
     print(f"Scanning {raw_wns_dir} for XML files (from {toml_path})...")
     xml_files = collect_xml_files(Path(toml_path), Path(raw_wns_dir))
-
     if not xml_files:
         print(f"No XML files found matching wordnets.toml entries in {raw_wns_dir}")
-        return
-
+        return 0
     xml_files = drop_unusable_languages(xml_files)
     file_options, skip = plan_multilexicon(
         Path(toml_path), Path(raw_wns_dir), xml_files, all_languages
     )
     xml_files = [p for p in xml_files if p not in skip]
+    # A release's members Require its concepts lexicon at the version the
+    # cleaned concepts file carries (CHANGED_SUFFIX if it changed), so the
+    # concepts files go first and their members take the version they got.
+    xml_files.sort(key=lambda p: not _is_concepts_file(file_options.get(p)))
+    concept_versions: dict[str, str] = {}
+    print(f"Found {len(xml_files)} files to clean")
 
-    print(f"Found {len(xml_files)} files to process")
-    converter_hash = source_hash(CONVERTER_SOURCES)
-    if read_manifest_converter(output_path) == converter_hash:
+    urls = source_urls(Path(toml_path), Path(raw_wns_dir))
+    sources: dict[str, dict] = {}
+    cleaner_hash = source_hash(CLEANER_SOURCES)
+    if read_manifest_converter(output_path) == cleaner_hash:
         reusable = set(read_manifest(output_path) or [])
     else:
         reusable = set()
-        print(f"Converter {converter_hash} has not made these outputs: converting all")
+        print(f"Cleaner {cleaner_hash} has not made these outputs: cleaning all")
+    cili = CiliIndex.from_tsv(Path(cili_file))
+    swaps, swap_stats = load_direction_swap_config(output_path / DIRECTION_SWAP_CONFIG_FILENAME)
+    if swaps:
+        print(f"Direction swaps for {', '.join(sorted(swaps))}")
     print()
 
-    success_count = 0
-    error_count = 0
-    skipped_count = 0
-    oewn_relations_path = None
-    planned_outputs: list[str] = []
-
-    # The English base must be processed first so other wordnets can reference
-    # its relations.  Detect it by filename before reading.
-    def _is_english_base(p: Path) -> bool:
-        return any(pat in p.name for pat in _EN_BASE_FILENAME_PATTERNS)
-
-    oewn = next((t for t in xml_files if _is_english_base(t)), None)
-    if oewn:
-        xml_files.remove(oewn)
-        xml_files.insert(0, oewn)
-
+    counts = {"cleaned": 0, "unchanged": 0, "reused": 0, "errors": 0}
+    planned: list[str] = []
     for i, xml_file in enumerate(xml_files, 1):
-        print(f"[{i}/{len(xml_files)}] Processing {xml_file.name}...")
-
+        print(f"[{i}/{len(xml_files)}] {xml_file.name}...")
+        header = read_lexicon_header(xml_file)
+        if header.id is None or header.version is None:
+            print(f"  Skipping {xml_file.name} (could not read the Lexicon header)")
+            counts["errors"] += 1
+            continue
+        version = header.version.removesuffix(CHANGED_SUFFIX)
+        output_name = f"{header.id}-{version}.xml"
+        url = urls.get(xml_file)
+        requires = file_options.get(xml_file, CleanOptions()).requires
+        sources[header.id] = {"file": output_name, "url": url,
+                              "extras": url_stem(url) if url else None,
+                              "requires": requires[0] if requires else None}
+        if output_name in reusable and (output_path / output_name).exists():
+            print(f"  Reusing {output_name}")
+            counts["reused"] += 1
+            planned.append(output_name)
+            _note_concept_version(output_path / output_name, concept_versions)
+            continue
+        options = dataclasses.replace(
+            file_options.get(xml_file, CleanOptions()),
+            direction_swaps=swaps.get(header.id, frozenset()),
+            swap_stats=swap_stats.get(header.id, {}),
+        )
+        if options.requires and options.requires[0] in concept_versions:
+            options = dataclasses.replace(
+                options, requires=(options.requires[0], concept_versions[options.requires[0]]))
         try:
-            if i == 1:
-                converter = WordNetToCygnetConverter(cili_path=cili_file, skip_cili_defns=True)
-            else:
-                if oewn_relations_path is None:
-                    en_base_matches = [
-                        m for en_id in _EN_BASE_IDS
-                        for m in sorted(output_path.glob(f"{en_id}-*.xml"))
-                    ]
-                    if not en_base_matches:
-                        print(
-                            f"  Skipping {xml_file.name} "
-                            "(English base output not found)"
-                        )
-                        error_count += 1
-                        continue
-                    oewn_relations_path = str(en_base_matches[0])
-                opts = file_options.get(xml_file)
-                converter = WordNetToCygnetConverter(
-                    cili_path=cili_file,
-                    relations_path=oewn_relations_path,
-                    skip_cili_defns=False,
-                    shared=opts.shared if opts else None,
-                    language=opts.language if opts else None,
-                )
-
-            root, tree = converter.read_metadata(str(xml_file))
-            lexicon_id = converter.lexicon_id
-            lexicon_version = converter.lexicon_version
-
-            if i == 1 and lexicon_id not in _EN_BASE_IDS:
-                raise ValueError(
-                    f"Expected English base first (one of: "
-                    f"{', '.join(sorted(_EN_BASE_IDS))}), "
-                    f"got '{lexicon_id}' from {xml_file.name}"
-                )
-            if i != 1 and lexicon_id in _EN_BASE_IDS:
-                raise ValueError(
-                    f"English base '{lexicon_id}' appeared at position {i},"
-                    f" expected position 1"
-                )
-
-            if lexicon_id is None or lexicon_version is None:
-                print(f"  Skipping {xml_file.name} (could not read metadata)")
-                error_count += 1
-                continue
-
-            output_filename = f"{lexicon_id}-{lexicon_version}.xml"
-            output_file = output_path / output_filename
-
-            if output_file.exists() and output_filename in reusable:
-                print(f"  Skipping {xml_file.name} (output {output_filename} already exists)")
-                skipped_count += 1
-                planned_outputs.append(output_filename)
-                continue
-
-            print(f"  Converting {xml_file.name}...")
-            converter.convert_from_tree(root)
-            converter.save(str(output_file))
-            print(f"  Converted to {output_filename}")
-            success_count += 1
-            planned_outputs.append(output_filename)
-            if i == 1:
-                oewn_relations_path = str(output_file)
-
-        except Exception as e:
-            print(f"  Error converting {xml_file.name}: {e}")
-            error_count += 1
-
+            result = LmfCleaner(xml_file, cili, options).clean(output_path)
+        except Exception as e:  # noqa: BLE001  (one bad source must not stop the batch)
+            print(f"  Error cleaning {xml_file.name}: {e}")
+            counts["errors"] += 1
+            continue
+        planned.append(result.output.name)
+        _note_concept_version(result.output, concept_versions)
+        if result.changed:
+            changes = json.loads(result.log.read_text(encoding="utf-8"))["changes"]
+            summary = ", ".join(f"{k} {v}" for k, v in sorted(changes.items())[:8])
+            print(f"  Cleaned to {result.output.name} ({summary})")
+            counts["cleaned"] += 1
+        else:
+            print(f"  Unchanged: {result.output.name}")
+            counts["unchanged"] += 1
+        if validate:
+            errors, warnings = validate_lmf(result.output)
+            for line in warnings:
+                print(f"  wn warning {line}")
+            for line in errors:
+                print(f"  wn ERROR {line}")
+            if errors:
+                counts["errors"] += 1
         print()
 
-    write_manifest(output_path, planned_outputs, converter_hash)
+    write_manifest(output_path, planned, cleaner_hash)
 
+    write_sources(output_path, {k: v for k, v in sources.items() if v['file'] in planned})
     print("=" * 70)
-    print("Batch conversion complete!")
-    print(f"  Successful: {success_count}")
-    print(f"  Skipped:    {skipped_count}")
-    print(f"  Errors:     {error_count}")
-    print(f"  Total:      {len(xml_files)}")
-    print(f"  Output:     {output_dir}")
+    print("Cleaning complete!")
+    for key, n in counts.items():
+        print(f"  {key.capitalize():10} {n}")
+    print(f"  Total:     {len(xml_files)}")
+    print(f"  Output:    {output_dir}")
     print("=" * 70)
+    return counts["errors"]
 
 
 def main():
@@ -353,27 +376,31 @@ def main():
 
     sys.stdout.reconfigure(line_buffering=True)
 
-    parser = argparse.ArgumentParser(
-        description="Batch convert GlobalWordNet XML files to Cygnet XML format."
-    )
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--raw-wns-dir", default="bin/raw_wns")
     parser.add_argument("--output-dir", default="bin/cygnets_presynth")
-    parser.add_argument("--cili-file", default="bin/cygnets_presynth/cili-1.0.xml")
+    parser.add_argument("--cili-file", default="bin/cili.tsv")
     parser.add_argument("--wordnets", default="wordnets.toml")
     parser.add_argument(
-        "--all-languages", action="store_true",
+        "--validate",
+        action="store_true",
+        help="check each cleaned file with wn (slow for big files)",
+    )
+    parser.add_argument(
+        "--all-languages",
+        action="store_true",
         help="keep 'mul' member lexicons in every language (for local builds)",
     )
-
     args = parser.parse_args()
-
-    batch_convert(
-        raw_wns_dir=args.raw_wns_dir,
-        output_dir=args.output_dir,
+    errors = clean_all(
         cili_file=args.cili_file,
         toml_path=args.wordnets,
+        raw_wns_dir=args.raw_wns_dir,
+        output_dir=args.output_dir,
         all_languages=args.all_languages,
+        validate=args.validate,
     )
+    sys.exit(1 if errors else 0)
 
 
 if __name__ == "__main__":

@@ -3,7 +3,6 @@
 import importlib.util
 import json
 import sys
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
@@ -23,7 +22,7 @@ sys.modules['translate_defns'] = _mod
 _spec.loader.exec_module(_mod)
 
 main = _mod.main
-create_xml_from_translations = _mod.create_xml_from_translations
+create_tsv_from_translations = _mod.create_tsv_from_translations
 
 
 def _stub_pipeline(monkeypatch, glosses, by_language):
@@ -32,7 +31,7 @@ def _stub_pipeline(monkeypatch, glosses, by_language):
     monkeypatch.setattr(_mod, 'get_already_translated', lambda: set())
     monkeypatch.setattr(_mod, 'filter_pending_glosses', lambda g, t: g)
     monkeypatch.setattr(_mod, 'group_by_language', lambda g: by_language)
-    monkeypatch.setattr(_mod, 'create_xml_from_translations', lambda: None)
+    monkeypatch.setattr(_mod, 'create_tsv_from_translations', lambda: None)
 
 
 class TestMainLanguageIsolation:
@@ -97,37 +96,33 @@ class TestMainLanguageIsolation:
 
 
 class TestCreateXmlFromTranslations:
-    """The output Gloss must record which language it was translated from,
+    """The output row must record which language it was translated from,
     so cyg.merge can carry that through to the definitions table — see
-    tests/test_pipeline.py::TestTranslatedFromGloss for the merge side.
+    tests/test_lmf_merge.py::TestSidecars for the merge side.
     """
 
     def _write_jsonl(self, tmp_path, monkeypatch, records):
         monkeypatch.chdir(tmp_path)
         (tmp_path / 'bin' / 'cygnets_presynth').mkdir(parents=True)
+        monkeypatch.setattr(_mod, 'PRESYNTH_DIR', tmp_path / 'bin' / 'cygnets_presynth')
         jsonl = tmp_path / 'bin' / 'translated_glosses.jsonl'
         jsonl.write_text('\n'.join(json.dumps(r) for r in records) + '\n')
 
-    def test_gloss_has_translated_from_and_provenance(self, tmp_path, monkeypatch):
+    def _rows(self, tmp_path):
+        import csv
+        with open(tmp_path / 'bin' / 'cygnets_presynth' / 'mtg.tsv', encoding='utf-8', newline='') as f:
+            return list(csv.DictReader(f, delimiter='\t'))
+
+    def test_row_has_translated_from(self, tmp_path, monkeypatch):
         self._write_jsonl(tmp_path, monkeypatch, [{
             'translated_definition': 'a dog',
             'definiendum_id': 'cili.i1',
             'source_language': 'hu',
             'source_text': 'kutya',
         }])
-
-        create_xml_from_translations()
-
-        root = ET.parse(tmp_path / 'bin' / 'cygnets_presynth' / 'mtg-1.0.xml').getroot()
-        gloss = root.find('.//Gloss')
-        assert gloss.get('definiendum') == 'cili.i1'
-        assert gloss.get('language') == 'en'
-        assert gloss.get('translated_from') == 'hu'
-
-        prov = gloss.find('Provenance')
-        assert prov is not None
-        assert prov.get('resource') == 'mtg'
-        assert prov.get('version') == '1.0'
+        create_tsv_from_translations()
+        assert self._rows(tmp_path) == [{'concept': 'cili.i1', 'language': 'en',
+                                         'translated_from': 'hu', 'definition': 'a dog'}]
 
     def test_different_source_languages_recorded_independently(self, tmp_path, monkeypatch):
         self._write_jsonl(tmp_path, monkeypatch, [
@@ -136,10 +131,6 @@ class TestCreateXmlFromTranslations:
             {'translated_definition': 'a cat', 'definiendum_id': 'cili.i2',
              'source_language': 'ru', 'source_text': 'kot'},
         ])
-
-        create_xml_from_translations()
-
-        root = ET.parse(tmp_path / 'bin' / 'cygnets_presynth' / 'mtg-1.0.xml').getroot()
-        by_definiendum = {g.get('definiendum'): g.get('translated_from')
-                           for g in root.findall('.//Gloss')}
-        assert by_definiendum == {'cili.i1': 'hu', 'cili.i2': 'ru'}
+        create_tsv_from_translations()
+        assert {r['concept']: r['translated_from'] for r in self._rows(tmp_path)} == {
+            'cili.i1': 'hu', 'cili.i2': 'ru'}

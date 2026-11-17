@@ -10,7 +10,7 @@ mero_substance relations with source and target swapped relative to every
 other wordnet in Cygnet. We found this by hand -- comparing every pair
 where plwn and OEWN both declared a relation on the same ILI pair, 100% of
 1,476 comparable pairs were reversed, 0 agreed (see
-cyg.converters.MERONYM_DIRECTION_SWAP). This script generalises that check
+cyg.lmf.load_direction_swap_config). This script generalises that check
 so it can run routinely on any new candidate, for every directed relation
 type, before a build is attempted.
 
@@ -225,10 +225,10 @@ def run(candidate_path: Path, reference_path: Path,
             print(f'  - {s.relation_type}: {s.reversed}/{s.comparable} comparable pairs '
                   f'reversed ({100 * s.reversed_share:.1f}%)')
         print()
-        print('Suggested fix: add an entry to MERONYM_DIRECTION_SWAP-style config in '
-              'cyg/converters.py (rename/generalise it if this is not about meronyms) '
-              'scoping the source/target swap to this resource and these relation types '
-              'only, then re-run this check against the corrected export.')
+        print('Suggested fix: add an entry for this resource and these relation types '
+              'to relation_direction_swaps.json (check_all_relation_directions.py '
+              '--write-swap-config writes one), then re-run this check against the '
+              'cleaned file.')
     else:
         print('No relation type looks systematically reversed '
               f'(threshold={threshold:.0%}, min_pairs={min_pairs}).')

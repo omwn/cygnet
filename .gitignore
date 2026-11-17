@@ -20,3 +20,4 @@ reports/
 __pycache__/
 *.egg-info/
 .pytest_cache/
+web/lmf/

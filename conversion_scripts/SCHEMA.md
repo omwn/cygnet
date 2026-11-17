@@ -507,3 +507,108 @@ pwn    3.1      pwn-09107022-n
 | `forms` UNIQUE(entry_rowid, form) | no constraint | Saves ~35 MB autoindex; dupes filtered at insert |
 | language as TEXT in entries, definitions | `language_rowid` INTEGER FK | Saves ~20 MB |
 | `lexicons` table (id, label, version, url, …) | `resources` table | Equivalent metadata; Cygnet adds `citation`, `email`, `confidence_score`, `extra` |
+
+---
+
+## The pre-synth intermediate (`bin/cygnets_presynth/`)
+
+The databases are built from a directory of cleaned source wordnets,
+written by Step 2 (`2_batch_convert_lmfs.py`, `cyg/clean.py`) and read by
+Step 6 (`6_synthesise.py`, `cyg/merge.py`):
+
+| File | Written by | Content |
+|---|---|---|
+| `<lexicon id>-<version>.xml` | Step 2 | One source lexicon as WN-LMF 1.4, cleaned (see below).  Loads in the `wn` library and validates against the DTD |
+| `<stem>_log.json` | Step 2 | What the cleaner changed or dropped, and why; read by `scripts/report.py` and `scripts/log_summary.py` |
+| `manifest.txt` | Step 2 | The files this build planned, after a line naming the cleaner version that made them; Step 6 ignores any other `.xml` in the directory |
+| `sources.json` | Step 2 | Where each cleaned file came from, by lexicon id: the wordnets.toml URL, the stem of its supporting files in `bin/raw_wns/extras/`, and the concepts lexicon a release member Requires; Step 8 packages from it and Step 6 puts the URL in the summaries |
+| `relation_direction_swaps.json` | Step 1.5 | Relation types whose direction a source has systematically reversed, by lexicon id; the cleaner swaps them |
+| `cili.tsv` | Step 1 (a link to `bin/cili.tsv`) | The CILI release: ILI, status, PWN origin and English definition per concept |
+| `cili_glosstag.json` | Step 4 (`--with-glosstag`) | `{ili: [[start, end, OEWN sense id], …]}`, the GlossTag sense annotations of the CILI definitions |
+| `mtg.tsv` | Step 5 (`--with-translate`) | English machine translations of the non-English definitions of local concepts |
+
+### The cleaned files
+
+A cleaned file is the source edited, not rebuilt: anything the cleaner has
+no opinion on passes through (`status`, `confidenceScore`, `dc:*`, `Tag`,
+`Count`, `SyntacticBehaviour`, existing notes).  A file the cleaner changed
+gets `.🦢` appended to `Lexicon@version` and a `note` on the Lexicon naming
+its log; a file it did not change is copied byte for byte under the
+upstream version.  The passes, in order:
+
+1. **metadata** — the language code fixed or overridden from
+   `wordnets.toml`, known licence errors corrected, the header attributes
+   `wn` requires present;
+2. **text** — NFC, whitespace collapsed, double-encoded HTML entities
+   decoded, blank Definitions and Examples removed; every Definition
+   carries `language` (an English definition in a non-English wordnet is
+   marked `language="en"`, and the merge drops it in favour of CILI's);
+3. **structure** — an invalid part-of-speech code becomes `u`; entries
+   without a lemma and senses whose synset is missing are dropped;
+4. **dedup and trimming** — entries with the same written forms are merged
+   (the dropped ids listed in `note="merged=id …"`), duplicate senses
+   collapsed, low-confidence elements dropped, repeated or unknown ILIs
+   cleared, a `mul` member's ILIs filled in from its concepts lexicon;
+5. **relations** — stored in the forward direction only (`hypernym`,
+   `mero_*`, `causes`, `entails`, …), symmetric relations once; duplicates,
+   self-loops and dangling targets removed; directions swapped where
+   Step 1.5 found them reversed.  The merge regenerates the inverses;
+6. **examples** — a synset-level `Example` moves under the `Sense` whose
+   word it contains, the word's span in `note="offsets=start,end"`; one
+   whose sense could not be located stays under the Synset and is not
+   merged.
+
+The `note` attribute carries machine-readable keys as `key=value` pairs
+separated by spaces: `offsets=start,end[;start,end…]` on an Example,
+`merged=id …` on an entry that absorbed others, and `translated_from=xx` on
+a Definition that is a machine translation.  A relation type outside the
+DTD's enumeration is written as `relType="other"` with the type in
+`dc:type`; a finer sub-type keeps `dc:type` and its label in
+`dc:description`, which the DB stores as `subtype` / `subtype_label`.
+
+### Concepts across files
+
+A synset with an ILI is unified across files by it.  One without
+(`ili=""`) becomes a local concept keyed `<lexicon id>.<synset id>`.  A
+multi-lexicon release — a concepts lexicon (`language="mul"`) whose
+Synsets carry the definitions and ILIs, and member lexicons that
+`Requires` it with stub Synsets — shares a concept per `dc:identifier`,
+keyed `<concepts lexicon id>.<identifier>`.  The entries of a `mul`
+lexicon are placeholders the DTD demands and are not merged.
+
+The merge then does only the cross-wordnet work: entries are unified by
+(language, part of speech, written forms) and case variants merged; the
+first definition per (synset, language) wins, so CILI and OEWN, merged
+first, supply the English; inverse relations are generated, cross-file
+duplicates dropped, a relation that contradicts one already merged is
+recorded in `relation_conflicts.json` and skipped, and an edge that would
+close a hypernym cycle is removed.  Provenance takes the resource and
+version from the Lexicon header and the original id from the Synset,
+LexicalEntry and Sense ids, plus every id in a `merged=` note.
+
+### The download archives (`web/lmf/`)
+
+Step 8 (`8_package_lmf.py`, `cyg/package.py`) packages each cleaned file
+as `<id>-<version>.tar.gz`: the file, its `_log.json`, and the
+`citation.bib`, `README` and `LICENSE` its source archive came with (kept
+by the download step in `bin/raw_wns/extras/<url stem>/`); a release
+without a `citation.bib` gets one made from the Lexicon header, and a
+member of a multi-lexicon release also carries the concepts lexicon it
+Requires.  An archive whose wordnet is no longer in `sources.json` (dropped
+from the configuration, or re-versioned) is removed, since the release
+workflow attaches every archive in the directory to the GitHub release;
+a wordnet's summary page links to its archive and to the original release.
+
+### The export (`--with-xml`)
+
+`7_validate_and_export.py` (`cyg/export.py`) writes the merged database
+back out as WN-LMF 1.4: `cygnet.xml`, with every contributing source in
+`dc:source` as space-separated `resource:version:original_id` tokens, and
+`cygnet_small.xml` without them.  The file is a multi-lexicon release of
+the kind the pipeline merges: a concepts lexicon `cygnet` (language `mul`)
+holds every concept once, with its definitions in every language and its
+relations, and one lexicon `cygnet-<lang>` per language, which `Requires`
+it, holds that language's entries and senses.  A concept without an ILI
+is identified by `dc:identifier="cyg:<rowid>"`.  Each Lexicon is validated
+against the DTD as a document of its own, because libxml2 reports
+spurious duplicate IDs past about a million of them.

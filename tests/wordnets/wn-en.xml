@@ -1,4 +1,5 @@
-<?xml version='1.0' encoding='UTF-8'?>
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE LexicalResource SYSTEM "https://globalwordnet.github.io/schemas/WN-LMF-1.4.dtd">
 <!--
   Test English wordnet.  Concepts here serve as the shared ILI layer;
   other test wordnets (wn-fr.xml etc.) reference ILIs declared here.
@@ -26,180 +27,80 @@
   Note: ILI IDs (i1–i8) are test fixtures; i3 is referenced by wn-fr.xml
   and wn-bad.xml, so those three must not be renumbered.
 -->
-<CygnetResource id="wn-en" label="Test English WordNet" language="en" version="1.0" citation="Bond, F. 2025. `Test WordNet &lt;https://github.com/rowanhm/cygnet&gt;`_. In *Proceedings of a Test Conference*.">
-
-  <!-- Concepts (ILI declarations shared by all wordnets) -->
-  <Concept id="cili.i1" ontological_category="NOUN" status="1">
-    <Provenance resource="wn-en" version="1.0" original_id="oewn-entity-n"/>
-  </Concept>
-  <Concept id="cili.i2" ontological_category="NOUN" status="1">
-    <Provenance resource="wn-en" version="1.0" original_id="oewn-animal-n"/>
-  </Concept>
-  <Concept id="cili.i3" ontological_category="NOUN" status="1">
-    <Provenance resource="wn-en" version="1.0" original_id="oewn-dog-n"/>
-  </Concept>
-  <Concept id="cili.i4" ontological_category="NOUN" status="1">
-    <Provenance resource="wn-en" version="1.0" original_id="oewn-brightness-n"/>
-  </Concept>
-  <Concept id="cili.i5" ontological_category="NOUN" status="1">
-    <Provenance resource="wn-en" version="1.0" original_id="oewn-dogfish-n"/>
-  </Concept>
-  <Concept id="cili.i6" ontological_category="ADJ" status="1">
-    <Provenance resource="wn-en" version="1.0" original_id="oewn-bright-a"/>
-  </Concept>
-  <Concept id="cili.i7" ontological_category="ADJ" status="1">
-    <Provenance resource="wn-en" version="1.0" original_id="oewn-gleaming-a"/>
-  </Concept>
-  <Concept id="cili.i8" ontological_category="ADJ" status="1">
-    <Provenance resource="wn-en" version="1.0" original_id="oewn-glowing-a"/>
-  </Concept>
-  <Concept id="cili.i9" ontological_category="NOUN" status="1">
-    <Provenance resource="wn-en" version="1.0" original_id="oewn-mouse-n"/>
-  </Concept>
-
-  <!-- English definitions (from OEWN / Princeton WordNet) -->
-  <Gloss definiendum="cili.i1" language="en">
-    <AnnotatedSentence>that which is perceived or known or inferred to have its own distinct existence (living or nonliving)</AnnotatedSentence>
-    <Provenance resource="wn-en" version="1.0"/>
-  </Gloss>
-  <Gloss definiendum="cili.i2" language="en">
-    <AnnotatedSentence>a living animal; any member of the kingdom Animalia</AnnotatedSentence>
-    <Provenance resource="wn-en" version="1.0"/>
-  </Gloss>
-  <Gloss definiendum="cili.i3" language="en">
-    <AnnotatedSentence>a domesticated carnivorous animal (Canis lupus familiaris), the most widely kept companion animal</AnnotatedSentence>
-    <Provenance resource="wn-en" version="1.0"/>
-  </Gloss>
-  <Gloss definiendum="cili.i4" language="en">
-    <AnnotatedSentence>the quality of being bright</AnnotatedSentence>
-    <Provenance resource="wn-en" version="1.0"/>
-  </Gloss>
-  <Gloss definiendum="cili.i5" language="en">
-    <AnnotatedSentence>any of several small sharks with a long pointed snout</AnnotatedSentence>
-    <Provenance resource="wn-en" version="1.0"/>
-  </Gloss>
-  <Gloss definiendum="cili.i6" language="en">
-    <AnnotatedSentence>emitting or reflecting light readily or in large amounts</AnnotatedSentence>
-    <Provenance resource="wn-en" version="1.0"/>
-  </Gloss>
-  <Gloss definiendum="cili.i7" language="en">
-    <AnnotatedSentence>bright with a steady but subdued sheen</AnnotatedSentence>
-    <Provenance resource="wn-en" version="1.0"/>
-  </Gloss>
-  <Gloss definiendum="cili.i8" language="en">
-    <AnnotatedSentence>emitting or reflecting light steadily and softly</AnnotatedSentence>
-    <Provenance resource="wn-en" version="1.0"/>
-  </Gloss>
-  <!-- Machine-translated gloss (mirrors 5_translate_defns.py's output shape) -->
-  <Gloss definiendum="cili.i9" language="en" translated_from="fr">
-    <AnnotatedSentence>a small rodent with a pointed snout and a long tail</AnnotatedSentence>
-    <Provenance resource="mtg" version="1.0"/>
-  </Gloss>
-
-  <!-- English lexemes -->
-  <Lexeme id="lex.en.entity" language="en" grammatical_category="NOUN">
-    <Wordform form="entity"/>
-    <Provenance resource="wn-en" version="1.0" original_id="oewn-entity-n"/>
-  </Lexeme>
-  <Lexeme id="lex.en.animal" language="en" grammatical_category="NOUN">
-    <Wordform form="animal"/>
-    <Provenance resource="wn-en" version="1.0" original_id="oewn-animal-n"/>
-  </Lexeme>
-  <Lexeme id="lex.en.dog" language="en" grammatical_category="NOUN">
-    <Wordform form="dog"/>
-    <Wordform form="doggo"/>
-    <Provenance resource="wn-en" version="1.0" original_id="oewn-dog-n"/>
-  </Lexeme>
-  <Lexeme id="lex.en.brightness" language="en" grammatical_category="NOUN">
-    <Wordform form="brightness"/>
-    <Provenance resource="wn-en" version="1.0" original_id="oewn-brightness-n"/>
-  </Lexeme>
-  <Lexeme id="lex.en.dogfish" language="en" grammatical_category="NOUN">
-    <Wordform form="dogfish"/>
-    <Provenance resource="wn-en" version="1.0" original_id="oewn-dogfish-n"/>
-  </Lexeme>
-  <Lexeme id="lex.en.mouse" language="en" grammatical_category="NOUN">
-    <Wordform form="mouse"/>
-    <Provenance resource="wn-en" version="1.0" original_id="oewn-mouse-n"/>
-  </Lexeme>
-  <Lexeme id="lex.en.bright" language="en" grammatical_category="ADJ">
-    <Wordform form="bright"/>
-    <Provenance resource="wn-en" version="1.0" original_id="oewn-bright-a"/>
-  </Lexeme>
-  <Lexeme id="lex.en.gleaming" language="en" grammatical_category="ADJ">
-    <Wordform form="gleaming"/>
-    <Provenance resource="wn-en" version="1.0" original_id="oewn-gleaming-a"/>
-  </Lexeme>
-  <Lexeme id="lex.en.glowing" language="en" grammatical_category="ADJ">
-    <Wordform form="glowing"/>
-    <Provenance resource="wn-en" version="1.0" original_id="oewn-glowing-a"/>
-  </Lexeme>
-
-  <!-- English senses (lexeme → concept) -->
-  <Sense id="sense.entity" signifier="lex.en.entity" signified="cili.i1">
-    <Provenance resource="wn-en" version="1.0"/>
-  </Sense>
-  <Sense id="sense.animal" signifier="lex.en.animal" signified="cili.i2">
-    <Provenance resource="wn-en" version="1.0"/>
-  </Sense>
-  <Sense id="sense.dog" signifier="lex.en.dog" signified="cili.i3">
-    <Provenance resource="wn-en" version="1.0"/>
-  </Sense>
-  <Sense id="sense.brightness" signifier="lex.en.brightness" signified="cili.i4">
-    <Provenance resource="wn-en" version="1.0"/>
-  </Sense>
-  <Sense id="sense.dogfish" signifier="lex.en.dogfish" signified="cili.i5">
-    <Provenance resource="wn-en" version="1.0"/>
-  </Sense>
-  <Sense id="sense.mouse" signifier="lex.en.mouse" signified="cili.i9">
-    <Provenance resource="wn-en" version="1.0"/>
-  </Sense>
-  <Sense id="sense.bright" signifier="lex.en.bright" signified="cili.i6">
-    <Provenance resource="wn-en" version="1.0"/>
-  </Sense>
-  <Sense id="sense.gleaming" signifier="lex.en.gleaming" signified="cili.i7">
-    <Provenance resource="wn-en" version="1.0"/>
-  </Sense>
-  <Sense id="sense.glowing" signifier="lex.en.glowing" signified="cili.i8">
-    <Provenance resource="wn-en" version="1.0"/>
-  </Sense>
-
-  <!-- Example sentences for sense.dog: one plain (tests bold rendering of
-       the matched token), one with literal "<script>"/"<img onerror>" text
-       outside the annotated token (tests that example text — third-party
-       source data — is never parsed as HTML; see renderExample() in
-       web/index.html, which builds React elements from structured
-       {text, bold} segments rather than an HTML string). -->
-  <Example>
-    <AnnotatedSentence>The <AnnotatedToken sense="sense.dog">dog</AnnotatedToken> barked loudly.</AnnotatedSentence>
-    <Provenance resource="wn-en" version="1.0"/>
-  </Example>
-  <Example>
-    <AnnotatedSentence>&lt;script&gt;window.__example_xss_fired=true;&lt;/script&gt;&lt;img src=x onerror="window.__example_xss_fired=true;"&gt;A <AnnotatedToken sense="sense.dog">dog</AnnotatedToken> is dangerous.</AnnotatedSentence>
-    <Provenance resource="wn-en" version="1.0"/>
-  </Example>
-
-  <!-- Hypernym chain: dog → animal → entity -->
-  <ConceptRelation relation_type="hypernym" source="cili.i3" target="cili.i2">
-    <Provenance resource="wn-en" version="1.0"/>
-  </ConceptRelation>
-  <ConceptRelation relation_type="hypernym" source="cili.i2" target="cili.i1">
-    <Provenance resource="wn-en" version="1.0"/>
-  </ConceptRelation>
-
-  <!-- Adjective relations: gleaming and glowing are variants of bright -->
-  <!-- eq_synonym fallback: gleaming (i7) ≈ bright (i6, has ARASAAC) — ADJ ↔ ADJ -->
-  <ConceptRelation relation_type="eq_synonym" source="cili.i7" target="cili.i6">
-    <Provenance resource="wn-en" version="1.0"/>
-  </ConceptRelation>
-  <!-- similar fallback: glowing (i8) ~ bright (i6, has ARASAAC) — ADJ ↔ ADJ -->
-  <ConceptRelation relation_type="similar" source="cili.i8" target="cili.i6">
-    <Provenance resource="wn-en" version="1.0"/>
-  </ConceptRelation>
-
-  <!-- Sense relation: gleaming antonym glowing (simplified; tests sense-level display) -->
-  <SenseRelation relation_type="antonym" source="sense.gleaming" target="sense.glowing">
-    <Provenance resource="wn-en" version="1.0"/>
-  </SenseRelation>
-
-</CygnetResource>
+<LexicalResource xmlns:dc="https://globalwordnet.github.io/schemas/dc/">
+  <Lexicon id="wn-en" label="Test English WordNet" language="en" email="test@example.org" license="https://creativecommons.org/licenses/by/4.0/" version="1.0" url="https://example.org/" citation="Bond, F. 2025. `Test WordNet &lt;https://github.com/rowanhm/cygnet&gt;`_. In *Proceedings of a Test Conference*.">
+    <LexicalEntry id="oewn-entity-n">
+      <Lemma writtenForm="entity" partOfSpeech="n"/>
+      <Sense id="sense.entity" synset="oewn-entity-n"/>
+    </LexicalEntry>
+    <LexicalEntry id="oewn-animal-n">
+      <Lemma writtenForm="animal" partOfSpeech="n"/>
+      <Sense id="sense.animal" synset="oewn-animal-n"/>
+    </LexicalEntry>
+    <LexicalEntry id="oewn-dog-n">
+      <Lemma writtenForm="dog" partOfSpeech="n"/>
+      <Form writtenForm="doggo"/>
+      <Sense id="sense.dog" synset="oewn-dog-n">
+        <Example note="offsets=4,7">The dog barked loudly.</Example>
+        <Example note="offsets=105,108">&lt;script&gt;window.__example_xss_fired=true;&lt;/script&gt;&lt;img src=x onerror="window.__example_xss_fired=true;"&gt;A dog is dangerous.</Example>
+      </Sense>
+    </LexicalEntry>
+    <LexicalEntry id="oewn-brightness-n">
+      <Lemma writtenForm="brightness" partOfSpeech="n"/>
+      <Sense id="sense.brightness" synset="oewn-brightness-n"/>
+    </LexicalEntry>
+    <LexicalEntry id="oewn-dogfish-n">
+      <Lemma writtenForm="dogfish" partOfSpeech="n"/>
+      <Sense id="sense.dogfish" synset="oewn-dogfish-n"/>
+    </LexicalEntry>
+    <LexicalEntry id="oewn-mouse-n">
+      <Lemma writtenForm="mouse" partOfSpeech="n"/>
+      <Sense id="sense.mouse" synset="oewn-mouse-n"/>
+    </LexicalEntry>
+    <LexicalEntry id="oewn-bright-a">
+      <Lemma writtenForm="bright" partOfSpeech="a"/>
+      <Sense id="sense.bright" synset="oewn-bright-a"/>
+    </LexicalEntry>
+    <LexicalEntry id="oewn-gleaming-a">
+      <Lemma writtenForm="gleaming" partOfSpeech="a"/>
+      <Sense id="sense.gleaming" synset="oewn-gleaming-a">
+        <SenseRelation target="sense.glowing" relType="antonym"/>
+      </Sense>
+    </LexicalEntry>
+    <LexicalEntry id="oewn-glowing-a">
+      <Lemma writtenForm="glowing" partOfSpeech="a"/>
+      <Sense id="sense.glowing" synset="oewn-glowing-a"/>
+    </LexicalEntry>
+    <Synset id="oewn-entity-n" ili="i1" partOfSpeech="n">
+      <Definition language="en">that which is perceived or known or inferred to have its own distinct existence (living or nonliving)</Definition>
+    </Synset>
+    <Synset id="oewn-animal-n" ili="i2" partOfSpeech="n">
+      <Definition language="en">a living animal; any member of the kingdom Animalia</Definition>
+      <SynsetRelation target="oewn-entity-n" relType="hypernym"/>
+    </Synset>
+    <Synset id="oewn-dog-n" ili="i3" partOfSpeech="n">
+      <Definition language="en">a domesticated carnivorous animal (Canis lupus familiaris), the most widely kept companion animal</Definition>
+      <SynsetRelation target="oewn-animal-n" relType="hypernym"/>
+    </Synset>
+    <Synset id="oewn-brightness-n" ili="i4" partOfSpeech="n">
+      <Definition language="en">the quality of being bright</Definition>
+    </Synset>
+    <Synset id="oewn-dogfish-n" ili="i5" partOfSpeech="n">
+      <Definition language="en">any of several small sharks with a long pointed snout</Definition>
+    </Synset>
+    <Synset id="oewn-bright-a" ili="i6" partOfSpeech="a">
+      <Definition language="en">emitting or reflecting light readily or in large amounts</Definition>
+    </Synset>
+    <Synset id="oewn-gleaming-a" ili="i7" partOfSpeech="a">
+      <Definition language="en">bright with a steady but subdued sheen</Definition>
+      <SynsetRelation target="oewn-bright-a" relType="eq_synonym"/>
+    </Synset>
+    <Synset id="oewn-glowing-a" ili="i8" partOfSpeech="a">
+      <Definition language="en">emitting or reflecting light steadily and softly</Definition>
+      <SynsetRelation target="oewn-bright-a" relType="similar"/>
+    </Synset>
+    <Synset id="oewn-mouse-n" ili="i9" partOfSpeech="n">
+      <Definition language="en" note="translated_from=fr">a small rodent with a pointed snout and a long tail</Definition>
+    </Synset>
+  </Lexicon>
+</LexicalResource>

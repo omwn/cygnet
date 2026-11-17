@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Report data-quality issues in a pre-synthesised Cygnet XML wordnet file.
+"""Report data-quality issues in a cleaned WN-LMF wordnet file (Step 2 output).
 
 Each issue section explains what Cygnet silently drops or modifies, phrased
 for upstream wordnet maintainers who may not know Cygnet's internals.
@@ -18,8 +18,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from lxml import etree as ET
-
+from cyg.lmf import LEXICON_TAGS, iter_lmf, parse_note, pos_label, relation_type
 from cyg.merge import INVERSE_CONCEPT_RELATIONS, INVERSE_SENSE_RELATIONS
 from cyg.presynth import log_path
 
@@ -98,7 +97,7 @@ MAX_EXAMPLES = 10
 
 @dataclass
 class WordnetData:
-    """Parsed contents of one pre-synth Cygnet XML file."""
+    """Parsed contents of one pre-synth WN-LMF file."""
 
     resource_id: str = ""
     label: str = ""
@@ -107,12 +106,12 @@ class WordnetData:
 
     # concept_id → POS label
     concepts: dict[str, str] = field(default_factory=dict)
-    # concept IDs for which at least one <Gloss> is present in this file
+    # synset IDs that have at least one <Definition> in this file
     glossed: set[str] = field(default_factory=set)
 
     # entry_id → language code
     entries: dict[str, str] = field(default_factory=dict)
-    # entry IDs that have at least one <Wordform>
+    # entry IDs whose <Lemma> has a writtenForm
     entries_with_forms: set[str] = field(default_factory=set)
 
     # entry_id → first wordform text
@@ -121,7 +120,7 @@ class WordnetData:
     # concept_id → [sense_ids] (in declaration order)
     concept_senses: dict[str, list[str]] = field(default_factory=dict)
 
-    # sense_id → (signifier/entry_id, signified/concept_id)
+    # sense_id → (entry_id, synset_id)
     senses: dict[str, tuple[str, str]] = field(default_factory=dict)
 
     # (plain_text_truncated, frozenset_of_annotated_sense_ids)
@@ -151,84 +150,67 @@ class Issue:
 # Parsing
 # ---------------------------------------------------------------------------
 
-def parse_xml(path: Path) -> WordnetData:
-    """Stream-parse a pre-synth Cygnet XML file into a WordnetData structure."""
+def parse_lmf(path: Path) -> WordnetData:
+    """Stream-parse a cleaned WN-LMF file into a WordnetData.
+
+    Concepts are the file's synsets (by id); an Example under a Sense counts
+    as annotated with that sense when its note carries offsets, a
+    synset-level Example as unmatched.
+    """
     data = WordnetData()
-    root_seen = False
-
-    for event, elem in ET.iterparse(str(path), events=("start", "end")):
-        tag = elem.tag
+    language = ""
+    for event, elem in iter_lmf(path, (*LEXICON_TAGS, "LexicalEntry", "Synset")):
         if event == "start":
-            if not root_seen and tag == "CygnetResource":
-                root_seen = True
-                data.resource_id = elem.get("id", "")
-                data.label = elem.get("label", "") or elem.get("id", "")
-                data.language = elem.get("language", "")
-                data.version = elem.get("version", "")
+            if elem.tag in LEXICON_TAGS:
+                language = elem.get("language", "")
+                if not data.resource_id:
+                    data.resource_id = elem.get("id", "")
+                    data.label = elem.get("label", "") or data.resource_id
+                    data.language = language
+                    data.version = elem.get("version", "")
             continue
-
-        if tag == "Concept":
-            cid = elem.get("id", "")
-            if cid in data.concepts:
-                data.duplicate_concept_ids.append(cid)
-            else:
-                data.concepts[cid] = elem.get("ontological_category", "")
-            elem.clear()
-
-        elif tag == "Gloss":
-            data.glossed.add(elem.get("definiendum", ""))
-            elem.clear()
-
-        elif tag == "Lexeme":
+        if elem.getparent() is None or elem.getparent().tag not in LEXICON_TAGS:
+            continue
+        if elem.tag == "LexicalEntry":
             eid = elem.get("id", "")
             if eid in data.entries:
                 data.duplicate_entry_ids.append(eid)
             else:
-                data.entries[eid] = elem.get("language", "")
-                wf = elem.find("Wordform")
-                if wf is not None:
+                data.entries[eid] = language
+                lemma = elem.find("Lemma")
+                if lemma is not None and lemma.get("writtenForm"):
                     data.entries_with_forms.add(eid)
-                    data.entry_forms[eid] = wf.get("form", "")
-            elem.clear()
-
-        elif tag == "Sense":
+                    data.entry_forms[eid] = lemma.get("writtenForm")
+            for sense in elem.iterchildren("Sense"):
+                sid = sense.get("id", "")
+                if sid in data.senses:
+                    data.duplicate_sense_ids.append(sid)
+                else:
+                    synset = sense.get("synset", "")
+                    data.senses[sid] = (eid, synset)
+                    data.concept_senses.setdefault(synset, []).append(sid)
+                for rel in sense.iterchildren("SenseRelation"):
+                    data.sense_rels.append((sid, relation_type(rel), rel.get("target", "")))
+                for example in sense.iterchildren("Example"):
+                    text = (example.text or "").strip()[:80]
+                    located = "offsets" in parse_note(example.get("note"))
+                    data.examples.append((text, frozenset({sid}) if located else frozenset()))
+        elif elem.tag == "Synset":
             sid = elem.get("id", "")
-            if sid in data.senses:
-                data.duplicate_sense_ids.append(sid)
+            if sid in data.concepts:
+                data.duplicate_concept_ids.append(sid)
             else:
-                signifier = elem.get("signifier", "")
-                signified = elem.get("signified", "")
-                data.senses[sid] = (signifier, signified)
-                data.concept_senses.setdefault(signified, []).append(sid)
-            elem.clear()
-
-        elif tag == "ConceptRelation":
-            data.concept_rels.append((
-                elem.get("source", ""),
-                elem.get("relation_type", ""),
-                elem.get("target", ""),
-            ))
-            elem.clear()
-
-        elif tag == "SenseRelation":
-            data.sense_rels.append((
-                elem.get("source", ""),
-                elem.get("relation_type", ""),
-                elem.get("target", ""),
-            ))
-            elem.clear()
-
-        elif tag == "Example":
-            ann = elem.find("AnnotatedSentence")
-            if ann is not None:
-                text = "".join(ann.itertext()).strip()[:80]
-                sense_ids = frozenset(
-                    child.get("sense") for child in ann if child.get("sense")
-                )
-                data.examples.append((text, sense_ids))
-            elem.clear()
-
+                data.concepts[sid] = pos_label(elem.get("partOfSpeech"))
+            if elem.find("Definition") is not None:
+                data.glossed.add(sid)
+            for rel in elem.iterchildren("SynsetRelation"):
+                data.concept_rels.append((sid, relation_type(rel), rel.get("target", "")))
+            for example in elem.iterchildren("Example"):
+                data.examples.append(((example.text or "").strip()[:80], frozenset()))
     return data
+
+
+parse_xml = parse_lmf
 
 
 # ---------------------------------------------------------------------------
@@ -357,11 +339,11 @@ def check_empty_entries(data: WordnetData) -> Issue | None:
         title="Word entries with no wordforms",
         total=len(empty),
         explanation=(
-            f"Cygnet skips any <Lexeme> that has no <Wordform> children, "
-            f"silently discarding {lost_senses} sense(s) that reference them."
+            f"Cygnet drops any <LexicalEntry> whose <Lemma> has no writtenForm, "
+            f"silently discarding {lost_senses} sense(s) under them."
         ),
         recommendation=(
-            "Add at least one <Wordform form=\"...\"/> to each <Lexeme>. "
+            "Give each <LexicalEntry> a <Lemma writtenForm=\"...\"/>. "
             "If the entry is intentionally empty, remove it and its <Sense> elements."
         ),
         items=empty[:MAX_EXAMPLES],
@@ -369,7 +351,7 @@ def check_empty_entries(data: WordnetData) -> Issue | None:
 
 
 def check_unglossed_concepts(data: WordnetData) -> Issue | None:
-    """Concepts declared in this file that have no <Gloss> in this file."""
+    """Synsets declared in this file that have no <Definition> in this file."""
     missing = sorted(cid for cid in data.concepts if cid not in data.glossed)
     if not missing:
         return None
@@ -390,12 +372,12 @@ def check_unglossed_concepts(data: WordnetData) -> Issue | None:
         total=len(missing),
         explanation=(
             "Cygnet requires every concept (synset) to have a definition. "
-            f"These {len(missing)} concept(s) have no <Gloss> in this file and will be "
+            f"These {len(missing)} synset(s) have no <Definition> in this file and will be "
             f"removed, taking {affected_senses} sense(s) with them."
         ),
         recommendation=(
-            "Add a <Gloss definiendum=\"CONCEPT_ID\" language=\"...\"> for each concept, "
-            "or remove the concept and its senses if it is genuinely unused."
+            "Add a <Definition> to each <Synset>, or remove the synset and its "
+            "senses if it is genuinely unused."
         ),
         items=items,
     )
@@ -454,7 +436,7 @@ def check_self_loops(data: WordnetData) -> Issue | None:
             "These concepts or senses have a relation pointing to themselves. "
             "Self-loops are meaningless and will be silently skipped by Cygnet."
         ),
-        recommendation="Remove any <ConceptRelation> or <SenseRelation> where source == target.",
+        recommendation="Remove any <SynsetRelation> or <SenseRelation> whose target is the element it sits in.",
         items=items,
     )
 
@@ -496,31 +478,6 @@ def check_internal_reversed_relations(data: WordnetData) -> Issue | None:
     )
 
 
-def check_dangling_senses(data: WordnetData) -> Issue | None:
-    """Senses whose signifier (entry ID) is not declared in this file."""
-    dangling = sorted(
-        f"{sid}: signifier '{eid}' not declared in this file"
-        for sid, (eid, _cid) in data.senses.items()
-        if eid and eid not in data.entries
-    )
-    if not dangling:
-        return None
-    return Issue(
-        severity="WARNING",
-        title="Senses referencing undeclared entries",
-        total=len(dangling),
-        explanation=(
-            "These senses reference a lexeme (word entry) ID that does not exist in this file. "
-            "Cygnet will silently skip any sense whose entry cannot be resolved."
-        ),
-        recommendation=(
-            "Ensure every <Sense signifier=\"...\"> value exactly matches the id= attribute "
-            "of a <Lexeme> in this file. Check for typos or stale IDs."
-        ),
-        items=dangling[:MAX_EXAMPLES],
-    )
-
-
 def check_unmatched_examples(data: WordnetData) -> Issue | None:
     """Example sentences whose sense annotations don't reference any sense in this file."""
     known_senses = set(data.senses.keys())
@@ -538,14 +495,15 @@ def check_unmatched_examples(data: WordnetData) -> Issue | None:
         title="Example sentences with no matching sense annotations",
         total=len(unmatched),
         explanation=(
-            "Cygnet only stores an example sentence if at least one <AnnotatedToken sense=\"...\"> "
-            "within it refers to a sense defined in this file. "
-            "These examples have no matching annotations and will be discarded."
+            "Cygnet stores an example under the sense it illustrates.  The cleaner "
+            "moves a synset-level <Example> under the <Sense> whose word it contains "
+            "(the word's position goes in note=\"offsets=start,end\"); these examples "
+            "are still under a <Synset> because no sense's word was found in them, "
+            "and the merge does not store them."
         ),
         recommendation=(
-            "Annotate the key word in each sentence with the correct sense ID, "
-            "for example: <AnnotatedToken sense=\"SENSE_ID\">word</AnnotatedToken>. "
-            "If the example cannot be linked to a specific sense, remove it."
+            "Put each <Example> under the <Sense> it illustrates, as WN-LMF 1.4 "
+            "allows.  If the example cannot be linked to a specific sense, remove it."
         ),
         items=unmatched[:MAX_EXAMPLES],
     )
@@ -634,7 +592,7 @@ def check_glossed_concepts_without_senses(data: WordnetData) -> Issue | None:
 # ---------------------------------------------------------------------------
 
 def load_json_log(xml_path: Path) -> dict:
-    """Load the per-file converter log (``{stem}_log.json``) alongside *xml_path*."""
+    """Load the per-file cleaner log (``{stem}_log.json``) alongside *xml_path*."""
     path = log_path(xml_path)
     if not path.exists():
         return {}
@@ -710,7 +668,7 @@ def _diversify(entries: list[dict], limit: int) -> list[dict]:
 
 
 def issues_from_json_log(log: dict, log_path: Path | None = None) -> list[Issue]:
-    """Turn converter-log entries into Issue objects."""
+    """Turn cleaner-log entries into Issue objects."""
     if not log:
         return []
 
@@ -885,7 +843,7 @@ def issues_from_json_log(log: dict, log_path: Path | None = None) -> list[Issue]
     if sense_miss:
         _add(Issue(
             severity="WARNING",
-            title="Senses with unresolvable synset (conversion time)",
+            title="Senses with unresolvable synset (cleaning time)",
             total=sense_miss,
             explanation=(
                 f"{sense_miss:,} sense(s) were dropped during conversion because "
@@ -899,7 +857,7 @@ def issues_from_json_log(log: dict, log_path: Path | None = None) -> list[Issue]
             items=[],
         ))
 
-    # Example sentences that couldn't be matched to a sense during conversion
+    # Example sentences that couldn't be matched to a sense during cleaning
     ex_stats = log.get("statistics", {}).get("examples", {})
     ex_skipped = ex_stats.get("skipped", 0)
     if ex_skipped:
@@ -915,17 +873,17 @@ def issues_from_json_log(log: dict, log_path: Path | None = None) -> list[Issue]
                 items.append(f'"{text}" (no senses/wordforms found for this concept)')
         _add(Issue(
             severity="WARNING",
-            title="Example sentences not matched to a sense (conversion time)",
+            title="Example sentences not matched to a sense (cleaning time)",
             total=ex_skipped,
             explanation=(
-                f"{ex_skipped:,} example sentence(s) were discarded during conversion. "
+                f"{ex_skipped:,} example sentence(s) could not be linked to a sense during cleaning. "
                 "Two failure modes are possible: (1) the concept had no senses so no "
                 "candidate wordforms could be identified — marked 'no senses/wordforms "
                 "found'; (2) the target word could not be matched in the sentence text "
                 "after morphological analysis. For mode (2), some mismatches are due to "
                 "limitations in our morphological analyser rather than errors in your "
                 "data — we apologise for the false positives. "
-                "These examples are absent from the pre-synthesised file."
+                "These examples stay under their <Synset> in the cleaned file and are not merged."
             ),
             recommendation=(
                 "For items marked 'no senses/wordforms found': check whether the concept "
@@ -1034,7 +992,6 @@ def run_checks(data: WordnetData) -> list[Issue]:
     _add(check_hypernym_cycles(data))
     _add(check_self_loops(data))
     _add(check_internal_reversed_relations(data))
-    _add(check_dangling_senses(data))
     _add(check_unmatched_examples(data))
     _add(check_non_standard_relations(data))
     issues.extend(check_duplicate_ids(data))
@@ -1110,7 +1067,7 @@ def collect_issues(path: Path) -> tuple[WordnetData, list[Issue], dict] | None:
     """Parse one pre-synth file and run every check against it.
 
     Returns None for the CILI file, which is an infrastructure resource
-    rather than a wordnet. The third element is the raw converter log dict
+    rather than a wordnet. The third element is the raw cleaner log dict
     (``{}`` if none exists) — some denominators for format_summary's %
     column need the original pre-dedup/pre-merge totals it records, which
     WordnetData (parsed from the post-processing pre-synth XML) can't
@@ -1123,7 +1080,7 @@ def collect_issues(path: Path) -> tuple[WordnetData, list[Issue], dict] | None:
     for issue in issues:
         issue.source_hint = path.name
 
-    # Augment with converter log (created at pre-synth time)
+    # Augment with the cleaner log (written at pre-synth time)
     json_log = load_json_log(path)
     log = log_path(path)
     issues.extend(issues_from_json_log(json_log, log if log.exists() else None))
@@ -1156,13 +1113,13 @@ _DENOMINATOR_KEY_FOR_TITLE = {
     "Defined concepts with no senses in this file": "concepts",
     "Word entries with no wordforms": "entries",
     "Senses referencing undeclared entries": "senses",
-    "Senses with unresolvable synset (conversion time)": "senses",
+    "Senses with unresolvable synset (cleaning time)": "senses",
     "POS mismatches: lexeme vs its concept": "senses",
     "Example sentences with no matching sense annotations": "examples",
-    "Example sentences not matched to a sense (conversion time)": "examples_found",
+    "Example sentences not matched to a sense (cleaning time)": "examples_found",
     # A cyclic SCC's node count is bounded by how many distinct concepts this
     # file's relations *reference* (mostly cili.* concepts it doesn't define
-    # locally), not by how many <Concept> elements it defines — len(concepts)
+    # locally), not by how many <Synset> elements it defines — len(concepts)
     # undercounts badly for wordnets that mostly link into existing CILI
     # concepts rather than creating new ones (e.g. odwn-nl).
     "Hypernym loops (cycles in the is-a hierarchy)": "relation_graph_nodes",
@@ -1171,10 +1128,10 @@ _DENOMINATOR_KEY_FOR_TITLE = {
     "Contradictory relation directions within this file": "relations",
     "Self-referential relations": "relations",
     "Non-standard relation types": "relations",
-    # These two are counted at conversion time over the full processed
+    # These two are counted at cleaning time over the full processed
     # population (CILI-mapped concepts / relations attempted before
     # dedup+skip), which the post-hoc pre-synth XML doesn't fully retain —
-    # only the converter log's own totals match the numerator's scope.
+    # only the cleaner log's own totals match the numerator's scope.
     "POS mismatches: synset vs CILI concept": "concepts_from_cili",
     "Concept relations already covered by another wordnet": "relations_attempted",
     "Relations with incompatible POS categories": "relations_attempted",
@@ -1189,7 +1146,7 @@ _DENOMINATOR_LABEL = {
     "examples_found": "examples found before conversion",
     "relation_graph_nodes": "concepts referenced by this file's relations",
     "concepts_from_cili": "concepts mapped to an existing CILI entry",
-    "relations_attempted": "concept relations attempted at conversion time",
+    "relations_attempted": "concept relations attempted at cleaning time",
 }
 
 
@@ -1199,7 +1156,7 @@ def _denominator_key(title: str) -> str | None:
         kind = title[len("Duplicate "):-len(" IDs")]
         return {"concept": "concepts", "entry": "entries", "sense": "senses"}.get(kind)
     # "Unrecognised part-of-speech code" has no denominator: it's counted once
-    # per raw pre-dedup Synset/LexicalEntry in the converter, but WordnetData's
+    # per raw pre-dedup Synset/LexicalEntry in the cleaner, but WordnetData's
     # concept/entry counts are post-dedup — the count can exceed both, so any
     # percentage against them would be misleading (occasionally over 100%).
     return _DENOMINATOR_KEY_FOR_TITLE.get(title)
@@ -1211,7 +1168,7 @@ def _relation_graph_node_count(data: WordnetData) -> int:
 
 
 def _denominator_value(key: str, data: WordnetData, issue_total: int, log: dict) -> int:
-    """The actual size for *key* on this wordnet's data (and converter log)."""
+    """The actual size for *key* on this wordnet's data (and cleaner log)."""
     if key == "concepts":
         return len(data.concepts)
     if key == "entries":
@@ -1393,7 +1350,7 @@ def format_summary(paths: list[Path], markdown: bool) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Report data-quality issues in a pre-synthesised Cygnet XML wordnet file.",
+        description="Report data-quality issues in a cleaned WN-LMF wordnet file (Step 2 output).",
     )
     parser.add_argument("files", nargs="*", type=Path, help="XML file(s) to check")
     parser.add_argument("--all", action="store_true",

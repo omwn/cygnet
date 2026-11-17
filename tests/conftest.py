@@ -11,6 +11,7 @@ from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 
 import pytest
+from cygnet_fixtures import cygnet_to_lmf
 
 from cyg.merge import MergeBuilder
 
@@ -27,9 +28,11 @@ _DEFAULT_DATABASES = {
 # ---------------------------------------------------------------------------
 
 def wn_xml(wn_id: str, body: str, language: str = 'en', version: str = '1.0') -> str:
-    """Wrap *body* XML in a CygnetResource root element."""
+    """A WN-LMF document for a fixture written in the Cygnet XML vocabulary
+    (see cygnet_fixtures.cygnet_to_lmf): *body* is wrapped in a
+    CygnetResource root and converted."""
     inner = textwrap.indent(textwrap.dedent(body).strip(), '  ')
-    return (
+    return cygnet_to_lmf(
         f"<?xml version='1.0' encoding='UTF-8'?>\n"
         f'<CygnetResource id="{wn_id}" label="Test {wn_id}"'
         f' language="{language}" version="{version}">\n'
@@ -141,6 +144,7 @@ def build_test_db(db_path: Path, prov_path: Path,
     b = MergeBuilder(db_path, prov_path)
     for f in xml_files:
         b.process_file(f)
+    b.resolve_pending_annotations()
 
     b.cur.execute("UPDATE languages SET name = 'English' WHERE code = 'en'")
     b.cur.execute("UPDATE languages SET name = 'French' WHERE code = 'fr'")
@@ -166,7 +170,12 @@ def build_test_db(db_path: Path, prov_path: Path,
             )
     b.conn.commit()
 
-    b.write_wordnet_summaries(db_path.parent / 'summaries')
+    # Where wn-en "came from", so the UI's download links can be tested.
+    sources = db_path.parent / 'sources.json'
+    sources.write_text(json.dumps({'wn-en': {
+        'file': 'wn-en-1.0.xml', 'url': 'https://example.org/releases/wn-en-1.0.tar.xz',
+        'extras': 'wn-en', 'requires': None}}))
+    b.write_wordnet_summaries(db_path.parent / 'summaries', sources_path=sources)
 
     build_version = '20260101000000'
     data_dir = db_path.parent / 'data'

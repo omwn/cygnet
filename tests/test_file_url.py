@@ -21,8 +21,7 @@ def stem(url: str) -> str:
         if name.endswith(ext):
             name = name[:-len(ext)]
             break
-    if name.endswith(".xml"):
-        name = name[:-4]
+    name = name.removesuffix(".xml")
     return re.sub(r"-\d[\d.]*$", "", name)
 
 
@@ -35,23 +34,6 @@ def stem(url: str) -> str:
 ])
 def test_stem_file_url(url, expected):
     assert stem(url) == expected
-
-
-# ---------------------------------------------------------------------------
-# English-base detection in 2_batch_convert_lmfs.py
-# ---------------------------------------------------------------------------
-
-def test_en_base_ids_includes_omw_en():
-    """omw-en is accepted as a valid English base alongside oewn."""
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "batch_convert",
-        Path(__file__).parent.parent / "conversion_scripts" / "2_batch_convert_lmfs.py",
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    assert "oewn" in mod._EN_BASE_IDS
-    assert "omw-en" in mod._EN_BASE_IDS
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +157,7 @@ def test_archive_skips_appledouble_files(work):
     result = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
 
     assert result.returncode == 0, result.stderr
-    names = sorted(p.name for p in (work / "bin" / "raw_wns").iterdir())
-    assert names == ["own-pt-1.0.xml"]
+    names = sorted(p.name for p in (work / "bin" / "raw_wns").iterdir() if p.is_file())
+    assert names == ["own-pt-1.0.xml"]   # the extras/ directory holds no ._ files either
+    assert not any((work / "bin" / "raw_wns" / "extras" / "own-pt").iterdir())
     assert listing.read_text() == "own-pt-1.0.xml\n"

@@ -9,9 +9,8 @@ Usage:
 
 import re
 import sqlite3
-from pathlib import Path
-
 import tomllib
+from pathlib import Path
 
 import wn
 
@@ -37,8 +36,7 @@ def url_to_wn_id(url: str) -> str:
         if name.endswith(ext):
             name = name[: -len(ext)]
             break
-    if name.endswith(".xml"):
-        name = name[:-4]
+    name = name.removesuffix(".xml")
 
     # Try version embedded in filename: "omw-bg-2.0" → base="omw-bg", ver="2.0"
     m = re.match(r"^(.+?)[-_](\d[\d.]*)$", name)

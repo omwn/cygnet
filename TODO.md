@@ -9,7 +9,12 @@ senses.  Those cleaned files are then merged.  The public products
 (`cygnet.db.gz`, `provenance.db.gz`, the per-resource provenance splits)
 and the web UI read only SQLite, so neither changes.
 
-Status (2026-11-09): planned, not started.  Supersedes the 2026-10-11
+Status (2026-11-10): steps 1–7 done on the `lmf-intermediate` branch;
+`build.sh` runs the WN-LMF path only, the converter and `cygnet.xsd` are
+gone; a /simplify round followed (shared LMF helpers in `cyg/lmf.py`,
+one-pass export of both variants, dead Cygnet-format readers removed).
+The full-corpus comparison that preceded
+the switch is in "Behaviour changes" below.  Supersedes the 2026-10-11
 plan.  Decisions taken on 2026-11-09:
 
 - The intermediate is one cleaned LMF file per source lexicon, useful on
@@ -222,7 +227,8 @@ Merge trusts the cleaned files and keeps only the cross-wordnet work:
 - Relations: inverses generated, cross-file dedup by (source, target,
   type), reversed-relation conflicts recorded in `conflicts.json`,
   cycle detection on the union graph.
-- `lexicalized="false"` synsets and senses skipped.
+- `lexicalized="false"` senses skipped in a mul release (gap markers);
+  elsewhere kept, as the converter kept them (COW).
 - `dc:type` → `subtype`, and `dc:description`/`dc:relation` →
   `subtype_label`, exactly as `_relation_subtype()` reads them today;
   `web/relations.json` is only the display lookup.
@@ -271,45 +277,105 @@ file name alone, so during the transition the cleaner writes to
 `bin/lmf_presynth/`; when the old path is deleted the directory takes the
 old name and the log gains `format: "wn-lmf-1.4"`.
 
-1. **Prep, needed regardless.**  Fix the stale relation filter in
-   `conversion_scripts/7_validate_and_export.py:20-30` (`class_hypernym`,
-   `member_meronym`, … while the DB uses `hypernym`, `mero_member`, …).
-   Move the shared tables and helpers (`CONFIDENCE_THRESHOLD`,
-   `below_confidence_threshold()`, `load_direction_swap_config()`, the
-   relation-type dicts, `fix_language`) into a small `cyg/lmf.py` both
-   sides import.
-2. **Merge reads LMF.**  Add `MergeBuilder.process_lmf_file()` beside
-   `process_file()`, dispatching on the root tag.  Iterparse over
-   Lexicon → Synset / LexicalEntry / Sense / Definition / Example /
-   SynsetRelation / SenseRelation; the `note` parser; the `lexicalized`
-   skip; `dc:type` lookup.  Decide here whether per-file cycle removal
-   stays in merge or moves to the cleaner.  `6_synthesise.py` accepts a
-   mixed directory.  Test by merging a raw pass-through source (omw-sk)
-   directly and comparing with its converted output.
-3. **Cleaner.**  `cyg/clean.py` with the seven passes above, lifting the
-   converter's existing logic pass by pass; `2_batch_convert_lmfs.py`
-   calls it, writing to `bin/lmf_presynth/`; the `mul` planning shrinks
-   to "clean the concepts lexicon first".  `scripts/report.py` and
-   `scripts/log_summary.py` move with it.  Freeze the baseline, then:
+1. **Prep, needed regardless.**  *Done.*  `cyg/lmf.py` holds the
+   relation-type tables (plus `inverse_only_types()`, `symmetric_types()`
+   and `is_forward_relation()`, the one-direction rule every writer
+   uses), `CONFIDENCE_THRESHOLD` / `below_confidence_threshold()`,
+   `load_direction_swap_config()` and re-exports `fix_language`;
+   `cyg/converters.py` and `cyg/merge.py` import from it.
+   `7_validate_and_export.py` now writes every relation type the DB
+   holds except inverse-only ones (its filter listed `class_hypernym`,
+   `member_meronym`, … and so dropped nearly everything), tolerates
+   provenance rows without an original id, and `cyg/cygnet.xsd` no
+   longer enumerates relation types.  `tests/test_lmf.py`,
+   `tests/test_export.py`.
+2. **Merge reads LMF.**  *Done.*  `process_file()` dispatches on the
+   root tag to `process_lmf_file()`: a first pass indexes the Synsets and
+   creates the concepts (senses precede their synsets in LMF), a second
+   streams entries and synsets, and sense relations are resolved at the
+   end of the file.  The Cygnet handlers were split into `_do_*` parsers
+   and `_add_*` workers that both paths share, so the two formats cannot
+   drift.  Reading helpers (`pos_label`, `entry_written_forms`,
+   `lexeme_id`, `relation_type`, `relation_subtype`, `parse_note`,
+   `note_offsets`) live in `cyg/lmf.py` for the cleaner to reuse.
+   Decisions: per-file cycle removal stays in merge (the LMF path feeds
+   the same hypernym tracker); a `lexicalized="false"` Sense is skipped
+   only inside a mul release, where it marks a lexical gap -- COW flags
+   19K ordinary adjective senses that way and the converter kept them;
+   a Synset whose concept already exists adds no synset provenance (as
+   today, so CILI-linked synsets keep only their creator's row -- adding
+   one per file would give every wordnet deep links by synset id at the
+   cost of ~1.5M provenance rows; revisit); a same-file duplicate entry
+   is merged into the first (`_flush_forms()` before the lookup); a
+   relation written as its inverse-only type (`hyponym`, `is_caused_by`,
+   `holo_part`) is stored the forward way round (`canonical_relation()`),
+   where the old merge took such a type for unknown and made it
+   symmetric.
+   Fixture `tests/wordnets/lmf-xx.xml`, tests `tests/test_lmf_merge.py`;
+   omw-sk merged raw and converted gives identical tables; norwegian-nb
+   (450K relations), with its 80 repeated ILIs cleared as the cleaner
+   will do in step 3, differs only by the 280 relations the converter
+   dropped as already in OEWN, which are now kept by decision.
+3. **Cleaner.**  *Done.*  `cyg/clean.py` (`LmfCleaner`) does the
+   seven passes in two streaming passes plus the linking stage; the
+   matcher moved to `cyg/linker.py` (`ExampleLinker`), shared with the
+   converter until step 5.  `2_batch_convert_lmfs.py --format lmf` runs
+   it into `bin/lmf_presynth/` (`build.sh --lmf`), with the mul
+   planning supplying `CleanOptions(shared, language, requires)`; a
+   member lexicon gets `<Requires ref="<concepts lexicon>"/>` and merge
+   keys the concepts of such a release by `dc:identifier`
+   (`<concepts lexicon>.<identifier>`).  Extra passes found necessary:
+   an entry left without senses is dropped (wn W201), an
+   `ILIDefinition` on a synset with an ILI is dropped (W304), and an
+   existing `offsets` note is kept (so cleaning the output again is a
+   no-op).  First corpus run: omw-sk passes through byte for byte;
+   estwn 12 s, norwegian-nb 21 s, oewn 25 s (49,391 of 49,724 synset
+   examples moved to senses), plwn 282 s at 1.8 GB peak, all loading in
+   `wn` with no E-codes.  `scripts/report.py` parses either format and
+   `scripts/log_summary.py` reads the new logs.  Sidecars: merge reads
+   `cili.tsv` directly (`cyg/cili.py`), with `cili_glosstag.json`
+   annotations resolved against OEWN's senses after the merge
+   (`resolve_pending_annotations()`; the old path dropped them, which is
+   why the DB never had definition annotations); Step 5 writes `mtg.tsv`
+   via `cyg/mtg.py`, which shares `lmf_concept_index()` with the merge.
+   Not yet done from the list below: deleting `1_extract_cili.py` (the
+   old path still needs its XML) and `4_add_glosstag_to_cili.py` writing
+   the JSON sidecar.  Originally planned as:
    merge reads `cili.tsv`, delete `1_extract_cili.py`;
    `4_add_glosstag_to_cili.py` writes `cili_glosstag.json`;
    `5_translate_defns.py` writes `mtg.tsv`; update `release.yml`,
    `scripts/upload_translations.sh`, `build.sh` (Steps 1, 3–5 and the
    `--translate-only` message), `test_translate_defns.py`.  Rebuild,
    compare DBs.
-4. **Export.**  `7_validate_and_export.py` emits WN-LMF 1.4 from the DB.
-   A merged lexeme belongs to several resources, so the export is one
-   Lexicon per language (`cygnet-{lang}`), synsets with `@ili`,
-   examples under their Sense with `note="offsets=…"` (an example linked
-   to several senses is repeated under each), forward relations only.
-   The provenance variant puts contributing sources in `dc:source` as
-   space-separated `resource:version:original_id` tokens; the small
-   variant omits it.  Validate with the DTD via `xmlstarlet`.
-5. **Delete** `cyg/cygnet.xsd`, `WordNetToCygnetConverter`,
-   `process_file()` and the Cygnet-tag `_do_*` handlers,
-   `parse_annotated_sentence()`, `build_annotated_sentence()`; rename
-   the output directory.
-6. **Tests.**  Rewrite fixtures that build Cygnet XML: `conftest.py`,
+4. **Export.**  *Done.*  `cyg/export.py` (`LmfExporter`) writes the DB
+   as a multi-lexicon WN-LMF release of the kind Cygnet itself merges: a
+   concepts lexicon `cygnet` (language `mul`; every concept once, with
+   its definitions in every language and its forward relations, keyed by
+   `ili` or `dc:identifier="cyg:<rowid>"`) and one lexicon `cygnet-{lang}`
+   per language that `Requires` it (entries, senses with their examples
+   and `note="offsets=…"`, and a Synset per concept the language
+   lexicalises with that language's definitions).  A type outside the
+   DTD's list is `relType="other"` + `dc:type`.  The provenance variant
+   carries `dc:source` tokens `resource:version:original_id`.
+   `7_validate_and_export.py` validates both files against the vendored
+   `cyg/WN-LMF-1.4.dtd` (a copy with a local DOCTYPE under `xmlstarlet`,
+   lxml otherwise); the test suite also `wn.add()`s the export.
+5. **Delete.**  *Done.*  `cyg/cygnet.xsd`, `cyg/converters.py`,
+   `1_extract_cili.py`, the Cygnet-tag merge handlers and the annotated
+   sentence helpers are gone; `2_batch_convert_lmfs.py` cleans into
+   `bin/cygnets_presynth/`, `build.sh` links `bin/cili.tsv` there and
+   `5_translate_defns.py` writes `mtg.tsv`; `4_add_glosstag_to_cili.py`
+   writes `cili_glosstag.json`.  The MT-gloss release asset is
+   `translated_glosses.jsonl` as before, only the file the release
+   workflow restores changed name.
+6. **Tests.**  *Done, by translation.*  The inline fixtures keep the
+   compact Cygnet vocabulary and `tests/cygnet_fixtures.py` turns it
+   into WN-LMF (`wn_xml()` in `conftest.py` returns LMF); the three
+   fixture files in `tests/wordnets/` were converted once and committed
+   as LMF.  Converter-only tests went with the converter; what they
+   covered (confidence, repeated ILIs, entity unescaping, definition
+   languages, direction swaps) is tested on the cleaner.  Originally
+   planned as: rewrite fixtures that build Cygnet XML: `conftest.py`,
    `test_pipeline.py`, `test_report.py`, `test_merge_utils.py`,
    `test_conflict_detection.py`, `test_direction_swap_fix.py`,
    `test_multilex.py`, `test_repeated_ili.py`,
@@ -340,17 +406,34 @@ emitter and the Cygnet-side readers go.  Suite today: 615 tests.
 
 ### Behaviour changes to expect in the DB
 
-- Sense-level examples whose lemma was not found are now kept; example
-  counts rise for estwn, the `tufs-*` lexicons and others with
-  sense-level examples.
-- Relations present in both OEWN and another wordnet now get a
-  provenance row for each (today only OEWN's); relation counts are
-  unchanged because merge dedups by key.
-- Versions shown in the Wordnets tab carry `.🦢` for cleaned sources.
+Measured on 2026-11-09 against the converter-path build of the same
+sources (`build.sh --lmf` vs. default; 814 of 1,249 compared measures
+identical, every difference below accounted for):
+
+- Sense-level examples whose lemma was not found are now kept: examples
+  427,658 → 488,288 (tufs-ar 1,400 → 12,340, plwn 201,549 → 230,170,
+  estwn 7,271 → 11,146, galnet, wordnet_lv ...).
+- English definitions now add provenance to CILI's (oewn 3,217 →
+  120,569 definition provenance rows); a non-English definition that
+  copies OEWN's *modern* English gloss is now caught as a copy, where
+  before only PWN 3.0's text was known: definitions 1,102,633 →
+  1,102,268 (fi −138, la −147, nl −39, ckb −13 ...), all English text
+  under a non-English label.
+- Each Lexicon of a multi-lexicon file is its own resource (cantown-en
+  appears beside cantown-yue); mul members get their own definitions.
+- Entries whose written forms differ only in NFC or whitespace now
+  merge: entries 2,357,998 → 2,357,211, senses 3,712,379 → 3,711,615
+  (copwn −137, UzWordnet-uz −17 ...).
+- Definition annotations from GlossTag now land (0 before).
+- Relations present in both OEWN and another wordnet get a provenance
+  row for each; relation counts are unchanged because merge dedups by
+  key (synset_relations 1,285,953 → 1,285,682 after cycle removal moved
+  slightly).
+- Versions shown in the Wordnets tab carry `.🦢` for cleaned sources
+  (198 of 204 files change, 118 of them only by the `Requires` element
+  a mul member gains).
 - Machine-translated glosses of local (non-ILI) concepts disappear
   until the next translation run, because their sidecar keys change.
-- Nothing else should change; any other diff in the step-2/3
-  comparisons is a bug.
 
 ### Possible upstream proposals for WN-LMF 1.5
 

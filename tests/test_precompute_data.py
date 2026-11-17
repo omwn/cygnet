@@ -15,7 +15,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from conftest import wn_xml
 
 # Two concepts: "dog" (hyponym) under "animal" (hypernym), one resource,

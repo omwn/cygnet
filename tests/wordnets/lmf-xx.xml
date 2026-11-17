@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE LexicalResource SYSTEM "https://globalwordnet.github.io/schemas/WN-LMF-1.4.dtd">
+<!--
+  Test WN-LMF wordnet, merged after wn-en.xml by tests/test_lmf_merge.py.
+  Language 'xx' (a test code), words loosely Finnish.
+
+  Synsets: xx-dog (i3, shared with wn-en), xx-cat (i10, a new ILI),
+  xx-animal (i2), xx-ghost (no ILI: a local concept), xx-gap (a lexical
+  gap, lexicalized="false", no senses).  xx-dog carries an English
+  definition identical to wn-en's, which the merge drops as a copy.
+
+  Entries: koira (lemma + inflected form + pronunciation), kissa, eläin,
+  aave, a second 'koira' entry absorbed into the first, 'gap' whose only
+  sense is lexicalized="false", and 'orpo' whose sense points at a synset
+  that does not exist.
+-->
+<LexicalResource xmlns:dc="https://globalwordnet.github.io/schemas/dc/">
+  <Lexicon id="lmf-xx" label="Test LMF WordNet" language="xx" email="x@example.org"
+           license="https://creativecommons.org/licenses/by/4.0/" version="1.0"
+           url="https://example.org/lmf-xx" citation="Bond, F. 2026. A test LMF wordnet.">
+    <LexicalEntry id="xx-koira-n">
+      <Lemma writtenForm="koira" partOfSpeech="n">
+        <Pronunciation variety="xx">ˈkoi̯rɑ</Pronunciation>
+      </Lemma>
+      <Form writtenForm="koirat"/>
+      <Sense id="xx-koira-n-1" synset="xx-dog">
+        <SenseRelation relType="antonym" target="xx-kissa-n-1"/>
+        <Example note="offsets=0,5">Koira haukkuu.</Example>
+        <Example>Se on eläin.</Example>
+        <Example note="R=1;offsets=4,9">Iso koira juoksee.</Example>
+      </Sense>
+    </LexicalEntry>
+    <LexicalEntry id="xx-kissa-n">
+      <Lemma writtenForm="kissa" partOfSpeech="n"/>
+      <Sense id="xx-kissa-n-1" synset="xx-cat">
+        <SenseRelation relType="derivation" target="xx-koira-n-1"/>
+      </Sense>
+    </LexicalEntry>
+    <LexicalEntry id="xx-eläin-n">
+      <Lemma writtenForm="eläin" partOfSpeech="n"/>
+      <Sense id="xx-eläin-n-1" synset="xx-animal"/>
+    </LexicalEntry>
+    <LexicalEntry id="xx-aave-n">
+      <Lemma writtenForm="aave" partOfSpeech="n"/>
+      <Sense id="xx-aave-n-1" synset="xx-ghost"/>
+    </LexicalEntry>
+    <LexicalEntry id="xx-koira-n-dup" note="merged=xx-koira-n-old">
+      <Lemma writtenForm="koira" partOfSpeech="n"/>
+      <Form writtenForm="koirat"/>
+      <Sense id="xx-koira-n-dup-1" synset="xx-dog"/>
+    </LexicalEntry>
+    <LexicalEntry id="xx-gap-n">
+      <Lemma writtenForm="gap" partOfSpeech="n"/>
+      <Sense id="xx-gap-n-1" synset="xx-animal" lexicalized="false"/>
+    </LexicalEntry>
+    <LexicalEntry id="xx-orpo-n">
+      <Lemma writtenForm="orpo" partOfSpeech="n"/>
+      <Sense id="xx-orpo-n-1" synset="xx-nowhere"/>
+    </LexicalEntry>
+    <Synset id="xx-dog" ili="i3" partOfSpeech="n">
+      <Definition>kotieläin, joka haukkuu</Definition>
+      <Definition language="en">a domesticated carnivorous animal (Canis lupus familiaris), the most widely kept companion animal</Definition>
+      <SynsetRelation relType="hypernym" target="xx-animal"/>
+      <SynsetRelation relType="other" dc:type="https://example.org/schema/pet" target="xx-ghost"/>
+      <SynsetRelation relType="hypernym" target="xx-nowhere"/>
+      <Example>Tämä esimerkki jää synsetille.</Example>
+    </Synset>
+    <Synset id="xx-cat" ili="i10" partOfSpeech="n">
+      <Definition>kehrää</Definition>
+      <SynsetRelation relType="hypernym" target="xx-animal"/>
+      <SynsetRelation relType="diminutive" dc:type="xx:56" dc:description="pikku" target="xx-ghost"/>
+      <SynsetRelation relType="holo_part" target="xx-animal"/>
+    </Synset>
+    <Synset id="xx-animal" ili="i2" partOfSpeech="n">
+      <Definition>elävä olento</Definition>
+      <SynsetRelation relType="hyponym" target="xx-dog"/>
+    </Synset>
+    <Synset id="xx-ghost" ili="" partOfSpeech="n">
+      <Definition>paikallinen käsite</Definition>
+    </Synset>
+    <Synset id="xx-gap" ili="i5" partOfSpeech="n" lexicalized="false">
+      <Definition>aukko sanastossa</Definition>
+    </Synset>
+  </Lexicon>
+</LexicalResource>

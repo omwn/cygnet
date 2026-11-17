@@ -1,24 +1,22 @@
 #!/usr/bin/env python3
 """
-Stream all pre-synthesised Cygnet XML files directly into SQLite.
+Stream the cleaned WN-LMF files and TSV sidecars directly into SQLite.
 
 Each source file is parsed, merged into the databases, and freed before
 the next is loaded — so peak memory is one file at a time plus the
 ID-mapping dictionaries (~300 MB), not the entire merged dataset.
 """
 
+import argparse
 import logging
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
-from lxml import etree
-
-from cyg.converters import DIRECTION_SWAP_CONFIG_FILENAME
+from cyg.lmf import DIRECTION_SWAP_CONFIG_FILENAME
 from cyg.merge import LOW_TRUST_RESOURCES, MergeBuilder
-from cyg.presynth import MANIFEST_NAME, read_manifest, stem_resource
-
-
+from cyg.multilex import read_lexicon_header
+from cyg.presynth import MANIFEST_NAME, SOURCES_NAME, read_manifest, stem_resource
 
 
 def select_files(input_dir: Path) -> list[Path]:
@@ -34,7 +32,7 @@ def select_files(input_dir: Path) -> list[Path]:
     Returns:
         Files to merge, sorted by name
     """
-    all_files = sorted(input_dir.glob('*.xml'))
+    all_files = sorted(list(input_dir.glob('*.xml')) + list(input_dir.glob('*.tsv')))
     manifest = read_manifest(input_dir)
     if manifest is None:
         print(f'  Warning: no {MANIFEST_NAME}; merging every file in {input_dir}')
@@ -56,14 +54,10 @@ def select_files(input_dir: Path) -> list[Path]:
 
 
 def is_concepts_lexicon(path: Path) -> bool:
-    """True if a pre-synth file is a 'mul' concepts lexicon.
-
-    Its member lexicons' senses point at its concepts, and _do_sense() drops
-    a sense whose concept is not registered yet, so it must be merged first.
-    """
-    for _event, elem in etree.iterparse(str(path), events=('start',)):
-        return elem.get('language') == 'mul'
-    return False
+    """True if a pre-synth file is a 'mul' concepts lexicon, merged before
+    its members so that their concepts carry its definitions and
+    provenance."""
+    return path.suffix == '.xml' and read_lexicon_header(path).language == 'mul'
 
 
 def low_trust_rank(path: Path) -> int | None:
@@ -91,7 +85,7 @@ def merge_order(all_files: list[Path]) -> list[Path]:
         if 'oewn' in f.stem:
             return (1, 0)
         # Machine-translated glosses (mtg) reference definiendum concepts from
-        # every other resource — _do_gloss() silently drops a Gloss if its
+        # every other resource — _add_gloss() silently drops a Gloss if its
         # concept isn't registered yet, so mtg must be processed last.
         if 'mtg' in f.stem:
             return (5, 0)
@@ -107,6 +101,12 @@ def merge_order(all_files: list[Path]) -> list[Path]:
 
 def main() -> None:
     sys.stdout.reconfigure(line_buffering=True)
+    parser = argparse.ArgumentParser(description='Merge the pre-synth files into the databases.')
+    parser.add_argument('--input-dir', type=Path, default=Path('bin/cygnets_presynth'),
+                        help='pre-synth directory: WN-LMF files and TSV sidecars')
+    parser.add_argument('--web-dir', type=Path, default=Path('web'),
+                        help='where cygnet.db, provenance.db, summaries/ and data/ go')
+    args = parser.parse_args()
 
     conflicts_path = Path('bin/relation_conflicts.json')
     logging.basicConfig(
@@ -115,9 +115,9 @@ def main() -> None:
         handlers=[logging.StreamHandler()],
     )
 
-    input_dir = Path('bin/cygnets_presynth')
-    db_path = Path('web/cygnet.db')
-    prov_db_path = Path('web/provenance.db')
+    input_dir = args.input_dir
+    db_path = args.web_dir / 'cygnet.db'
+    prov_db_path = args.web_dir / 'provenance.db'
 
     db_path.parent.mkdir(exist_ok=True)
 
@@ -165,6 +165,10 @@ def main() -> None:
     builder.create_indexes()
 
     # The per-file check above should leave no cycles; this is a release gate.
+    n_ann = builder.resolve_pending_annotations()
+    if n_ann:
+        print(f'  {n_ann:,} definition annotation(s) resolved against the English base')
+
     print('\nPhase 1b: Checking that no cycles remain...')
     n_cycles = builder.detect_cycles()
     if n_cycles:
@@ -205,7 +209,8 @@ def main() -> None:
     print('\nPhase 8: Writing per-wordnet summaries...')
     summaries_dir = db_path.parent / 'summaries'
     direction_swaps_path = input_dir / DIRECTION_SWAP_CONFIG_FILENAME
-    n_summaries = builder.write_wordnet_summaries(summaries_dir, direction_swaps_path)
+    n_summaries = builder.write_wordnet_summaries(summaries_dir, direction_swaps_path,
+                                                  input_dir / SOURCES_NAME)
     print(f'  {n_summaries:,} summary file(s) written to {summaries_dir}')
 
     # One build version for everything this run produces -- generated here
@@ -214,7 +219,7 @@ def main() -> None:
     # into manifest.json by write_manifest(), below; the browser compares
     # the two to validate a cached database without depending on HTTP
     # headers (which may not even be readable cross-origin).
-    build_version = datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')
+    build_version = datetime.now(UTC).strftime('%Y%m%d%H%M%S')
     data_dir = db_path.parent / 'data'
 
     print('\nPhase 9: Writing search index...')

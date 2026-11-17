@@ -1,15 +1,14 @@
-"""Tests for example-sentence matching in WordNetToCygnetConverter.
+"""Tests for example-sentence matching in cyg.linker.ExampleLinker.
 
 Covers _get_all_forms and _find_best_match across English and the
 morphologically rich languages where tok2vec was previously disabled.
 """
 
-from collections import OrderedDict
 
 import pytest
 import spacy
 
-from cyg.converters import WordNetToCygnetConverter, _spacy_candidates
+from cyg.linker import ExampleLinker, _spacy_candidates
 
 _INSTALLED = set(spacy.util.get_installed_models())
 
@@ -23,24 +22,18 @@ def _lang_model_installed(lang: str) -> bool:
 # Helpers — build a minimal converter with NLP tools initialised
 # ---------------------------------------------------------------------------
 
-def _make_converter(lang: str) -> WordNetToCygnetConverter:
-    """Return a converter with NLP tools loaded for *lang*, no DB needed."""
-    conv = object.__new__(WordNetToCygnetConverter)
-    conv.lexicon_language = lang
-    conv.doc_cache = OrderedDict()
-    conv.prefetched_docs = {}
-    conv.form_cache = {}
-    conv.nltk_cache = {}
-    conv.nltk_lemmatizer = None
+def _make_linker(lang: str) -> ExampleLinker:
+    """Return a linker with NLP tools loaded for *lang*, no DB needed."""
+    linker = ExampleLinker(lang)
     try:
         import nltk
         from nltk.stem import WordNetLemmatizer
         nltk.data.find('corpora/wordnet')
-        conv.nltk_lemmatizer = WordNetLemmatizer()
+        linker.nltk_lemmatizer = WordNetLemmatizer()
     except (ImportError, LookupError):
         pass
-    conv.nlp = conv._load_spacy_model(_spacy_candidates(lang), disable=["parser", "ner"])
-    return conv
+    linker.nlp = linker._load_spacy_model(_spacy_candidates(lang), disable=["parser", "ner"])
+    return linker
 
 
 # ---------------------------------------------------------------------------
@@ -50,22 +43,22 @@ def _make_converter(lang: str) -> WordNetToCygnetConverter:
 class TestEnglishMatching:
     @pytest.fixture(scope="class")
     def conv(self):
-        return _make_converter('en')
+        return _make_linker('en')
 
     def test_plural_noun(self, conv):
-        sid, _ = conv._find_best_match("The dogs barked.", [("s1", "dog")])
+        sid, _ = conv.find_best_match("The dogs barked.", [("s1", "dog")])
         assert sid == "s1"
 
     def test_past_tense_verb(self, conv):
-        sid, _ = conv._find_best_match("She ran quickly.", [("s1", "run")])
+        sid, _ = conv.find_best_match("She ran quickly.", [("s1", "run")])
         assert sid == "s1"
 
     def test_gerund(self, conv):
-        sid, _ = conv._find_best_match("He is running.", [("s1", "run")])
+        sid, _ = conv.find_best_match("He is running.", [("s1", "run")])
         assert sid == "s1"
 
     def test_no_match(self, conv):
-        assert conv._find_best_match("The cat sat.", [("s1", "dog")]) == (None, None)
+        assert conv.find_best_match("The cat sat.", [("s1", "dog")]) == (None, None)
 
 
 # ---------------------------------------------------------------------------
@@ -78,25 +71,25 @@ class TestRussianMatching:
         pytest.importorskip("spacy")
         if not _lang_model_installed("ru"):
             pytest.skip("ru spaCy model not installed")
-        return _make_converter('ru')
+        return _make_linker('ru')
 
     def test_genitive_month(self, conv):
         """'январь' should match genitive 'января'."""
-        sid, form = conv._find_best_match(
+        sid, form = conv.find_best_match(
             "Сегодня двадцать третье января.", [("s1", "январь")]
         )
         assert sid == "s1"
 
     def test_neuter_adjective(self, conv):
         """'большой' should match neuter 'большое'."""
-        sid, form = conv._find_best_match(
+        sid, form = conv.find_best_match(
             "В её комнате большое зеркало.", [("s1", "большой")]
         )
         assert sid == "s1"
 
     def test_plural_noun(self, conv):
         """'девочка' should match plural nominative 'Девочки'."""
-        sid, form = conv._find_best_match(
+        sid, form = conv.find_best_match(
             "Девочки любят конфеты.", [("s1", "девочка")]
         )
         assert sid == "s1"
@@ -112,11 +105,11 @@ class TestSlovenianMatching:
         pytest.importorskip("spacy")
         if not _lang_model_installed("sl"):
             pytest.skip("sl spaCy model not installed")
-        return _make_converter('sl')
+        return _make_linker('sl')
 
     def test_locative_plural(self, conv):
         """'življenje' should match locative plural 'življenjih'."""
-        sid, form = conv._find_best_match(
+        sid, form = conv.find_best_match(
             "Vojne terjajo velikansko ceno v človeških življenjih.",
             [("s1", "življenje")],
         )
@@ -133,18 +126,18 @@ class TestPortugueseMatching:
         pytest.importorskip("spacy")
         if not _lang_model_installed("pt"):
             pytest.skip("pt spaCy model not installed")
-        return _make_converter('pt')
+        return _make_linker('pt')
 
     def test_gerund(self, conv):
         """'respirar' should match gerund 'respirando'."""
-        sid, form = conv._find_best_match(
+        sid, form = conv.find_best_match(
             "O paciente está respirando.", [("s1", "respirar")]
         )
         assert sid == "s1"
 
     def test_feminine_plural_adjective(self, conv):
         """'último' should match feminine plural 'últimas'."""
-        sid, form = conv._find_best_match(
+        sid, form = conv.find_best_match(
             "As suas últimas palavras.", [("s1", "último")]
         )
         assert sid == "s1"
@@ -160,18 +153,18 @@ class TestKoreanMatching:
         pytest.importorskip("spacy")
         if not _lang_model_installed("ko"):
             pytest.skip("ko spaCy model not installed")
-        return _make_converter('ko')
+        return _make_linker('ko')
 
     def test_adnominal_adjective(self, conv):
         """'크다' (big) should match adnominal form '큰' via shared stem '크'."""
-        sid, form = conv._find_best_match(
+        sid, form = conv.find_best_match(
             "서울에서 제일 큰 서점이 어디에요?", [("s1", "크다")]
         )
         assert sid == "s1"
 
     def test_verb_sells(self, conv):
         """'팔다' (to sell) should match conjugated '파는'."""
-        sid, form = conv._find_best_match(
+        sid, form = conv.find_best_match(
             "그 백화점에서 파는 음식은 다 신선해요.", [("s1", "팔다")]
         )
         assert sid == "s1"
@@ -184,7 +177,7 @@ class TestKoreanMatching:
 class TestPrefetchDocs:
     @pytest.fixture(scope="class")
     def conv(self):
-        return _make_converter('en')
+        return _make_linker('en')
 
     @pytest.mark.parametrize("text,candidates", [
         # Substring match inside a longer token: needs the lowercased doc.
@@ -196,7 +189,7 @@ class TestPrefetchDocs:
     def test_no_parsing_after_prefetch(self, conv, text, candidates):
         conv.doc_cache.clear()
         conv.form_cache.clear()
-        conv._prefetch_docs([(text, candidates)])
+        conv.prefetch_docs([(text, candidates)])
         nlp = conv.nlp
 
         def fail(text):
@@ -204,42 +197,9 @@ class TestPrefetchDocs:
 
         conv.nlp = fail
         try:
-            _sense, form = conv._find_best_match(text, candidates)
+            _sense, form = conv.find_best_match(text, candidates)
             start = text.lower().find(form.lower())
-            conv._expand_to_token_boundaries(text.lower(), start, start + len(form))
+            conv.expand_to_token_boundaries(text.lower(), start, start + len(form))
         finally:
             conv.nlp = nlp
             conv.prefetched_docs = {}
-
-
-# ---------------------------------------------------------------------------
-# Examples whose sense was not converted
-# ---------------------------------------------------------------------------
-
-class TestExampleOfUnconvertedSense:
-    """A sense example whose sense was dropped (below the confidence
-    threshold, say) is counted as skipped, not a crash: estwn-et-2.7.0
-    failed to convert at all on a KeyError here (2026-11-09)."""
-
-    def _bare_converter(self):
-        conv = object.__new__(WordNetToCygnetConverter)
-        conv.old_sense_to_new_sense = {'kept': 'sense.1'}
-        conv.sense_lookup = {'sense.1': 'lex.1'}
-        conv.concept_to_senses = {}
-        conv.log = {'statistics': {'examples': {
-            'skipped': 0, 'processed': 0, 'failed_matches': []}}}
-        return conv
-
-    def test_dropped_sense_counts_as_skipped(self):
-        conv = self._bare_converter()
-        conv._process_single_example('Mingi lause.', 'ex-1', is_synset_example=False,
-                                     old_sense_id='dropped')
-        assert conv.log['statistics']['examples']['skipped'] == 1
-        assert conv.log['statistics']['examples']['failed_matches'] == []
-
-    def test_sense_without_lexeme_counts_as_skipped(self):
-        conv = self._bare_converter()
-        conv.sense_lookup = {}
-        conv._process_single_example('Mingi lause.', 'ex-1', is_synset_example=False,
-                                     old_sense_id='kept')
-        assert conv.log['statistics']['examples']['skipped'] == 1
