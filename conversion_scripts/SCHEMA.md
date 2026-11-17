@@ -594,7 +594,9 @@ as `<id>-<version>.tar.gz`: the file, its `_log.json`, and the
 by the download step in `bin/raw_wns/extras/<url stem>/`); a release
 without a `citation.bib` gets one made from the Lexicon header, and a
 member of a multi-lexicon release also carries the concepts lexicon it
-Requires.  The release workflow attaches them to the GitHub release, and
+Requires.  An archive whose wordnet is no longer in `sources.json` (dropped
+from the configuration, or re-versioned) is removed, since the release
+workflow attaches every archive in the directory to the GitHub release;
 a wordnet's summary page links to its archive and to the original release.
 
 ### The export (`--with-xml`)

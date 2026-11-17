@@ -46,7 +46,7 @@ def test_package_name():
 def test_archive_holds_file_log_and_the_releases_supporting_files(tmp_path):
     presynth, extras, out = _presynth(tmp_path)
 
-    assert package_all(presynth, extras, out) == (3, 0)
+    assert package_all(presynth, extras, out) == (3, 0, 0)
 
     assert _names(out / 'kin-fi-0.2.tar.gz') == [
         'kin-fi-0.2/LICENSE', 'kin-fi-0.2/README.md', 'kin-fi-0.2/citation.bib',
@@ -89,9 +89,9 @@ def test_up_to_date_archives_are_kept_and_reproducible(tmp_path):
     package_all(presynth, extras, out)
     first = (out / 'wnb-xx-1.4.tar.gz').read_bytes()
 
-    assert package_all(presynth, extras, out) == (0, 3)
+    assert package_all(presynth, extras, out) == (0, 3, 0)
     (out / 'wnb-xx-1.4.tar.gz').unlink()
-    assert package_all(presynth, extras, out) == (1, 2)
+    assert package_all(presynth, extras, out) == (1, 2, 0)
     assert (out / 'wnb-xx-1.4.tar.gz').read_bytes() == first
 
 
@@ -101,5 +101,23 @@ def test_file_listed_but_missing_is_skipped(tmp_path, capsys):
     sources['gone'] = {'file': 'gone-1.xml', 'url': None, 'extras': None, 'requires': None}
     write_sources(presynth, sources)
 
-    assert package_all(presynth, extras, out) == (3, 0)
+    assert package_all(presynth, extras, out) == (3, 0, 0)
     assert 'gone-1.xml missing' in capsys.readouterr().out
+
+
+def test_archives_of_dropped_or_reversioned_wordnets_are_removed(tmp_path, capsys):
+    presynth, extras, out = _presynth(tmp_path)
+    package_all(presynth, extras, out)
+    # wnb-xx leaves the configuration; Step 2 writes kin at a new version.
+    sources = json.loads((presynth / 'sources.json').read_text())
+    del sources['wnb-xx']
+    (presynth / 'kin-0.2.xml').unlink()
+    (presynth / 'kin-0.3.xml').write_text(_XML.format(id='kin', label='Kin', lang='mul', version='0.3'))
+    sources['kin']['file'] = 'kin-0.3.xml'
+    write_sources(presynth, sources)
+
+    assert package_all(presynth, extras, out) == (2, 0, 2)
+
+    assert sorted(p.name for p in out.iterdir()) == ['kin-0.3.tar.gz', 'kin-fi-0.2.tar.gz']
+    assert 'kin-fi-0.2/kin-0.3.xml' in _names(out / 'kin-fi-0.2.tar.gz')
+    assert 'wnb-xx-1.4.tar.gz no longer among the sources, removed' in capsys.readouterr().out

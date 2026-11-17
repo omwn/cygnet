@@ -21,8 +21,8 @@ def main() -> int:
     if not (args.presynth_dir / SOURCES_NAME).exists():
         print(f'  No {SOURCES_NAME} in {args.presynth_dir}: run Step 2 first')
         return 1
-    written, kept = package_all(args.presynth_dir, args.extras_dir, args.out_dir)
-    print(f'  {written} archive(s) written, {kept} up to date, in {args.out_dir}')
+    written, kept, removed = package_all(args.presynth_dir, args.extras_dir, args.out_dir)
+    print(f'  {written} archive(s) written, {kept} up to date, {removed} stale removed, in {args.out_dir}')
     return 0
 
 

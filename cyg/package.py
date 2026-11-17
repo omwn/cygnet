@@ -120,8 +120,13 @@ def package_one(presynth: Path, extras_root: Path, out_dir: Path, lexicon: str,
     return out
 
 
-def package_all(presynth: Path, extras_root: Path, out_dir: Path) -> tuple[int, int]:
-    """Package every cleaned file sources.json lists.
+def package_all(presynth: Path, extras_root: Path, out_dir: Path) -> tuple[int, int, int]:
+    """Package every cleaned file sources.json lists, and remove the
+    archives of wordnets it no longer lists.
+
+    The release workflow uploads every archive in the output directory, so
+    one left over from a wordnet since dropped or re-versioned would keep
+    being published.
 
     Args:
         presynth: The cleaned files' directory (with sources.json).
@@ -129,16 +134,24 @@ def package_all(presynth: Path, extras_root: Path, out_dir: Path) -> tuple[int, 
         out_dir: Where the archives go (``web/lmf``).
 
     Returns:
-        (archives written, archives already up to date).
+        (archives written, archives already up to date, stale archives removed).
     """
     sources = read_sources(presynth)
     written = kept = 0
+    current: set[str] = set()
     for lexicon, entry in sorted(sources.items()):
         if not (presynth / entry['file']).exists():
             print(f'  {entry["file"]} missing, not packaged')
             continue
+        current.add(package_name(entry['file']))
         if package_one(presynth, extras_root, out_dir, lexicon, entry, sources) is None:
             kept += 1
         else:
             written += 1
-    return written, kept
+    removed = 0
+    for stale in sorted(out_dir.glob('*.tar.gz')):
+        if stale.name not in current:
+            print(f'  {stale.name} no longer among the sources, removed')
+            stale.unlink()
+            removed += 1
+    return written, kept, removed
